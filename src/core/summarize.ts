@@ -216,6 +216,12 @@ export async function summarizeSession(
     else log('fail', 'transcript unreadable', e);
     return null;
   }
+  const active = findActiveHandover(ctx, normalizeDir(input.cwd));
+  // A summary of a restricted ticket's session could quote its description or comments.
+  if (active?.restricted) {
+    log('skip', 'restricted ticket');
+    return null;
+  }
   if (excerpt.length < 500) {
     log('skip', 'transcript too short');
     return null;
@@ -236,7 +242,6 @@ export async function summarizeSession(
     log('fail', 'no usable JSON in the reply', reply.slice(0, 200));
     return null;
   }
-  const active = findActiveHandover(ctx, normalizeDir(input.cwd));
   let path: string;
   try {
     path = writeSession(ctx, {

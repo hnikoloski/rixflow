@@ -12699,7 +12699,8 @@ function toHandover(path) {
     previousCheckpoint: str2(data.previous_checkpoint),
     created: str2(data.created),
     ended: str2(data.ended),
-    outcome: data.outcome === "finished" || data.outcome === "dropped" ? data.outcome : void 0
+    outcome: data.outcome === "finished" || data.outcome === "dropped" ? data.outcome : void 0,
+    restricted: data.restricted === true ? true : void 0
   };
 }
 function readHandover(ctx, task) {
@@ -12890,6 +12891,11 @@ async function summarizeSession(ctx, input, deps) {
     else log("fail", "transcript unreadable", e);
     return null;
   }
+  const active = findActiveHandover(ctx, normalizeDir(input.cwd));
+  if (active?.restricted) {
+    log("skip", "restricted ticket");
+    return null;
+  }
   if (excerpt.length < 500) {
     log("skip", "transcript too short");
     return null;
@@ -12911,7 +12917,6 @@ ${excerpt.replace(/<\/transcript>/gi, "<\\/transcript>")}
     log("fail", "no usable JSON in the reply", reply.slice(0, 200));
     return null;
   }
-  const active = findActiveHandover(ctx, normalizeDir(input.cwd));
   let path;
   try {
     path = writeSession(ctx, {

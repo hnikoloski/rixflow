@@ -175,7 +175,7 @@ describe('resumeTask', () => {
     const res = await resumeTask(ctx, null, '101');
     expect(res).toEqual({
       handover: null, checkpoint: null, changed: false, newComments: [], currentModifiedAt: null,
-      ticketsUnavailable: true, reason: 'the ticket tracker is not configured',
+      ticketsUnavailable: true, privateBrief: false, reason: 'the ticket tracker is not configured',
     });
   });
 

@@ -47,6 +47,7 @@ export interface Handover {
   created?: string;
   ended?: string;
   outcome?: 'finished' | 'dropped';
+  restricted?: boolean;
 }
 
 const SECTION_TITLES = new Set([
@@ -194,6 +195,7 @@ export function writeHandover(ctx: Ctx, h: Handover): string {
   writeDoc(path, {
     type: 'handover', task: h.task, site: h.site, project_dir: h.projectDir, asana_modified_at: h.asanaModifiedAt,
     created: ctx.now().toISOString(), related: h.related, previous_checkpoint: h.previousCheckpoint, author: ctx.user.name,
+    restricted: h.restricted ? true : undefined,
   }, body);
   reindex(ctx);
   return path;
@@ -210,6 +212,7 @@ function toHandover(path: string): Handover {
     related: Array.isArray(data.related) ? data.related.map(String) : [],
     previousCheckpoint: str(data.previous_checkpoint), created: str(data.created),
     ended: str(data.ended), outcome: data.outcome === 'finished' || data.outcome === 'dropped' ? data.outcome : undefined,
+    restricted: data.restricted === true ? true : undefined,
   };
 }
 

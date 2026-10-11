@@ -5,6 +5,7 @@ import { listInbox } from './messages';
 import { readCheckpoint, readHandover, writeHandover, type Checkpoint, type Handover } from './notes';
 import { scrub } from './scrub';
 import { search } from './search';
+import { readPrivateBrief, restrictedBrief, writePrivateBrief } from './private';
 import { resolveSite } from './sites';
 import { loadSites } from './team';
 import { parentChain, type Ticket, type TicketComment, type TicketSource } from './tickets/types';
@@ -32,6 +33,8 @@ export interface ResumeResult {
   // error): `changed: false` then means "unknown", not "unchanged". `reason` says why (scrubbed).
   ticketsUnavailable: boolean;
   reason?: string;
+  // True when `handover.brief` is the full brief from this machine's private file.
+  privateBrief: boolean;
 }
 
 function keywords(name: string): string {
@@ -93,12 +96,15 @@ export async function startTask(ctx: Ctx, source: TicketSource, wf: Workflow, in
     .filter((m) => m.task === id)
     .map((m) => oneLine(`- ${m.type} from ${m.from} (${oneLine(scrub(m.created).slice(0, 10))}): ${m.body}`))
     .join('\n');
+  const full = buildBrief(ticket, chain, comments, source.label);
+  if (ticket.restricted) writePrivateBrief(ctx.configDir, id, full);
   const handoverPath = writeHandover(ctx, {
     task: id,
     site: site.codes.join(', ') || undefined,
     projectDir: site.folder ?? undefined,
     asanaModifiedAt: ticket.modifiedAt,
-    brief: buildBrief(ticket, chain, comments, source.label),
+    brief: ticket.restricted ? restrictedBrief(ticket, source.label, ctx.user.name) : full,
+    restricted: ticket.restricted || undefined,
     requestContext: requests || undefined,
     related,
     previousCheckpoint: checkpoint ? `people/${ctx.user.name}/checkpoints/${id}.md` : undefined,
@@ -120,9 +126,11 @@ export async function resumeTask(ctx: Ctx, source: TicketSource | null, task: st
   assertTicketId(task);
   const handover = readHandover(ctx, task);
   const checkpoint = readCheckpoint(ctx, task);
+  const priv = handover?.restricted ? readPrivateBrief(ctx.configDir, task) : null;
   const local = {
-    handover: handover && scrubFields(handover),
+    handover: handover && scrubFields(priv === null ? handover : { ...handover, brief: priv }),
     checkpoint: checkpoint && scrubFields(checkpoint),
+    privateBrief: priv !== null,
   };
   const unavailable = (reason: string): ResumeResult => ({
     ...local, changed: false, newComments: [], currentModifiedAt: null, ticketsUnavailable: true, reason: oneLine(scrub(reason)).slice(0, 200),

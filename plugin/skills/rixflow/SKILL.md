@@ -35,6 +35,7 @@ At session start RixFlow adds `[rixflow] session <id>` to the context. Pass that
 ## Never
 
 - Never write to Asana. RixFlow is read-only; the user updates Asana.
+- Never copy a restricted ticket's details into hub notes, checkpoints, messages or `promote_to_shared`.
 - Never put passwords, tokens or URLs with credentials in messages or notes.
 - Never read or edit hub files directly (with file tools or shell commands); use the RixFlow tools (`read_note`, `search`, `team_info` and the write tools).
 - If a RixFlow tool fails with `NOT_INITIALIZED`, `NO_TICKETS` or `ASANA_AUTH`, follow /rixflow:setup: show the user the command it gives; never run it yourself.
