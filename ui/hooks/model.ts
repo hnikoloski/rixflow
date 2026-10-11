@@ -1,6 +1,6 @@
 import type { InboxItem, Status } from '../types/status'
 
-export const STATUS_VERSION = 1
+export const STATUS_VERSION = 2
 
 export const TOOL = {
   start: 'mcp__plugin_rixflow_hub__start_task',

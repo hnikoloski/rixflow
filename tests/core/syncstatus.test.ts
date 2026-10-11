@@ -9,7 +9,7 @@ import { describeSync, persist, persistHub, syncHub } from '../../src/core/runti
 import { runCheck } from '../../src/core/check';
 import { sendMessage } from '../../src/core/messages';
 import { mergeHubGitignore } from '../../src/core/template';
-import { fakeAsana } from '../fixtures/asana';
+import { fakeAsanaSource } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 import { hubWithRemote } from '../gitHub';
 
@@ -99,7 +99,7 @@ describe('session brief reports sync health (I1)', () => {
   const result = (status: string, pending = 0, detail = '') => async () => ({ status, detail, pending, conflicts: [] }) as never;
   it('reports blocked, rejected and offline, but not locked or ok', async () => {
     const ctx = makeCtx();
-    const run = (sync: () => Promise<never>) => runCheck(ctx, { asana: fakeAsana([]), sync }, 'session');
+    const run = (sync: () => Promise<never>) => runCheck(ctx, { source: fakeAsanaSource([]), sync }, 'session');
     expect(await run(result('offline', 3))).toBe('[rixflow] hub offline, 3 pending');
     expect(await run(result('blocked', 0, 'RixFlow: commit blocked - x: possible secret (https://a:b@c/)'))).toBe(
       '[rixflow] hub sync failing: RixFlow: commit blocked - x: possible secret (https://[redacted]@c/)',
@@ -111,21 +111,21 @@ describe('session brief reports sync health (I1)', () => {
   });
   it('offline with nothing pending: never on prompts, once per calendar day at session start', async () => {
     const ctx = makeCtx();
-    const deps = { asana: fakeAsana([]), sync: result('offline', 0) };
+    const deps = { source: fakeAsanaSource([]), sync: result('offline', 0) };
     const at = (iso: string) => ({ ...ctx, now: () => new Date(iso) });
     expect(await runCheck(at('2026-10-08T09:00:00Z'), deps, 'prompt')).toBe('');
     expect(await runCheck(at('2026-10-08T10:00:00Z'), deps, 'session')).toBe('[rixflow] hub offline, 0 pending');
     expect(await runCheck(at('2026-10-08T15:00:00Z'), deps, 'session')).toBe('');
     expect(await runCheck(at('2026-10-09T08:00:00Z'), deps, 'session')).toBe('[rixflow] hub offline, 0 pending');
-    const pendingDeps = { asana: fakeAsana([]), sync: result('offline', 2) };
+    const pendingDeps = { source: fakeAsanaSource([]), sync: result('offline', 2) };
     expect(await runCheck(at('2026-10-09T09:00:00Z'), pendingDeps, 'session')).toBe('[rixflow] hub offline, 2 pending');
     expect(await runCheck(at('2026-10-09T09:10:00Z'), pendingDeps, 'prompt')).toBe('[rixflow] hub offline, 2 pending');
-    expect(await runCheck(at('2026-10-09T09:20:00Z'), { asana: fakeAsana([]), sync: result('blocked', 0, 'x') }, 'prompt')).toBe('[rixflow] hub sync failing: x');
+    expect(await runCheck(at('2026-10-09T09:20:00Z'), { source: fakeAsanaSource([]), sync: result('blocked', 0, 'x') }, 'prompt')).toBe('[rixflow] hub sync failing: x');
   });
 
   it('a hub without a remote gets its own wording once per day, and counts local commits', async () => {
     const ctx = makeCtx();
-    const deps = { asana: fakeAsana([]), sync: async () => ({ status: 'offline', detail: NO_REMOTE_DETAIL, pending: 4, conflicts: [] }) as never };
+    const deps = { source: fakeAsanaSource([]), sync: async () => ({ status: 'offline', detail: NO_REMOTE_DETAIL, pending: 4, conflicts: [] }) as never };
     const at = (iso: string) => ({ ...ctx, now: () => new Date(iso) });
     expect(await runCheck(at('2026-10-08T10:00:00Z'), deps, 'session')).toBe('[rixflow] hub has no remote; nothing is shared');
     expect(await runCheck(at('2026-10-08T10:10:00Z'), deps, 'prompt')).toBe('');
@@ -143,7 +143,7 @@ describe('session brief reports sync health (I1)', () => {
 
   it('reports it on prompts at most once per interval', async () => {
     const ctx = makeCtx();
-    const deps = { asana: fakeAsana([]), sync: result('rejected', 1) };
+    const deps = { source: fakeAsanaSource([]), sync: result('rejected', 1) };
     const at = (iso: string) => ({ ...ctx, now: () => new Date(iso) });
     expect(await runCheck(at('2026-10-08T10:00:00Z'), deps, 'prompt')).toBe('[rixflow] hub push rejected, 1 pending');
     expect(await runCheck(at('2026-10-08T10:02:00Z'), deps, 'prompt')).toBe('');

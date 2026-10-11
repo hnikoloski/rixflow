@@ -1,13 +1,15 @@
 import { normalizeDir, isInsideDir } from './config';
-import { parentChain, type AsanaComment, type AsanaReader, type AsanaTask } from './asana';
 import { buildBrief, oneLine } from './brief';
+import { mapTicket } from './mapping';
 import { listInbox } from './messages';
 import { readCheckpoint, readHandover, writeHandover, type Checkpoint, type Handover } from './notes';
 import { scrub } from './scrub';
 import { search } from './search';
 import { resolveSite } from './sites';
 import { loadSites } from './team';
+import { parentChain, type Ticket, type TicketComment, type TicketSource } from './tickets/types';
 import { HubError, assertTicketId, type Ctx } from './types';
+import type { Workflow } from './workflow';
 
 export interface StartResult {
   task: string;
@@ -24,11 +26,11 @@ export interface ResumeResult {
   handover: Handover | null;
   checkpoint: Checkpoint | null;
   changed: boolean;
-  newComments: AsanaComment[];
+  newComments: TicketComment[];
   currentModifiedAt: string | null;
-  // True when Asana could not be checked (not configured, unreachable, any non-auth error):
-  // `changed: false` then means "unknown", not "unchanged". `reason` says why (scrubbed).
-  asanaUnavailable: boolean;
+  // True when the ticket tracker could not be checked (not configured, unreachable, any non-auth
+  // error): `changed: false` then means "unknown", not "unchanged". `reason` says why (scrubbed).
+  ticketsUnavailable: boolean;
   reason?: string;
 }
 
@@ -75,45 +77,46 @@ function scrubFields<T extends object>(v: T): T {
 }
 
 function isAuthError(err: unknown): boolean {
-  return err instanceof HubError && err.code === 'ASANA_AUTH';
+  return err instanceof HubError && err.code.endsWith('_AUTH');
 }
 
-export async function startTask(ctx: Ctx, asana: AsanaReader, input: { task: string; cwd: string }): Promise<StartResult> {
+export async function startTask(ctx: Ctx, source: TicketSource, wf: Workflow, input: { task: string; cwd: string }): Promise<StartResult> {
   assertTicketId(input.task);
-  const task = await asana.getTask(input.task);
-  const chain = await parentChain(asana, task);
-  const site = resolveSite(chain, loadSites(ctx.hubDir), ctx.user);
-  const comments = await asana.getComments(input.task, 10);
-  const related = search(ctx.hubDir, { text: keywords(chain.map((t) => t.name).join(' ')), site: site.codes[0], limit: 5 }).map((h) => h.path);
-  const checkpoint = readCheckpoint(ctx, input.task);
+  const id = source.normalizeId(input.task);
+  const ticket = await source.ticket(id);
+  const chain = await parentChain(source, ticket);
+  const site = resolveSite(chain, mapTicket(chain, wf, ctx.now()), loadSites(ctx.hubDir), ctx.user);
+  const comments = await source.comments(id, 10);
+  const related = search(ctx.hubDir, { text: keywords(chain.map((t) => t.title).join(' ')), site: site.codes[0], limit: 5 }).map((h) => h.path);
+  const checkpoint = readCheckpoint(ctx, id);
   const requests = listInbox(ctx)
-    .filter((m) => m.task === input.task)
+    .filter((m) => m.task === id)
     .map((m) => oneLine(`- ${m.type} from ${m.from} (${oneLine(scrub(m.created).slice(0, 10))}): ${m.body}`))
     .join('\n');
   const handoverPath = writeHandover(ctx, {
-    task: input.task,
+    task: id,
     site: site.codes.join(', ') || undefined,
     projectDir: site.folder ?? undefined,
-    asanaModifiedAt: task.modified_at,
-    brief: buildBrief(task, chain, comments),
+    asanaModifiedAt: ticket.modifiedAt,
+    brief: buildBrief(ticket, chain, comments, source.label),
     requestContext: requests || undefined,
     related,
-    previousCheckpoint: checkpoint ? `people/${ctx.user.name}/checkpoints/${input.task}.md` : undefined,
+    previousCheckpoint: checkpoint ? `people/${ctx.user.name}/checkpoints/${id}.md` : undefined,
   });
   const inFolder = !!site.folder && isInsideDir(normalizeDir(input.cwd), site.folder);
   return {
-    task: input.task,
-    title: scrub(oneLine(task.name)),
+    task: id,
+    title: scrub(oneLine(ticket.title)),
     handoverPath,
     siteCodes: site.codes,
     projectDir: site.folder,
     inFolder,
-    launch: site.folder && !inFolder ? `${cdCommand(site.folder)} && claude "/rixflow:resume ${input.task}"` : null,
+    launch: site.folder && !inFolder ? `${cdCommand(site.folder)} && claude "/rixflow:resume ${id}"` : null,
     needsSite: !site.folder,
   };
 }
 
-export async function resumeTask(ctx: Ctx, asana: AsanaReader | null, task: string): Promise<ResumeResult> {
+export async function resumeTask(ctx: Ctx, source: TicketSource | null, task: string): Promise<ResumeResult> {
   assertTicketId(task);
   const handover = readHandover(ctx, task);
   const checkpoint = readCheckpoint(ctx, task);
@@ -122,28 +125,30 @@ export async function resumeTask(ctx: Ctx, asana: AsanaReader | null, task: stri
     checkpoint: checkpoint && scrubFields(checkpoint),
   };
   const unavailable = (reason: string): ResumeResult => ({
-    ...local, changed: false, newComments: [], currentModifiedAt: null, asanaUnavailable: true, reason: oneLine(scrub(reason)).slice(0, 200),
+    ...local, changed: false, newComments: [], currentModifiedAt: null, ticketsUnavailable: true, reason: oneLine(scrub(reason)).slice(0, 200),
   });
-  if (!asana) return unavailable('Asana is not configured');
-  let current: AsanaTask;
+  if (!source) return unavailable('the ticket tracker is not configured');
+  let current: Ticket;
+  let id: string;
   try {
-    current = await asana.getTask(task);
+    id = source.normalizeId(task);
+    current = await source.ticket(id);
   } catch (err) {
     if (isAuthError(err)) throw err;
-    // Asana unreachable: the local handover and checkpoint still answer the question.
+    // Tracker unreachable: the local handover and checkpoint still answer the question.
     return unavailable(err instanceof HubError ? `${err.code}: ${err.message}` : err instanceof Error ? err.message : String(err));
   }
-  // The newest local record is the baseline: its Asana timestamp decides `changed`, and its time
+  // The newest local record is the baseline: its ticket timestamp decides `changed`, and its time
   // is the cutoff for comments that count as new.
   const baseline = newestBaseline(handover, checkpoint);
   const since = baseline?.asanaModifiedAt ?? '';
-  const changed = !!since && current.modified_at !== since;
-  let newComments: AsanaComment[] = [];
+  const changed = !!since && current.modifiedAt !== since;
+  let newComments: TicketComment[] = [];
   if (changed) {
     const cutoff = Date.parse(baseline?.at ?? '');
     try {
-      newComments = (await asana.getComments(task, 20)).filter(
-        (c) => Number.isNaN(cutoff) || Date.parse(c.created_at) > cutoff,
+      newComments = (await source.comments(id, 20)).filter(
+        (c) => Number.isNaN(cutoff) || Date.parse(c.createdAt) > cutoff,
       );
     } catch (err) {
       if (isAuthError(err)) throw err;
@@ -154,7 +159,7 @@ export async function resumeTask(ctx: Ctx, asana: AsanaReader | null, task: stri
     ...local,
     changed,
     newComments: newComments.map(scrubFields),
-    currentModifiedAt: current.modified_at,
-    asanaUnavailable: false,
+    currentModifiedAt: current.modifiedAt,
+    ticketsUnavailable: false,
   };
 }

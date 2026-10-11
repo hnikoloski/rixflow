@@ -56,7 +56,7 @@ describe('hub CLI', () => {
     const r = run(['status', '--json', '--no-sync']);
     expect(r.status).toBe(0);
     const s = JSON.parse(r.stdout);
-    expect(s).toMatchObject({ v: 1, initialized: false, problems: ['setup needed'] });
+    expect(s).toMatchObject({ v: 2, initialized: false, problems: ['setup needed'] });
   });
 
   describe('with an initialised hub', () => {

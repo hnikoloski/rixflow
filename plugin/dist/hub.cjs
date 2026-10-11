@@ -10786,7 +10786,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli/main.ts
-var import_node_path18 = require("node:path");
+var import_node_path19 = require("node:path");
 
 // node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
@@ -11421,6 +11421,162 @@ function lastSummaryFailure(configDir2) {
   }
 }
 
+// src/core/workflow.ts
+var import_node_fs7 = require("node:fs");
+var import_node_path8 = require("node:path");
+var import_yaml4 = __toESM(require_dist(), 1);
+
+// src/core/version.ts
+var RIXFLOW_VERSION = "0.2.0";
+
+// src/core/workflow.ts
+var LEGACY = {
+  requires: null,
+  legacy: true,
+  tracker: { type: "asana", workspace: null },
+  project: { from: "custom-field", field: "Website", values: "codes" },
+  status: { field: "Status", todo: [], in_progress: ["in progress"], waiting: [], done: [] },
+  sprints: { mode: "asana-sections" },
+  urgent: { field: "Priority", values: ["urgent", "critical", "p0", "highest"] }
+};
+function deepFreeze(v) {
+  if (v !== null && typeof v === "object") Object.values(v).forEach(deepFreeze);
+  return Object.freeze(v);
+}
+var LEGACY_WORKFLOW = deepFreeze(structuredClone(LEGACY));
+var FILE = "config/workflow.yml";
+var SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+var FROMS = ["custom-field", "asana-project", "component", "label", "jira-project"];
+var BUCKETS = ["todo", "in_progress", "waiting", "done"];
+function fail2(reason) {
+  throw new HubError("BAD_CONFIG", `${FILE}: ${reason}`);
+}
+function compareVersions(a, b) {
+  const pa = SEMVER.exec(a);
+  const pb = SEMVER.exec(b);
+  if (!pa || !pb) throw new HubError("BAD_CONFIG", `invalid version: ${!pa ? a : b}`);
+  for (let i = 1; i <= 3; i++) {
+    const d = Number(pa[i]) - Number(pb[i]);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+function optString(v, what) {
+  if (v === void 0 || v === null) return null;
+  if (typeof v !== "string" && typeof v !== "number") fail2(`${what} must be a string`);
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+function stringList(v, what) {
+  if (v === void 0 || v === null) return [];
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" || typeof x === "number")) {
+    fail2(`${what} must be a list of strings`);
+  }
+  return v.map((x) => String(x));
+}
+function section(raw, key) {
+  const v = raw[key];
+  if (v === void 0 || v === null) return {};
+  if (!isMapping(v)) fail2(`${key} must be a mapping`);
+  return v;
+}
+function parseTracker(raw) {
+  const t = section(raw, "tracker");
+  if (t.type === "asana") return { type: "asana", workspace: optString(t.workspace, "tracker.workspace") };
+  if (t.type === "jira") {
+    const rawUrl = optString(t.url, "tracker.url");
+    if (!rawUrl) fail2("jira tracker needs a url");
+    if (t.flavor !== "cloud" && t.flavor !== "server") fail2("jira tracker needs flavor: cloud or server");
+    let u;
+    try {
+      u = new URL(rawUrl);
+    } catch {
+      fail2(`jira url is not a valid URL: ${rawUrl}`);
+    }
+    if (u.protocol !== "https:") fail2("jira url must use https");
+    const url = `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+    return { type: "jira", url, flavor: t.flavor, projects: stringList(t.projects, "tracker.projects") };
+  }
+  return fail2(`unknown tracker type: ${String(t.type)}`);
+}
+function parseProject(raw) {
+  const p = section(raw, "project");
+  const from = p.from;
+  if (!FROMS.includes(from)) fail2(`unknown project source: ${String(from)}`);
+  const field2 = optString(p.field, "project.field");
+  if (from === "custom-field" && !field2) fail2("project source custom-field needs a field");
+  let values;
+  if (p.values === void 0 || p.values === null || p.values === "codes") {
+    values = "codes";
+  } else if (isMapping(p.values)) {
+    values = {};
+    for (const [k, code] of Object.entries(p.values)) {
+      try {
+        assertSiteCode(code);
+      } catch {
+        fail2(`invalid project code for "${k}": ${String(code)}`);
+      }
+      values[k] = code;
+    }
+  } else {
+    fail2("project.values must be a mapping or 'codes'");
+  }
+  return { from, field: field2, values };
+}
+function parseStatus(raw) {
+  const s = section(raw, "status");
+  const out = { field: optString(s.field, "status.field"), todo: [], in_progress: [], waiting: [], done: [] };
+  const seen = /* @__PURE__ */ new Map();
+  for (const b of BUCKETS) {
+    out[b] = stringList(s[b], `status.${b}`);
+    for (const name of out[b]) {
+      const key = name.toLowerCase();
+      const prev = seen.get(key);
+      if (prev !== void 0) fail2(`status "${name}" is listed in both ${prev} and ${b}`);
+      seen.set(key, b);
+    }
+  }
+  return out;
+}
+function parseSprints(raw) {
+  const s = section(raw, "sprints");
+  const mode = s.mode === void 0 || s.mode === null ? "none" : s.mode;
+  if (mode === "none") return { mode: "none" };
+  if (mode === "asana-sections") return { mode: "asana-sections" };
+  if (mode === "jira-sprints") {
+    if (s.board === void 0 || s.board === null) return { mode: "jira-sprints", board: null };
+    if (typeof s.board !== "number" || !Number.isInteger(s.board) || s.board < 0) fail2("sprints.board must be a whole number");
+    return { mode: "jira-sprints", board: s.board };
+  }
+  return fail2(`unknown sprints mode: ${String(mode)}`);
+}
+function loadWorkflow(hubDir2, version = RIXFLOW_VERSION) {
+  const path = (0, import_node_path8.join)(hubDir2, FILE);
+  if (!(0, import_node_fs7.existsSync)(path)) return structuredClone(LEGACY);
+  const raw = readYaml(path, FILE);
+  let requires = null;
+  if (raw.requires !== void 0 && raw.requires !== null && raw.requires !== "") {
+    if (typeof raw.requires !== "string" || !SEMVER.test(raw.requires)) fail2("requires must be a version like 0.3.0");
+    requires = raw.requires;
+    if (compareVersions(requires, version) > 0) {
+      throw new HubError(
+        "WORKFLOW_TOO_NEW",
+        `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`
+      );
+    }
+  }
+  const urgent = section(raw, "urgent");
+  return {
+    requires,
+    legacy: false,
+    tracker: parseTracker(raw),
+    project: parseProject(raw),
+    status: parseStatus(raw),
+    sprints: parseSprints(raw),
+    urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") }
+  };
+}
+
 // src/core/check.ts
 var PROMPT_INTERVAL_MS = 3e5;
 var NOTIFIED_CAP = 500;
@@ -11431,6 +11587,14 @@ var CONTROL_CHARS = new RegExp(
   "[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2028\\u2029\\u2066-\\u2069]",
   "g"
 );
+var LABELS = { asana: "Asana", jira: "Jira" };
+function trackerLabel(ctx, deps) {
+  try {
+    return LABELS[(deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir)).tracker.type];
+  } catch {
+    return null;
+  }
+}
 function clean(text) {
   const oneLine = scrub(String(text).replace(CONTROL_CHARS, " ")).replace(/\s+/g, " ").trim();
   return oneLine.length > ITEM_MAX ? `${oneLine.slice(0, ITEM_MAX - 3)}...` : oneLine;
@@ -11487,10 +11651,14 @@ async function check(ctx, deps, trigger) {
   state.lastPromptCheck = now.toISOString();
   const parts = [];
   const budget = trigger === "prompt" ? PROMPT_TIMEOUT_MS : SESSION_TIMEOUT_MS;
-  const asana = typeof deps.asana === "function" ? deps.asana() : deps.asana;
-  const workspace = ctx.user.asanaWorkspace;
-  const asanaFetch = asana && workspace ? withTimeout(() => asana.getMyTasks(workspace), budget) : null;
-  asanaFetch?.catch(() => void 0);
+  let source;
+  try {
+    source = typeof deps.source === "function" ? deps.source() : deps.source;
+  } catch {
+    source = null;
+  }
+  const ticketFetch = source ? withTimeout(() => source.myTickets(), budget) : null;
+  ticketFetch?.catch(() => void 0);
   const synced = await withTimeout(() => deps.sync(), budget).catch(() => null);
   let fresh = [];
   try {
@@ -11505,21 +11673,22 @@ async function check(ctx, deps, trigger) {
   const freshSet = new Set(freshIds);
   const previous = Array.isArray(state.notified) ? state.notified : [];
   state.notified = [...previous.filter((id) => !freshSet.has(id)), ...freshIds].slice(-NOTIFIED_CAP);
-  if (!asana) {
-    if (trigger === "session") parts.push(`Asana token missing (run: ${hubCommand("token set")})`);
-  } else if (asanaFetch) {
+  if (!source || !ticketFetch) {
+    const label = trigger === "session" ? trackerLabel(ctx, deps) : null;
+    if (label) parts.push(`${label} token missing (run: ${hubCommand("token set")})`);
+  } else {
     try {
-      const tasks = await asanaFetch;
+      const tickets = await ticketFetch;
       const seen = isRecord(state.seenTaskModified) ? state.seenTaskModified : {};
       const firstRun = Object.keys(seen).length === 0;
-      const changed = tasks.filter((t) => typeof seen[t.gid] === "string" && seen[t.gid] !== t.modified_at);
-      state.seenTaskModified = Object.fromEntries(tasks.map((t) => [t.gid, t.modified_at]));
+      const changed = tickets.filter((t) => typeof seen[t.id] === "string" && seen[t.id] !== t.modifiedAt);
+      state.seenTaskModified = Object.fromEntries(tickets.map((t) => [t.id, t.modifiedAt]));
       if (!firstRun && changed.length) {
-        const names = changed.slice(0, 3).map((t) => `"${clean(t.name).replace(/"/g, "'")}"`).join(", ");
-        parts.push(`Asana updated: ${names}${changed.length > 3 ? ` and ${changed.length - 3} more` : ""}`);
+        const names = changed.slice(0, 3).map((t) => `"${clean(t.title).replace(/"/g, "'")}"`).join(", ");
+        parts.push(`${source.label} updated: ${names}${changed.length > 3 ? ` and ${changed.length - 3} more` : ""}`);
       }
     } catch {
-      if (trigger === "session") parts.push("Asana unreachable");
+      if (trigger === "session") parts.push(`${source.label} unreachable`);
     }
   }
   const health = describeHealth(synced, trigger, state, now.toISOString().slice(0, 10));
@@ -11547,8 +11716,8 @@ async function runCheck(ctx, deps, trigger) {
 }
 
 // src/core/runtime.ts
-var import_node_fs10 = require("node:fs");
-var import_node_path11 = require("node:path");
+var import_node_fs11 = require("node:fs");
+var import_node_path12 = require("node:path");
 
 // src/core/asana.ts
 var DEFAULT_BASE = "https://app.asana.com/api/1.0";
@@ -11656,35 +11825,17 @@ var AsanaClient = class {
     return stories.filter((s) => s.resource_subtype === "comment_added").slice(-limit).map((s) => ({ created_at: s.created_at, author: s.created_by?.name ?? "unknown", text: s.text }));
   }
 };
-function fieldValue(task, prefix) {
-  const p = prefix.toLowerCase();
-  const f = (task.custom_fields ?? []).find((c) => c.name.toLowerCase().startsWith(p) && c.display_value);
-  return f?.display_value ?? null;
-}
-async function parentChain(asana, task, max = 5) {
-  const chain = [task];
-  const seen = /* @__PURE__ */ new Set([task.gid]);
-  let current = task;
-  while (current.parent && chain.length <= max) {
-    const parentGid = current.parent.gid;
-    if (seen.has(parentGid)) break;
-    seen.add(parentGid);
-    current = await asana.getTask(parentGid);
-    chain.push(current);
-  }
-  return chain;
-}
 
 // src/core/lock.ts
 var import_node_crypto = require("node:crypto");
-var import_node_fs7 = require("node:fs");
-var import_node_path8 = require("node:path");
+var import_node_fs8 = require("node:fs");
+var import_node_path9 = require("node:path");
 var LOCK_STALE_MS = 6e4;
 var POLL_MS = 100;
-var lockPath = (hubDir2) => (0, import_node_path8.join)(hubDir2, ".git", "rixflow.lock");
+var lockPath = (hubDir2) => (0, import_node_path9.join)(hubDir2, ".git", "rixflow.lock");
 function readLock(path) {
   try {
-    const v = JSON.parse((0, import_node_fs7.readFileSync)(path, "utf8"));
+    const v = JSON.parse((0, import_node_fs8.readFileSync)(path, "utf8"));
     return v !== null && typeof v === "object" ? v : {};
   } catch {
     return null;
@@ -11703,7 +11854,7 @@ function isStale(path, now) {
   let ts = typeof info?.ts === "number" ? info.ts : NaN;
   if (!Number.isFinite(ts)) {
     try {
-      ts = (0, import_node_fs7.statSync)(path).mtimeMs;
+      ts = (0, import_node_fs8.statSync)(path).mtimeMs;
     } catch {
       return true;
     }
@@ -11718,22 +11869,22 @@ function tryLock(hubDir2, now = Date.now) {
   for (let attempt = 0; attempt < 2; attempt++) {
     let fd;
     try {
-      fd = (0, import_node_fs7.openSync)(path, import_node_fs7.constants.O_WRONLY | import_node_fs7.constants.O_CREAT | import_node_fs7.constants.O_EXCL | import_node_fs7.constants.O_NOFOLLOW, 420);
+      fd = (0, import_node_fs8.openSync)(path, import_node_fs8.constants.O_WRONLY | import_node_fs8.constants.O_CREAT | import_node_fs8.constants.O_EXCL | import_node_fs8.constants.O_NOFOLLOW, 420);
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
       if (attempt === 0 && isStale(path, now())) {
-        (0, import_node_fs7.rmSync)(path, { force: true });
+        (0, import_node_fs8.rmSync)(path, { force: true });
         continue;
       }
       return null;
     }
     try {
-      (0, import_node_fs7.writeSync)(fd, JSON.stringify({ pid: process.pid, ts: now(), token }));
+      (0, import_node_fs8.writeSync)(fd, JSON.stringify({ pid: process.pid, ts: now(), token }));
     } finally {
-      (0, import_node_fs7.closeSync)(fd);
+      (0, import_node_fs8.closeSync)(fd);
     }
     return () => {
-      if (readLock(path)?.token === token) (0, import_node_fs7.rmSync)(path, { force: true });
+      if (readLock(path)?.token === token) (0, import_node_fs8.rmSync)(path, { force: true });
     };
   }
   return null;
@@ -11748,9 +11899,9 @@ async function acquireLock(hubDir2, waitMs, sleep = (ms) => new Promise((r) => s
 }
 
 // src/core/template.ts
-var import_node_fs8 = require("node:fs");
-var import_node_path9 = require("node:path");
-var import_yaml4 = __toESM(require_dist(), 1);
+var import_node_fs9 = require("node:fs");
+var import_node_path10 = require("node:path");
+var import_yaml5 = __toESM(require_dist(), 1);
 var README = `# Team hub
 
 Knowledge vault and inbox for the team's Claude Code sessions.
@@ -11783,14 +11934,14 @@ function validate(members, sites) {
 }
 async function bootstrapHub(dir, members, sites, env = process.env) {
   validate(members, sites);
-  if ((0, import_node_fs8.existsSync)((0, import_node_path9.join)(dir, ".git"))) throw new HubError("ALREADY_EXISTS", `${dir} is already a git repository`);
+  if ((0, import_node_fs9.existsSync)((0, import_node_path10.join)(dir, ".git"))) throw new HubError("ALREADY_EXISTS", `${dir} is already a git repository`);
   const putRaw = (rel, text) => {
-    (0, import_node_fs8.mkdirSync)((0, import_node_path9.dirname)((0, import_node_path9.join)(dir, rel)), { recursive: true });
-    (0, import_node_fs8.writeFileSync)((0, import_node_path9.join)(dir, rel), text);
+    (0, import_node_fs9.mkdirSync)((0, import_node_path10.dirname)((0, import_node_path10.join)(dir, rel)), { recursive: true });
+    (0, import_node_fs9.writeFileSync)((0, import_node_path10.join)(dir, rel), text);
   };
-  const putDoc = (rel, type, body) => writeDoc((0, import_node_path9.join)(dir, rel), { type, generated: true }, body);
-  putRaw("config/team.yml", import_yaml4.default.stringify({ members }));
-  putRaw("config/sites.yml", import_yaml4.default.stringify({ sites }));
+  const putDoc = (rel, type, body) => writeDoc((0, import_node_path10.join)(dir, rel), { type, generated: true }, body);
+  putRaw("config/team.yml", import_yaml5.default.stringify({ members }));
+  putRaw("config/sites.yml", import_yaml5.default.stringify({ sites }));
   putRaw(".gitignore", `${HUB_GITIGNORE.join("\n")}
 `);
   putDoc("README.md", "readme", README);
@@ -11808,8 +11959,8 @@ _Generated by RixFlow. Do not edit._
   await commitAll(git, "chore: bootstrap team hub", BOOTSTRAP_PATHS);
 }
 function mergeHubGitignore(dir) {
-  const path = (0, import_node_path9.join)(dir, ".gitignore");
-  const current = (0, import_node_fs8.existsSync)(path) ? (0, import_node_fs8.readFileSync)(path, "utf8") : "";
+  const path = (0, import_node_path10.join)(dir, ".gitignore");
+  const current = (0, import_node_fs9.existsSync)(path) ? (0, import_node_fs9.readFileSync)(path, "utf8") : "";
   const have = new Set(current.split(/\r?\n/).map((l) => l.trim()));
   const missing = HUB_GITIGNORE.filter((e) => !have.has(e));
   if (missing.length === 0) return false;
@@ -11820,14 +11971,107 @@ function mergeHubGitignore(dir) {
   return true;
 }
 
+// src/core/tickets/types.ts
+function fieldValue(t, prefix) {
+  const p = prefix.toLowerCase();
+  return t.fields.find((f) => f.name.toLowerCase().startsWith(p) && f.value)?.value ?? null;
+}
+async function parentChain(src, t, max = 5) {
+  const chain = [t];
+  const seen = /* @__PURE__ */ new Set([t.id]);
+  let current = t;
+  while (current.parent && chain.length <= max) {
+    const parentId = current.parent.id;
+    if (seen.has(parentId)) break;
+    seen.add(parentId);
+    current = await src.ticket(parentId);
+    chain.push(current);
+  }
+  return chain;
+}
+
+// src/core/tickets/asana.ts
+function toTicket(t, opts) {
+  const fields = (t.custom_fields ?? []).filter((c) => c.display_value).map((c) => ({ name: c.name, value: c.display_value }));
+  const base = {
+    id: t.gid,
+    title: t.name,
+    notes: t.notes ?? "",
+    modifiedAt: t.modified_at,
+    due: t.due_on ?? null,
+    url: t.permalink_url ?? null,
+    parent: t.parent ? { id: t.parent.gid, title: t.parent.name } : null,
+    status: null,
+    priority: null,
+    fields,
+    components: [],
+    labels: [],
+    containers: (t.memberships ?? []).flatMap((m) => m.project ? [m.project.name] : []),
+    sections: (t.memberships ?? []).flatMap((m) => m.section ? [m.section.name] : []),
+    sprints: [],
+    restricted: false
+  };
+  base.status = fieldValue(base, opts.statusField ?? "Status");
+  base.priority = fieldValue(base, opts.priorityField ?? "Priority");
+  return base;
+}
+function asanaSource(reader, opts) {
+  const conv = (t) => toTicket(t, opts);
+  const me = () => {
+    if (!reader.getMe) throw new HubError("ASANA_HTTP", "This Asana reader cannot look up the current user");
+    return reader.getMe();
+  };
+  const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
+  return {
+    kind: "asana",
+    label: "Asana",
+    normalizeId(raw) {
+      const id = typeof raw === "string" ? raw.trim() : raw;
+      try {
+        assertGid(id);
+      } catch {
+        throw new HubError("BAD_TICKET", `invalid ticket id: ${String(raw)}`);
+      }
+      return id;
+    },
+    async whoAmI() {
+      const u = await me();
+      return { id: u.gid, name: u.name };
+    },
+    myTickets: sample,
+    async ticket(id) {
+      return conv(await reader.getTask(id));
+    },
+    async comments(id, limit) {
+      return (await reader.getComments(id, limit)).map((c) => ({ createdAt: c.created_at, author: c.author, text: c.text }));
+    },
+    async scopes() {
+      return (await me()).workspaces.map((w) => ({ id: w.gid, name: w.name }));
+    },
+    // Asana has no cheap "recent in scope" endpoint; the creator's own tasks stand in. Scope is ignored.
+    async sample(_scope, limit) {
+      return (await sample()).slice(0, limit);
+    },
+    async statuses() {
+      return [...new Set((await sample()).map((t) => t.status).filter((s) => !!s))];
+    },
+    async priorities() {
+      return [...new Set((await sample()).map((t) => t.priority).filter((s) => !!s))];
+    },
+    async boards() {
+      return [];
+    }
+  };
+}
+
 // src/core/token.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs9 = require("node:fs");
-var import_node_path10 = require("node:path");
+var import_node_fs10 = require("node:fs");
+var import_node_path11 = require("node:path");
 var KEYCHAIN_TIMEOUT_MS = 5e3;
 var defaultExec = (cmd, args, input) => (0, import_node_child_process2.execFileSync)(cmd, args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: KEYCHAIN_TIMEOUT_MS });
 function tokenFile(configDir2) {
-  return (0, import_node_path10.join)(configDir2, "asana-token");
+  return (0, import_node_path11.join)(configDir2, "asana-token");
 }
 var LEGACY_ACCOUNT = "asana";
 var accountFor = (user) => user ? `asana:${user}` : LEGACY_ACCOUNT;
@@ -11856,8 +12100,8 @@ function keychainSet(exec, token, user) {
   }
 }
 function ensurePrivateDir(configDir2) {
-  (0, import_node_fs9.mkdirSync)(configDir2, { recursive: true, mode: 448 });
-  if ((0, import_node_fs9.statSync)(configDir2).mode & 63) (0, import_node_fs9.chmodSync)(configDir2, 448);
+  (0, import_node_fs10.mkdirSync)(configDir2, { recursive: true, mode: 448 });
+  if ((0, import_node_fs10.statSync)(configDir2).mode & 63) (0, import_node_fs10.chmodSync)(configDir2, 448);
 }
 function getToken(configDir2, env = process.env, exec = defaultExec, user) {
   const fromEnv = env.ASANA_TOKEN?.trim();
@@ -11865,23 +12109,30 @@ function getToken(configDir2, env = process.env, exec = defaultExec, user) {
   const fromKeychain = keychainGet(exec, user);
   if (fromKeychain) return fromKeychain;
   const file = tokenFile(configDir2);
-  return (0, import_node_fs9.existsSync)(file) ? (0, import_node_fs9.readFileSync)(file, "utf8").trim() || null : null;
+  return (0, import_node_fs10.existsSync)(file) ? (0, import_node_fs10.readFileSync)(file, "utf8").trim() || null : null;
 }
 function setToken(configDir2, token, exec = defaultExec, user) {
   if (!/^\S+$/.test(token)) throw new HubError("BAD_TOKEN", "Token must be a single non-empty line without spaces");
   if (keychainSet(exec, token, user)) return "keychain";
   ensurePrivateDir(configDir2);
   const file = tokenFile(configDir2);
-  (0, import_node_fs9.rmSync)(file, { force: true });
-  (0, import_node_fs9.writeFileSync)(file, token, { mode: 384, flag: "wx" });
+  (0, import_node_fs10.rmSync)(file, { force: true });
+  (0, import_node_fs10.writeFileSync)(file, token, { mode: 384, flag: "wx" });
   return "file";
 }
 
 // src/core/runtime.ts
-function makeAsana(ctx, env = process.env) {
-  if (!ctx.user.asanaWorkspace) return null;
+function makeSource(ctx, env = process.env, wf = loadWorkflow(ctx.hubDir)) {
+  if (wf.tracker.type !== "asana") return null;
+  const workspace = wf.tracker.workspace ?? ctx.user.asanaWorkspace;
+  if (!workspace) return null;
   const token = getToken(ctx.configDir, env, void 0, ctx.user.name);
-  return token ? new AsanaClient(token) : null;
+  if (!token) return null;
+  return asanaSource(new AsanaClient(token), {
+    workspace,
+    statusField: wf.status.field ?? void 0,
+    priorityField: wf.urgent.field ?? void 0
+  });
 }
 var TOOL_LOCK_WAIT_MS = 3e3;
 var LOCKED = { status: "locked", detail: "another RixFlow process is syncing the hub", pending: 0, conflicts: [] };
@@ -11891,7 +12142,7 @@ function errorDetail(e) {
   return detailLine(e instanceof Error ? e.message : String(e));
 }
 async function persistHub(hubDir2, user, message, opts = {}, env = process.env) {
-  if (!(0, import_node_fs10.existsSync)((0, import_node_path11.join)(hubDir2, ".git"))) return { status: "blocked", detail: "hub is not a git repo", pending: 0, conflicts: [] };
+  if (!(0, import_node_fs11.existsSync)((0, import_node_path12.join)(hubDir2, ".git"))) return { status: "blocked", detail: "hub is not a git repo", pending: 0, conflicts: [] };
   let release;
   try {
     release = await acquireLock(hubDir2, opts.waitMs ?? TOOL_LOCK_WAIT_MS);
@@ -11912,7 +12163,7 @@ async function persistHub(hubDir2, user, message, opts = {}, env = process.env) 
   }
 }
 async function syncHub(ctx) {
-  if (!(0, import_node_fs10.existsSync)((0, import_node_path11.join)(ctx.hubDir, ".git"))) return null;
+  if (!(0, import_node_fs11.existsSync)((0, import_node_path12.join)(ctx.hubDir, ".git"))) return null;
   return persistHub(ctx.hubDir, ctx.user.name, `sync: ${ctx.user.name}`, { waitMs: 0 });
 }
 async function persist(ctx, message, opts = {}) {
@@ -11936,22 +12187,22 @@ function describeSync(r) {
 
 // src/core/summarize.ts
 var import_node_child_process3 = require("node:child_process");
-var import_node_fs12 = require("node:fs");
+var import_node_fs13 = require("node:fs");
 
 // src/core/notes.ts
-var import_node_fs11 = require("node:fs");
-var import_node_path13 = require("node:path");
+var import_node_fs12 = require("node:fs");
+var import_node_path14 = require("node:path");
 
 // src/core/indexes.ts
-var import_node_path12 = require("node:path");
+var import_node_path13 = require("node:path");
 function rebuildIndex(hubDir2, relDir, title) {
-  const dir = (0, import_node_path12.join)(hubDir2, relDir);
+  const dir = (0, import_node_path13.join)(hubDir2, relDir);
   const groups = /* @__PURE__ */ new Map();
   for (const file of listMd(dir)) {
-    if ((0, import_node_path12.basename)(file) === "_index.md") continue;
-    const inDir = (0, import_node_path12.relative)(dir, file);
-    const group = inDir.includes(import_node_path12.sep) ? inDir.split(import_node_path12.sep)[0] : "(root)";
-    const link = (0, import_node_path12.relative)(hubDir2, file).split(import_node_path12.sep).join("/").replace(/\.md$/, "");
+    if ((0, import_node_path13.basename)(file) === "_index.md") continue;
+    const inDir = (0, import_node_path13.relative)(dir, file);
+    const group = inDir.includes(import_node_path13.sep) ? inDir.split(import_node_path13.sep)[0] : "(root)";
+    const link = (0, import_node_path13.relative)(hubDir2, file).split(import_node_path13.sep).join("/").replace(/\.md$/, "");
     groups.set(group, [...groups.get(group) ?? [], link]);
   }
   const lines = [`# ${title}`, "", "_Generated by RixFlow. Do not edit._", ""];
@@ -11960,7 +12211,7 @@ function rebuildIndex(hubDir2, relDir, title) {
     for (const link of groups.get(group).sort().reverse()) lines.push(`- [[${link}]]`);
     lines.push("");
   }
-  writeDoc((0, import_node_path12.join)(dir, "_index.md"), { type: "index", generated: true }, lines.join("\n"));
+  writeDoc((0, import_node_path13.join)(dir, "_index.md"), { type: "index", generated: true }, lines.join("\n"));
 }
 
 // src/core/notes.ts
@@ -12018,7 +12269,7 @@ function reindex(ctx) {
 var str = (v) => v === void 0 || v === null ? void 0 : String(v);
 function writeSession(ctx, s) {
   if (s.task) assertTicketId(s.task);
-  const dir = (0, import_node_path13.join)(personDir(ctx), "sessions");
+  const dir = (0, import_node_path14.join)(personDir(ctx), "sessions");
   const date = isoDate(ctx.now());
   const base = `${date}-${s.task ?? "misc"}`;
   const related = [s.task ? `[[people/${ctx.user.name}/handovers/${s.task}]]` : "", siteLink(s.site)].filter(Boolean).join(" \xB7 ");
@@ -12051,7 +12302,7 @@ function writeSession(ctx, s) {
     author: ctx.user.name
   };
   for (let n = 1; ; n++) {
-    const path = (0, import_node_path13.join)(dir, `${base}-${n}.md`);
+    const path = (0, import_node_path14.join)(dir, `${base}-${n}.md`);
     try {
       writeDoc(path, data, body, { exclusive: true });
       reindex(ctx);
@@ -12062,7 +12313,7 @@ function writeSession(ctx, s) {
   }
 }
 function hasSessionSummary(ctx, sessionId) {
-  return readAll2(listMd((0, import_node_path13.join)(personDir(ctx), "sessions")), (f) => readDoc(f).data.session_id).includes(sessionId);
+  return readAll2(listMd((0, import_node_path14.join)(personDir(ctx), "sessions")), (f) => readDoc(f).data.session_id).includes(sessionId);
 }
 function toCheckpoint(path) {
   const { data, body } = readDoc(path);
@@ -12081,11 +12332,11 @@ function toCheckpoint(path) {
   };
 }
 function listCheckpoints(ctx) {
-  return readAll2(listMd((0, import_node_path13.join)(personDir(ctx), "checkpoints")), toCheckpoint);
+  return readAll2(listMd((0, import_node_path14.join)(personDir(ctx), "checkpoints")), toCheckpoint);
 }
 function handoverPath(ctx, task) {
   assertTicketId(task);
-  return (0, import_node_path13.join)(personDir(ctx), "handovers", `${task}.md`);
+  return (0, import_node_path14.join)(personDir(ctx), "handovers", `${task}.md`);
 }
 function toHandover(path) {
   const { data, body } = readDoc(path);
@@ -12105,13 +12356,13 @@ function toHandover(path) {
 }
 function readHandover(ctx, task) {
   const path = handoverPath(ctx, task);
-  return (0, import_node_fs11.existsSync)(path) ? toHandover(path) : null;
+  return (0, import_node_fs12.existsSync)(path) ? toHandover(path) : null;
 }
 function findActiveHandover(ctx, cwd) {
-  const dir = (0, import_node_path13.join)(personDir(ctx), "handovers");
-  if (!(0, import_node_fs11.existsSync)(dir)) return null;
+  const dir = (0, import_node_path14.join)(personDir(ctx), "handovers");
+  if (!(0, import_node_fs12.existsSync)(dir)) return null;
   const matches = readAll2(
-    (0, import_node_fs11.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path13.join)(dir, f)),
+    (0, import_node_fs12.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path14.join)(dir, f)),
     toHandover
   ).filter((h) => h.projectDir && isInsideDir(cwd, h.projectDir));
   matches.sort((a, b) => String(b.created).localeCompare(String(a.created)));
@@ -12170,14 +12421,14 @@ function makeRunClaude(opts) {
 }
 var runClaude = makeRunClaude({ command: "claude", timeoutMs: 18e4 });
 function readTail(path, maxBytes) {
-  const fd = (0, import_node_fs12.openSync)(path, "r");
+  const fd = (0, import_node_fs13.openSync)(path, "r");
   try {
-    const size = (0, import_node_fs12.fstatSync)(fd).size;
+    const size = (0, import_node_fs13.fstatSync)(fd).size;
     const start = Math.max(0, size - maxBytes);
     const buf = Buffer.alloc(size - start);
     let filled = 0;
     while (filled < buf.length) {
-      const n = (0, import_node_fs12.readSync)(fd, buf, filled, buf.length - filled, start + filled);
+      const n = (0, import_node_fs13.readSync)(fd, buf, filled, buf.length - filled, start + filled);
       if (n === 0) break;
       filled += n;
     }
@@ -12186,7 +12437,7 @@ function readTail(path, maxBytes) {
     const nl = text.indexOf("\n");
     return nl === -1 ? "" : text.slice(nl + 1);
   } finally {
-    (0, import_node_fs12.closeSync)(fd);
+    (0, import_node_fs13.closeSync)(fd);
   }
 }
 function parseLine(line2) {
@@ -12425,28 +12676,28 @@ function detachedSync(cliPath2, env = process.env, spawnFn = import_node_child_p
 
 // src/cli/init.ts
 var import_node_child_process5 = require("node:child_process");
-var import_node_fs14 = require("node:fs");
-var import_node_path15 = require("node:path");
+var import_node_fs15 = require("node:fs");
+var import_node_path16 = require("node:path");
 var import_promises = require("node:readline/promises");
 
 // src/core/hookcopy.ts
 var import_node_crypto2 = require("node:crypto");
-var import_node_fs13 = require("node:fs");
-var import_node_path14 = require("node:path");
+var import_node_fs14 = require("node:fs");
+var import_node_path15 = require("node:path");
 function refreshHookCopy(configDir2, runningCli) {
   try {
     if (!runningCli) return false;
-    const copy = (0, import_node_path14.join)(configDir2, "hub.cjs");
-    if (!(0, import_node_fs13.existsSync)(copy) || (0, import_node_path14.resolve)(copy) === (0, import_node_path14.resolve)(runningCli)) return false;
-    const next = (0, import_node_fs13.readFileSync)(runningCli);
+    const copy = (0, import_node_path15.join)(configDir2, "hub.cjs");
+    if (!(0, import_node_fs14.existsSync)(copy) || (0, import_node_path15.resolve)(copy) === (0, import_node_path15.resolve)(runningCli)) return false;
+    const next = (0, import_node_fs14.readFileSync)(runningCli);
     const digest = (b) => (0, import_node_crypto2.createHash)("sha256").update(b).digest("hex");
-    if (digest(next) === digest((0, import_node_fs13.readFileSync)(copy))) return false;
+    if (digest(next) === digest((0, import_node_fs14.readFileSync)(copy))) return false;
     const tmp = `${copy}.tmp-${process.pid}`;
     try {
-      (0, import_node_fs13.writeFileSync)(tmp, next, { mode: 420 });
-      (0, import_node_fs13.renameSync)(tmp, copy);
+      (0, import_node_fs14.writeFileSync)(tmp, next, { mode: 420 });
+      (0, import_node_fs14.renameSync)(tmp, copy);
     } finally {
-      (0, import_node_fs13.rmSync)(tmp, { force: true });
+      (0, import_node_fs14.rmSync)(tmp, { force: true });
     }
     return true;
   } catch {
@@ -12457,7 +12708,7 @@ function refreshHookCopy(configDir2, runningCli) {
 // src/cli/init.ts
 var MCP_ALLOW_RULE = "mcp__plugin_rixflow_hub__*";
 var isRecord2 = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-function stringList(v, label) {
+function stringList2(v, label) {
   if (v === void 0) return [];
   if (!Array.isArray(v)) throw new HubError("BAD_SETTINGS", `${label} in settings.json is not a list; refusing to overwrite it`);
   return [...v];
@@ -12467,8 +12718,8 @@ function mergeClaudeSettings(settings, hubDir2) {
     throw new HubError("BAD_SETTINGS", "permissions in settings.json is not an object; refusing to overwrite it");
   }
   const permissions = { ...settings.permissions };
-  const allow = stringList(permissions.allow, "permissions.allow");
-  const dirs = stringList(permissions.additionalDirectories, "permissions.additionalDirectories");
+  const allow = stringList2(permissions.allow, "permissions.allow");
+  const dirs = stringList2(permissions.additionalDirectories, "permissions.additionalDirectories");
   const changes = [];
   if (!allow.includes(MCP_ALLOW_RULE)) {
     allow.push(MCP_ALLOW_RULE);
@@ -12493,24 +12744,24 @@ exec node ${shellQuote(cliPath2)} verify-commit
 }
 function installPreCommit(hubDir2, configDir2, cliPath2) {
   const messages = [];
-  (0, import_node_fs14.mkdirSync)(configDir2, { recursive: true });
-  const cliCopy = (0, import_node_path15.join)(configDir2, "hub.cjs");
-  (0, import_node_fs14.copyFileSync)(cliPath2, cliCopy);
-  const hooksDir = (0, import_node_path15.join)(hubDir2, ".git", "hooks");
-  (0, import_node_fs14.mkdirSync)(hooksDir, { recursive: true });
-  const hook = (0, import_node_path15.join)(hooksDir, "pre-commit");
-  if ((0, import_node_fs14.existsSync)(hook) && !(0, import_node_fs14.readFileSync)(hook, "utf8").includes(PRE_COMMIT_MARKER)) {
-    (0, import_node_fs14.copyFileSync)(hook, `${hook}.bak`);
+  (0, import_node_fs15.mkdirSync)(configDir2, { recursive: true });
+  const cliCopy = (0, import_node_path16.join)(configDir2, "hub.cjs");
+  (0, import_node_fs15.copyFileSync)(cliPath2, cliCopy);
+  const hooksDir = (0, import_node_path16.join)(hubDir2, ".git", "hooks");
+  (0, import_node_fs15.mkdirSync)(hooksDir, { recursive: true });
+  const hook = (0, import_node_path16.join)(hooksDir, "pre-commit");
+  if ((0, import_node_fs15.existsSync)(hook) && !(0, import_node_fs15.readFileSync)(hook, "utf8").includes(PRE_COMMIT_MARKER)) {
+    (0, import_node_fs15.copyFileSync)(hook, `${hook}.bak`);
     messages.push(`Existing pre-commit hook backed up to ${hook}.bak and replaced.`);
   }
-  (0, import_node_fs14.writeFileSync)(hook, preCommitScript(cliCopy, configDir2));
-  (0, import_node_fs14.chmodSync)(hook, 493);
+  (0, import_node_fs15.writeFileSync)(hook, preCommitScript(cliCopy, configDir2));
+  (0, import_node_fs15.chmodSync)(hook, 493);
   let hooksPath = "";
   try {
     hooksPath = (0, import_node_child_process5.execFileSync)("git", ["-C", hubDir2, "config", "core.hooksPath"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
   }
-  if (hooksPath && hooksPath !== ".git/hooks" && (0, import_node_path15.resolve)(hubDir2, hooksPath) !== (0, import_node_path15.resolve)(hooksDir)) {
+  if (hooksPath && hooksPath !== ".git/hooks" && (0, import_node_path16.resolve)(hubDir2, hooksPath) !== (0, import_node_path16.resolve)(hooksDir)) {
     messages.push(`WARNING: core.hooksPath is set to "${hooksPath}", so the pre-commit ownership gate is INACTIVE for the hub.`);
   }
   return messages;
@@ -12539,10 +12790,10 @@ function terminalIo() {
 async function applyClaudeSettings(io, linkPath, hubDir2) {
   let settingsPath = linkPath;
   let current = {};
-  if ((0, import_node_fs14.existsSync)(settingsPath)) {
+  if ((0, import_node_fs15.existsSync)(settingsPath)) {
     let parsed;
     try {
-      parsed = JSON.parse((0, import_node_fs14.readFileSync)(settingsPath, "utf8"));
+      parsed = JSON.parse((0, import_node_fs15.readFileSync)(settingsPath, "utf8"));
     } catch {
       throw new HubError("BAD_SETTINGS", `${settingsPath} is not valid JSON; fix it by hand and re-run init`);
     }
@@ -12557,17 +12808,17 @@ ${changes.map((c) => `  - ${c}`).join("\n")}`);
     io.log("Skipped. You will get permission prompts for RixFlow tools.");
     return;
   }
-  (0, import_node_fs14.mkdirSync)((0, import_node_path15.dirname)(settingsPath), { recursive: true });
-  const existed = (0, import_node_fs14.existsSync)(settingsPath);
-  if (existed) settingsPath = (0, import_node_fs14.realpathSync)(settingsPath);
-  if (existed) (0, import_node_fs14.copyFileSync)(settingsPath, `${settingsPath}.bak`);
+  (0, import_node_fs15.mkdirSync)((0, import_node_path16.dirname)(settingsPath), { recursive: true });
+  const existed = (0, import_node_fs15.existsSync)(settingsPath);
+  if (existed) settingsPath = (0, import_node_fs15.realpathSync)(settingsPath);
+  if (existed) (0, import_node_fs15.copyFileSync)(settingsPath, `${settingsPath}.bak`);
   const tmp = `${settingsPath}.tmp-${process.pid}`;
   try {
-    (0, import_node_fs14.writeFileSync)(tmp, `${JSON.stringify(settings, null, 2)}
-`, { mode: existed ? (0, import_node_fs14.statSync)(settingsPath).mode & 511 : 420 });
-    (0, import_node_fs14.renameSync)(tmp, settingsPath);
+    (0, import_node_fs15.writeFileSync)(tmp, `${JSON.stringify(settings, null, 2)}
+`, { mode: existed ? (0, import_node_fs15.statSync)(settingsPath).mode & 511 : 420 });
+    (0, import_node_fs15.renameSync)(tmp, settingsPath);
   } finally {
-    (0, import_node_fs14.rmSync)(tmp, { force: true });
+    (0, import_node_fs15.rmSync)(tmp, { force: true });
   }
   io.log(`Settings updated${existed ? " (backup: settings.json.bak)" : ""}.`);
 }
@@ -12585,7 +12836,7 @@ async function runInit(io, cliPath2, env = process.env) {
   const hubDir2 = hubDir(env);
   io.log("Everything you save to the team hub (notes, session summaries, checkpoints) is visible to the whole team.");
   if ((await io.ask('Type "yes" to continue: ')).toLowerCase() !== "yes") throw new HubError("ABORTED", "init cancelled");
-  if (!(0, import_node_fs14.existsSync)((0, import_node_path15.join)(hubDir2, ".git"))) {
+  if (!(0, import_node_fs15.existsSync)((0, import_node_path16.join)(hubDir2, ".git"))) {
     const url = await io.ask("Hub git URL (e.g. git@github.com:org/rixflow-hub.git): ");
     await withAccessHint(io, () => new Git(homeDir(env), env, { interactive: true }).run(["clone", "-q", "--", url, hubDir2]));
   } else {
@@ -12596,7 +12847,7 @@ async function runInit(io, cliPath2, env = process.env) {
   const name = await io.ask("Your name (as listed above): ");
   const member = team.find((m) => m.name === name);
   if (!member) throw new HubError("UNKNOWN_MEMBER", `${name} is not in config/team.yml; add them first`);
-  const defaultRoot = (0, import_node_path15.join)(homeDir(env), "projects");
+  const defaultRoot = (0, import_node_path16.join)(homeDir(env), "projects");
   const projectsRoot = normalizeDir(await io.ask(`Projects folder [${defaultRoot}]: `) || defaultRoot, env);
   const token = await io.askHidden("Asana personal access token (input hidden): ");
   const me = await new AsanaClient(token).getMe();
@@ -12620,16 +12871,16 @@ async function runInit(io, cliPath2, env = process.env) {
     const res = await persistHub(hubDir2, name, `chore: ignore editor files in the hub (${name})`, {}, env);
     io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
   }
-  await applyClaudeSettings(io, (0, import_node_path15.join)(homeDir(env), ".claude", "settings.json"), hubDir2);
+  await applyClaudeSettings(io, (0, import_node_path16.join)(homeDir(env), ".claude", "settings.json"), hubDir2);
   io.log(`Done. Hub: ${hubDir2}. Config: ${configDir2}.`);
 }
 
 // src/core/status.ts
-var import_node_fs15 = require("node:fs");
-var import_node_path17 = require("node:path");
+var import_node_fs16 = require("node:fs");
+var import_node_path18 = require("node:path");
 
 // src/core/sites.ts
-var import_node_path16 = require("node:path");
+var import_node_path17 = require("node:path");
 function isSiteCode(v) {
   try {
     assertSiteCode(v);
@@ -12644,34 +12895,22 @@ function folderFor(code, sites, user) {
   const site = Object.hasOwn(sites, code) ? sites[code] : void 0;
   if (!site) return null;
   const root = normalizeDir(user.projectsRoot);
-  const folder = (0, import_node_path16.resolve)(root, site.folder);
-  const rel = (0, import_node_path16.relative)(root, folder);
-  if (rel === "" || rel === ".." || rel.startsWith(".." + import_node_path16.sep) || (0, import_node_path16.isAbsolute)(rel)) return null;
+  const folder = (0, import_node_path17.resolve)(root, site.folder);
+  const rel = (0, import_node_path17.relative)(root, folder);
+  if (rel === "" || rel === ".." || rel.startsWith(".." + import_node_path17.sep) || (0, import_node_path17.isAbsolute)(rel)) return null;
   return folder;
 }
-function valueFromChain(chain, prefix) {
-  for (const t of chain) {
-    const v = fieldValue(t, prefix);
-    if (v) return v;
-  }
-  return null;
-}
-function resolveSite(chain, sites, user) {
+function resolveSite(chain, mapped, sites, user) {
   if (chain.length === 0) return { codes: [], folder: null, source: "none" };
-  const remembered = Object.hasOwn(user.taskSites, chain[0].gid) ? user.taskSites[chain[0].gid] : void 0;
+  const remembered = Object.hasOwn(user.taskSites, chain[0].id) ? user.taskSites[chain[0].id] : void 0;
   if (remembered && isSiteCode(remembered)) return { codes: [remembered], folder: folderFor(remembered, sites, user), source: "remembered" };
-  for (let i = 0; i < chain.length; i++) {
-    const value = fieldValue(chain[i], "Website");
-    if (!value) continue;
-    const codes = value.split(",").map((s) => s.trim()).filter(isSiteCode);
-    if (codes.length === 0) continue;
-    return {
-      codes,
-      folder: codes.length === 1 ? folderFor(codes[0], sites, user) : null,
-      source: i === 0 ? "task" : "parent"
-    };
-  }
-  return { codes: [], folder: null, source: "none" };
+  const codes = mapped.codes.filter(isSiteCode);
+  if (codes.length === 0) return { codes: [], folder: null, source: "none" };
+  return {
+    codes,
+    folder: codes.length === 1 ? folderFor(codes[0], sites, user) : null,
+    source: (mapped.codesAt ?? 0) === 0 ? "task" : "parent"
+  };
 }
 
 // src/core/sprint.ts
@@ -12699,40 +12938,108 @@ function isCurrentSprint(name, now) {
   });
 }
 
-// src/core/plate.ts
-var URGENT_PRIORITY = /^(urgent|critical|p0|highest)$/i;
-var URGENT_NAME = /hotfix|urgent|\bp0\b/i;
-var INBOX_STATUSES = /* @__PURE__ */ new Set(["new", "read"]);
-function sectionOf(chain) {
-  for (const t of chain) for (const m of t.memberships ?? []) if (m.section) return m.section.name;
+// src/core/mapping.ts
+var BUCKETS2 = ["todo", "in_progress", "waiting", "done"];
+var URGENT_TITLE = /hotfix|urgent|\bp0\b/i;
+function projectValues(t, wf) {
+  const p = wf.project;
+  switch (p.from) {
+    case "custom-field": {
+      const v = p.field ? fieldValue(t, p.field) : null;
+      return v ? [v] : [];
+    }
+    case "component":
+      return t.components;
+    case "label":
+      return t.labels;
+    case "asana-project":
+    case "jira-project":
+      return t.containers;
+  }
+}
+function codesOf(t, wf) {
+  const raw = projectValues(t, wf);
+  const values = wf.project.values;
+  if (values === "codes") return raw.flatMap((v) => v.split(",")).map((s) => s.trim()).filter(isSiteCode);
+  const lookup = new Map(Object.entries(values).map(([k, code]) => [k.trim().toLowerCase(), code]));
+  const out = [];
+  for (const v of raw) {
+    const code = lookup.get(v.trim().toLowerCase());
+    if (code && isSiteCode(code) && !out.includes(code)) out.push(code);
+  }
+  return out;
+}
+function bucketOf(status, wf) {
+  if (!status) return null;
+  const s = status.toLowerCase();
+  for (const b of BUCKETS2) {
+    const names = wf.status[b].map((n) => n.toLowerCase());
+    if (wf.legacy ? names.some((n) => s.includes(n)) : names.includes(s)) return b;
+  }
   return null;
 }
+function sprintOf(chain, wf, now) {
+  const mode = wf.sprints;
+  if (mode.mode === "none") return null;
+  if (mode.mode === "asana-sections") {
+    const sections2 = chain.flatMap((t) => t.sections);
+    const candidates = wf.legacy ? sections2.slice(0, 1) : sections2;
+    return candidates.find((name) => isCurrentSprint(name, now)) ?? null;
+  }
+  for (const t of chain) {
+    const s = t.sprints.find((x) => x.active && (mode.board === null || x.boardId === mode.board));
+    if (s) return s.name;
+  }
+  return null;
+}
+function needsParents(t, wf) {
+  return projectValues(t, wf).length === 0 || wf.sprints.mode === "asana-sections" && t.sections.length === 0;
+}
+function mapTicket(chain, wf, now) {
+  const own = chain[0];
+  let codes = [];
+  let codesAt;
+  for (let i = 0; i < chain.length; i++) {
+    const c = codesOf(chain[i], wf);
+    if (c.length) {
+      codes = c;
+      codesAt = i;
+      break;
+    }
+  }
+  const priority = chain.find((t) => t.priority)?.priority ?? null;
+  const urgentValues = wf.urgent.values.map((v) => v.toLowerCase());
+  const urgent = !!priority && urgentValues.includes(priority.toLowerCase()) || wf.legacy && !!own && URGENT_TITLE.test(own.title);
+  const mapped = { codes, bucket: own ? bucketOf(own.status, wf) : null, urgent, sprint: sprintOf(chain, wf, now) };
+  if (codesAt !== void 0) mapped.codesAt = codesAt;
+  return mapped;
+}
+
+// src/core/plate.ts
+var INBOX_STATUSES = /* @__PURE__ */ new Set(["new", "read"]);
 var clean2 = (text) => text.trim().split("\n")[0].slice(0, 80).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ");
 var display = (text) => clean2(scrub(text));
 var byDue = (a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
 function buildPlate(input) {
   const paused = new Set(input.checkpoints.map((c) => c.task));
   const plate = { sprintName: null, urgent: [], inProgress: [], sprint: [], inbox: [], backlog: [], waiting: [] };
-  for (const { task, chain, sites } of input.tasks) {
-    const status = valueFromChain([task], "Status");
-    const priority = valueFromChain(chain, "Priority");
-    const section = sectionOf(chain);
+  for (const { ticket, mapped } of input.tasks) {
+    if (mapped.bucket === "done") continue;
     const item = {
       n: 0,
       kind: "task",
-      ref: task.gid,
-      title: display(task.name),
-      sites,
-      status: status === null ? null : display(status),
-      priority,
-      due: task.due_on ?? null,
-      paused: paused.has(task.gid)
+      ref: ticket.id,
+      title: display(ticket.title),
+      sites: mapped.codes,
+      status: ticket.status === null ? null : display(ticket.status),
+      priority: ticket.priority,
+      due: ticket.due,
+      paused: paused.has(ticket.id)
     };
-    const inSprint = !!section && isCurrentSprint(section, input.now);
-    if (inSprint) plate.sprintName = display(section);
-    if (priority && URGENT_PRIORITY.test(priority) || URGENT_NAME.test(task.name)) plate.urgent.push(item);
-    else if (item.paused || /in progress/i.test(status ?? "")) plate.inProgress.push(item);
-    else if (inSprint) plate.sprint.push(item);
+    if (mapped.sprint) plate.sprintName = display(mapped.sprint);
+    if (mapped.urgent) plate.urgent.push(item);
+    else if (item.paused || mapped.bucket === "in_progress") plate.inProgress.push(item);
+    else if (mapped.sprint) plate.sprint.push(item);
     else plate.backlog.push(item);
   }
   for (const m of input.inbox.filter((x) => INBOX_STATUSES.has(x.status))) {
@@ -12776,52 +13083,53 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return out;
 }
-async function gatherPlate(ctx, asana) {
-  const workspace = ctx.user.asanaWorkspace;
-  if (!workspace) throw new HubError("NO_WORKSPACE", `No Asana workspace configured (run in a terminal: ${hubCommand("init")})`);
+var isAuthError = (err) => err instanceof HubError && err.code.endsWith("_AUTH");
+async function gatherPlate(ctx, source, wf) {
   const sites = loadSites(ctx.hubDir);
-  const mine = await asana.getMyTasks(workspace);
-  const fetches = new Map(mine.map((t) => [t.gid, Promise.resolve(t)]));
+  const now = ctx.now();
+  const mine = await source.myTickets();
+  const fetches = new Map(mine.map((t) => [t.id, Promise.resolve(t)]));
   const cached = {
-    getMyTasks: (w) => asana.getMyTasks(w),
-    getComments: (g, l) => asana.getComments(g, l),
-    getTask: (gid) => {
-      let p = fetches.get(gid);
+    ticket: (id) => {
+      let p = fetches.get(id);
       if (!p) {
-        p = asana.getTask(gid);
-        fetches.set(gid, p);
+        p = source.ticket(id);
+        fetches.set(id, p);
       }
       return p;
     }
   };
-  const tasks = await mapLimit(mine, PARENT_FETCH_LIMIT, async (task) => {
-    const needsParents = !task.memberships?.some((m) => m.section) || !fieldValue(task, "Website");
-    let chain = [task];
-    if (needsParents) {
+  const tasks = await mapLimit(mine, PARENT_FETCH_LIMIT, async (ticket) => {
+    let chain = [ticket];
+    if (needsParents(ticket, wf)) {
       try {
-        chain = await parentChain(cached, task);
+        chain = await parentChain(cached, ticket);
       } catch (err) {
-        if (err instanceof HubError && err.code === "ASANA_AUTH") throw err;
-        chain = [task];
+        if (isAuthError(err)) throw err;
+        chain = [ticket];
       }
     }
-    return { task, chain, sites: resolveSite(chain, sites, ctx.user).codes };
+    const mapped = mapTicket(chain, wf, now);
+    return { ticket, mapped: { ...mapped, codes: resolveSite(chain, mapped, sites, ctx.user).codes } };
   });
   return buildPlate({
     tasks,
     inbox: listInbox(ctx, ["new", "read"]),
     checkpoints: listCheckpoints(ctx),
     waiting: listWaiting(ctx, 2),
-    now: ctx.now()
+    now
   });
 }
 
 // src/core/status.ts
-var STATUS_VERSION = 1;
+var STATUS_VERSION = 2;
 var ASANA_CACHE_TTL_MS = 6e5;
 var STATUS_BUDGET_MS = 9e3;
 var SYNC_BUDGET_MS = 4e3;
 var CACHE_FILE = "status-cache.json";
+function cacheScope(ctx, wf) {
+  return wf.tracker.type === "jira" ? `jira:${wf.tracker.url}` : `asana:${wf.tracker.workspace ?? ctx.user.asanaWorkspace ?? ""}`;
+}
 function emptyStatus(now, problems) {
   return {
     v: STATUS_VERSION,
@@ -12841,25 +13149,25 @@ var line = (re, text) => {
   return m ? display(m[1]) : null;
 };
 var titleOf = (h, fallback) => h && line(/^# (.+)$/m, h.brief) || fallback;
-function readCache(ctx) {
+function readCache(ctx, scope) {
   try {
-    const path = (0, import_node_path17.join)(ctx.configDir, CACHE_FILE);
-    if (!(0, import_node_fs15.existsSync)(path)) return null;
-    const c = JSON.parse((0, import_node_fs15.readFileSync)(path, "utf8"));
-    if (c.user !== ctx.user.name || c.workspace !== ctx.user.asanaWorkspace || !Array.isArray(c.items)) return null;
+    const path = (0, import_node_path18.join)(ctx.configDir, CACHE_FILE);
+    if (!(0, import_node_fs16.existsSync)(path)) return null;
+    const c = JSON.parse((0, import_node_fs16.readFileSync)(path, "utf8"));
+    if (c.user !== ctx.user.name || c.scope !== scope || !Array.isArray(c.items)) return null;
     return Number.isNaN(Date.parse(c.fetchedAt)) ? null : c;
   } catch {
     return null;
   }
 }
 function writeCache(ctx, cache) {
-  const path = (0, import_node_path17.join)(ctx.configDir, CACHE_FILE);
+  const path = (0, import_node_path18.join)(ctx.configDir, CACHE_FILE);
   const tmp = `${path}.tmp-${process.pid}`;
   try {
-    (0, import_node_fs15.writeFileSync)(tmp, JSON.stringify(cache), { mode: 384 });
-    (0, import_node_fs15.renameSync)(tmp, path);
+    (0, import_node_fs16.writeFileSync)(tmp, JSON.stringify(cache), { mode: 384 });
+    (0, import_node_fs16.renameSync)(tmp, path);
   } catch {
-    (0, import_node_fs15.rmSync)(tmp, { force: true });
+    (0, import_node_fs16.rmSync)(tmp, { force: true });
   }
 }
 var toTask = (i) => ({ task: i.ref, title: i.title, sites: i.sites, status: i.status, due: i.due, paused: i.paused });
@@ -12874,33 +13182,39 @@ async function within(work, ms) {
     clearTimeout(timer);
   }
 }
-async function asanaSection(ctx, opts, deps, problems, deadline) {
-  const cached = readCache(ctx);
+async function ticketSection(ctx, wf, opts, deps, problems, deadline) {
+  const scope = cacheScope(ctx, wf);
+  const cached = readCache(ctx, scope);
   const now = ctx.now().getTime();
   const age = cached ? now - Date.parse(cached.fetchedAt) : NaN;
   if (cached && !opts.refresh && age >= 0 && age < ASANA_CACHE_TTL_MS) return cached;
-  const asana = deps.asana(ctx);
-  if (!asana || !ctx.user.asanaWorkspace) {
-    problems.push("asana token missing");
+  let source;
+  try {
+    source = deps.source(ctx);
+  } catch {
+    source = null;
+  }
+  if (!source) {
+    problems.push("tickets token missing");
     return cached;
   }
   try {
-    const plate = await within(gatherPlate(ctx, asana), deadline - Date.now());
+    const plate = await within(gatherPlate(ctx, source, wf), deadline - Date.now());
     if (plate === "timeout") {
-      problems.push("asana timed out");
+      problems.push("tickets timed out");
       return cached;
     }
     const fresh = {
       fetchedAt: ctx.now().toISOString(),
       user: ctx.user.name,
-      workspace: ctx.user.asanaWorkspace,
+      scope,
       name: plate.sprintName,
       items: [...plate.urgent, ...plate.inProgress, ...plate.sprint].map(toTask)
     };
     writeCache(ctx, fresh);
     return fresh;
   } catch (e) {
-    problems.push(e instanceof HubError && e.code === "ASANA_AUTH" ? "asana token rejected" : "asana unreachable");
+    problems.push(e instanceof HubError && e.code.endsWith("_AUTH") ? "tickets token rejected" : "tickets unreachable");
     return cached;
   }
 }
@@ -12955,8 +13269,15 @@ async function buildStatus(opts, deps) {
   } catch {
     problems.push("checkpoints unreadable");
   }
-  const asana = opts.asana ? await asanaSection(ctx, opts, deps, problems, deadline) : readCache(ctx);
-  if (asana) out.sprint = { name: asana.name, fetchedAt: asana.fetchedAt, items: asana.items };
+  let tickets = null;
+  let wf = null;
+  try {
+    wf = deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
+  } catch {
+    problems.push("tickets: workflow invalid");
+  }
+  if (wf) tickets = opts.asana ? await ticketSection(ctx, wf, opts, deps, problems, deadline) : readCache(ctx, cacheScope(ctx, wf));
+  if (tickets) out.sprint = { name: tickets.name, fetchedAt: tickets.fetchedAt, items: tickets.items };
   try {
     let task;
     if (opts.task) {
@@ -12971,7 +13292,7 @@ async function buildStatus(opts, deps) {
     const gid = task ?? h?.task;
     if (task) out.paused = out.paused.filter((p) => p.task !== task);
     if (gid && (task || !out.paused.some((p) => p.task === gid))) {
-      const live = asana?.items.find((i) => i.task === gid);
+      const live = tickets?.items.find((i) => i.task === gid);
       out.current = {
         task: gid,
         title: live?.title ?? titleOf(h, gid),
@@ -13069,7 +13390,7 @@ async function verifyStaged(git, user) {
 }
 
 // src/cli/main.ts
-var cliPath = (0, import_node_path18.resolve)(process.argv[1] ?? "hub.cjs");
+var cliPath = (0, import_node_path19.resolve)(process.argv[1] ?? "hub.cjs");
 var STDIN_TIMEOUT_MS = 3e3;
 function readStdin() {
   if (process.stdin.isTTY) return Promise.resolve("");
@@ -13092,7 +13413,7 @@ function printAndExit0(text) {
   process.stdout.write(text, () => process.exit(0));
 }
 var syncChild = detachedSync(cliPath);
-var check2 = (ctx, trigger) => runCheck(ctx, { asana: () => makeAsana(ctx), sync: syncChild }, trigger);
+var check2 = (ctx, trigger) => runCheck(ctx, { source: () => makeSource(ctx), sync: syncChild }, trigger);
 refreshHookCopy(configDir(), hubCliPath());
 var program2 = new Command("hub").description("RixFlow CLI");
 program2.command("init").description("set up this machine").action(async () => {
@@ -13128,7 +13449,7 @@ program2.command("status").description("status of the hub as JSON, for the RixFl
       {
         loadCtx: () => loadCtx(),
         sync: syncChild,
-        asana: (ctx) => makeAsana(ctx),
+        source: (ctx) => makeSource(ctx),
         pending: (ctx) => pendingCount(new Git(ctx.hubDir)),
         startedAt: performance.timeOrigin
       }

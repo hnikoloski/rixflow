@@ -1,15 +1,16 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AsanaReader } from './asana';
 import type { SyncResult, SyncStatus } from './git';
 import { listInbox, type MessageStatus, type MessageType } from './messages';
 import { findActiveHandover, listCheckpoints, readHandover, type Handover } from './notes';
 import { display, gatherPlate, type PlateItem } from './plate';
+import type { TicketSource } from './tickets/types';
 import { HubError, assertTicketId, type Ctx } from './types';
+import { loadWorkflow, type Workflow } from './workflow';
 
-export const STATUS_VERSION = 1;
+export const STATUS_VERSION = 2;
 export const ASANA_CACHE_TTL_MS = 600_000;
-// The mod gives `hub status` 10 s. All of it (sync, then Asana) must end within STATUS_BUDGET_MS;
+// The mod gives `hub status` 10 s. All of it (sync, then tickets) must end within STATUS_BUDGET_MS;
 // sync gets SYNC_BUDGET_MS of that, then the status is built without it.
 export const STATUS_BUDGET_MS = 9_000;
 export const SYNC_BUDGET_MS = 4_000;
@@ -20,7 +21,9 @@ export interface StatusOptions { cwd: string; task?: string; asana: boolean; ref
 export interface StatusDeps {
   loadCtx: () => Ctx;
   sync: (ctx: Ctx) => Promise<SyncResult | null>;
-  asana: (ctx: Ctx) => AsanaReader | null;
+  source: (ctx: Ctx) => TicketSource | null;
+  // Defaults to the hub's config/workflow.yml (the legacy Asana mapping when it is missing).
+  workflow?: (ctx: Ctx) => Workflow;
   syncBudgetMs?: number;
   budgetMs?: number;
   // Local commits not yet pushed; read when the sync loses its race (it is still running elsewhere).
@@ -47,7 +50,12 @@ export interface HubStatus {
   problems: string[];
 }
 
-interface AsanaCache { fetchedAt: string; user: string; workspace: string; name: string | null; items: StatusTask[] }
+// `scope` ties the cache to one tracker scope: `asana:<workspace gid>` or `jira:<base url>`.
+interface TicketCache { fetchedAt: string; user: string; scope: string; name: string | null; items: StatusTask[] }
+
+export function cacheScope(ctx: Ctx, wf: Workflow): string {
+  return wf.tracker.type === 'jira' ? `jira:${wf.tracker.url}` : `asana:${wf.tracker.workspace ?? ctx.user.asanaWorkspace ?? ''}`;
+}
 
 export function emptyStatus(now: Date, problems: string[]): HubStatus {
   return {
@@ -62,12 +70,12 @@ const line = (re: RegExp, text: string): string | null => {
 };
 const titleOf = (h: Handover | null, fallback: string) => (h && line(/^# (.+)$/m, h.brief)) || fallback;
 
-function readCache(ctx: Ctx): AsanaCache | null {
+function readCache(ctx: Ctx, scope: string): TicketCache | null {
   try {
     const path = join(ctx.configDir, CACHE_FILE);
     if (!existsSync(path)) return null;
-    const c = JSON.parse(readFileSync(path, 'utf8')) as AsanaCache;
-    if (c.user !== ctx.user.name || c.workspace !== ctx.user.asanaWorkspace || !Array.isArray(c.items)) return null;
+    const c = JSON.parse(readFileSync(path, 'utf8')) as TicketCache;
+    if (c.user !== ctx.user.name || c.scope !== scope || !Array.isArray(c.items)) return null;
     return Number.isNaN(Date.parse(c.fetchedAt)) ? null : c;
   } catch {
     return null;
@@ -75,7 +83,7 @@ function readCache(ctx: Ctx): AsanaCache | null {
 }
 
 // Temp file + rename: a reader never sees half a file, even with several sessions polling.
-function writeCache(ctx: Ctx, cache: AsanaCache): void {
+function writeCache(ctx: Ctx, cache: TicketCache): void {
   const path = join(ctx.configDir, CACHE_FILE);
   const tmp = `${path}.tmp-${process.pid}`;
   try {
@@ -102,34 +110,40 @@ async function within<T>(work: Promise<T>, ms: number): Promise<T | 'timeout'> {
 }
 
 // A failed or late fetch falls back to the last cache, however old: a stale sprint beats a blank one.
-async function asanaSection(
-  ctx: Ctx, opts: StatusOptions, deps: StatusDeps, problems: string[], deadline: number,
-): Promise<AsanaCache | null> {
-  const cached = readCache(ctx);
+async function ticketSection(
+  ctx: Ctx, wf: Workflow, opts: StatusOptions, deps: StatusDeps, problems: string[], deadline: number,
+): Promise<TicketCache | null> {
+  const scope = cacheScope(ctx, wf);
+  const cached = readCache(ctx, scope);
   const now = ctx.now().getTime();
   const age = cached ? now - Date.parse(cached.fetchedAt) : NaN;
   // A fetchedAt in the future (clock change, copied file) counts as stale.
   if (cached && !opts.refresh && age >= 0 && age < ASANA_CACHE_TTL_MS) return cached;
-  const asana = deps.asana(ctx);
-  if (!asana || !ctx.user.asanaWorkspace) {
-    problems.push('asana token missing');
+  let source: TicketSource | null;
+  try {
+    source = deps.source(ctx);
+  } catch {
+    source = null;
+  }
+  if (!source) {
+    problems.push('tickets token missing');
     return cached;
   }
   try {
     // Abandoned on timeout: the requests are read-only GETs, and the CLI exits right after.
-    const plate = await within(gatherPlate(ctx, asana), deadline - Date.now());
+    const plate = await within(gatherPlate(ctx, source, wf), deadline - Date.now());
     if (plate === 'timeout') {
-      problems.push('asana timed out');
+      problems.push('tickets timed out');
       return cached;
     }
-    const fresh: AsanaCache = {
-      fetchedAt: ctx.now().toISOString(), user: ctx.user.name, workspace: ctx.user.asanaWorkspace,
+    const fresh: TicketCache = {
+      fetchedAt: ctx.now().toISOString(), user: ctx.user.name, scope,
       name: plate.sprintName, items: [...plate.urgent, ...plate.inProgress, ...plate.sprint].map(toTask),
     };
     writeCache(ctx, fresh);
     return fresh;
   } catch (e) {
-    problems.push(e instanceof HubError && e.code === 'ASANA_AUTH' ? 'asana token rejected' : 'asana unreachable');
+    problems.push(e instanceof HubError && e.code.endsWith('_AUTH') ? 'tickets token rejected' : 'tickets unreachable');
     return cached;
   }
 }
@@ -185,9 +199,16 @@ export async function buildStatus(opts: StatusOptions, deps: StatusDeps): Promis
   }
 
   // Without --asana (the mod's fast poll) the last cached sprint is served as is, so a fast poll
-  // never blanks the sprint an Asana poll fetched.
-  const asana = opts.asana ? await asanaSection(ctx, opts, deps, problems, deadline) : readCache(ctx);
-  if (asana) out.sprint = { name: asana.name, fetchedAt: asana.fetchedAt, items: asana.items };
+  // never blanks the sprint a ticket poll fetched.
+  let tickets: TicketCache | null = null;
+  let wf: Workflow | null = null;
+  try {
+    wf = deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
+  } catch {
+    problems.push('tickets: workflow invalid');
+  }
+  if (wf) tickets = opts.asana ? await ticketSection(ctx, wf, opts, deps, problems, deadline) : readCache(ctx, cacheScope(ctx, wf));
+  if (tickets) out.sprint = { name: tickets.name, fetchedAt: tickets.fetchedAt, items: tickets.items };
 
   try {
     let task: string | undefined;
@@ -205,7 +226,7 @@ export async function buildStatus(opts: StatusOptions, deps: StatusDeps): Promis
     // of paused; only the cwd fallback defers to a checkpoint.
     if (task) out.paused = out.paused.filter((p) => p.task !== task);
     if (gid && (task || !out.paused.some((p) => p.task === gid))) {
-      const live = asana?.items.find((i) => i.task === gid);
+      const live = tickets?.items.find((i) => i.task === gid);
       out.current = {
         task: gid,
         title: live?.title ?? titleOf(h, gid),

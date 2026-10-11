@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../../src/mcp/server';
 import { loadUserConfig } from '../../src/core/config';
-import { fakeAsana, field, task } from '../fixtures/asana';
+import { fakeAsanaSource, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 import { hubCommand } from '../../src/core/command';
 import { HubError } from '../../src/core/types';
@@ -18,7 +18,7 @@ async function connect(asanaTasks = [task({ gid: '101', name: 'Testimonial card'
   const persisted: string[] = [];
   const server = createServer({
     ctx: () => ctx,
-    asana: () => fakeAsana(asanaTasks),
+    source: () => fakeAsanaSource(asanaTasks),
     persist: async (_c, m) => { persisted.push(m); return { ...syncResult }; },
   });
   const client = new Client({ name: 'test', version: '1.0.0' });
@@ -109,7 +109,7 @@ describe('MCP server', () => {
   it('setup_info works before init and gives the exact terminal command (I8)', async () => {
     const server = createServer({
       ctx: () => { throw new HubError('NOT_INITIALIZED', 'no config'); },
-      asana: () => null,
+      source: () => null,
       persist: async () => ({ status: 'ok', detail: '', pending: 0, conflicts: [] }),
     });
     const client = new Client({ name: 'test', version: '1.0.0' });
@@ -144,15 +144,15 @@ describe('MCP server', () => {
     expect(persisted).toEqual(['checkpoint: hristijan 101', 'session: hristijan sess-1', 'finish: hristijan 101']);
   });
 
-  it('reports a clear error without Asana', async () => {
+  it('reports a clear error without a ticket source', async () => {
     const ctx = makeCtx();
-    const server = createServer({ ctx: () => ctx, asana: () => null, persist: async () => ({ status: 'ok', detail: '', pending: 0, conflicts: [] }) });
+    const server = createServer({ ctx: () => ctx, source: () => null, persist: async () => ({ status: 'ok', detail: '', pending: 0, conflicts: [] }) });
     const client = new Client({ name: 't', version: '1' });
     const [a, b] = InMemoryTransport.createLinkedPair();
     await Promise.all([client.connect(a), server.connect(b)]);
     const res = (await client.callTool({ name: 'plate', arguments: {} })) as { isError?: boolean; content: Array<{ text: string }> };
     expect(res.isError).toBe(true);
-    expect(res.content[0].text).toMatch(/^NO_ASANA/);
+    expect(res.content[0].text).toMatch(/^NO_TICKETS/);
   });
 });
 

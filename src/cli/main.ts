@@ -4,7 +4,7 @@ import { runCheck } from '../core/check';
 import { configDir, loadCtx } from '../core/config';
 import { Git, pendingCount, type SyncResult } from '../core/git';
 import type { Trigger } from '../core/notes';
-import { describeSync, makeAsana, persist, syncHub } from '../core/runtime';
+import { describeSync, makeSource, persist, syncHub } from '../core/runtime';
 import { scrub } from '../core/scrub';
 import { runClaude, summarizeSession } from '../core/summarize';
 import { logSummary } from '../core/summarylog';
@@ -48,7 +48,7 @@ function printAndExit0(text: string): void {
 const syncChild = detachedSync(cliPath);
 
 const check = (ctx: Ctx, trigger: 'session' | 'prompt') =>
-  runCheck(ctx, { asana: () => makeAsana(ctx), sync: syncChild }, trigger);
+  runCheck(ctx, { source: () => makeSource(ctx), sync: syncChild }, trigger);
 
 // Once per start, best effort: keep the pre-commit copy of the CLI in step with this bundle.
 refreshHookCopy(configDir(), hubCliPath());
@@ -100,7 +100,7 @@ program
     try {
       out = await buildStatus(
         { cwd: opts.cwd ?? process.cwd(), task: opts.task, asana: !!opts.asana, refresh: !!opts.refresh, sync: opts.sync !== false },
-        { loadCtx: () => loadCtx(), sync: syncChild, asana: (ctx) => makeAsana(ctx), pending: (ctx) => pendingCount(new Git(ctx.hubDir)),
+        { loadCtx: () => loadCtx(), sync: syncChild, source: (ctx) => makeSource(ctx), pending: (ctx) => pendingCount(new Git(ctx.hubDir)),
           startedAt: performance.timeOrigin },
       );
     } catch {

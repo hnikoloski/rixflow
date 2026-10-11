@@ -7,7 +7,7 @@ import { isoDate, newMessageId } from '../../src/core/ids';
 import { insideHub, listMd, personDir, readDoc, writeDoc } from '../../src/core/hubfs';
 import { makeCtx } from '../helpers';
 import { buildBrief } from '../../src/core/brief';
-import { field, task } from '../fixtures/asana';
+import { asTicket, field, task } from '../fixtures/asana';
 
 describe('frontmatter', () => {
   it('round-trips and keeps numeric-looking ids as strings', () => {
@@ -80,7 +80,7 @@ describe('scrub is a fixed point of findSecrets', () => {
   });
   it('scrubs a Stage-link handover brief into something the pre-commit check accepts', () => {
     const t = task({ gid: '101', name: 'Stage https://u:p@x.example.com/', custom_fields: [field('Stage link - Web', 'https://acmestage:a1b2c3d4@stage.acme.example.com/en/pricing/'), field('Dev Link', 'https://dev@bitbucket.org/x/y')] });
-    const brief = buildBrief(t, [t], []);
+    const brief = buildBrief(asTicket(t), [asTicket(t)], [], 'Asana');
     expect(brief).toContain('https://[redacted]@stage.acme.example.com/en/pricing/');
     expect(findSecrets(brief)).toEqual([]);
   });

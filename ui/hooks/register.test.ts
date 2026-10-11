@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 const status = (o: Record<string, unknown> = {}) => JSON.stringify({
-  v: 1, at: '2026-10-10T18:00:00.000Z', user: 'hristijan', initialized: true,
+  v: 2, at: '2026-10-10T18:00:00.000Z', user: 'hristijan', initialized: true,
   sync: { status: 'ok', pending: 0, detail: '' }, current: null,
   inbox: [{ id: '2026-10-10-8qsc', from: 'pm', type: 'request', task: '111', preview: 'Consent v2 by Wed', status: 'new', created: '2026-10-10T17:58:00.000Z' }],
   paused: [], sprint: null, problems: [], ...o,

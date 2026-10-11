@@ -1,15 +1,16 @@
-import type { AsanaReader } from './asana';
 import { hubCommand } from './command';
 import { loadState, saveState } from './config';
 import { NO_REMOTE_DETAIL, type SyncResult } from './git';
 import { listInbox, type Message } from './messages';
 import { scrub } from './scrub';
 import { lastSummaryFailure } from './summarylog';
+import type { TicketSource } from './tickets/types';
 import type { CheckState, Ctx } from './types';
+import { loadWorkflow, type Workflow } from './workflow';
 
 export const PROMPT_INTERVAL_MS = 300_000;
 
-// Bounds for everything written to the hook output. Sync and Asana calls run concurrently and
+// Bounds for everything written to the hook output. Sync and ticket calls run concurrently and
 // are cut off so a slow network cannot hang the user's prompt. The prompt hook gets a shorter budget.
 const NOTIFIED_CAP = 500;
 const PROMPT_TIMEOUT_MS = 2_000;
@@ -24,8 +25,21 @@ const CONTROL_CHARS = new RegExp(
 export interface CheckDeps {
   // A factory is called only after the prompt rate limit passes, so a rate-limited prompt never
   // spawns a keychain lookup.
-  asana: AsanaReader | null | (() => AsanaReader | null);
+  source: TicketSource | null | (() => TicketSource | null);
   sync: () => Promise<SyncResult | null>;
+  // Names the tracker when no source could be built. Defaults to the hub's config/workflow.yml.
+  workflow?: () => Workflow;
+}
+
+const LABELS: Record<Workflow['tracker']['type'], string> = { asana: 'Asana', jira: 'Jira' };
+
+// The tracker's name for user-facing lines; null when the workflow cannot be read (hooks stay quiet).
+function trackerLabel(ctx: Ctx, deps: CheckDeps): string | null {
+  try {
+    return LABELS[(deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir)).tracker.type];
+  } catch {
+    return null;
+  }
 }
 
 // Makes one untrusted string safe to inject: one line, no control or bidi characters,
@@ -97,13 +111,17 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   const parts: string[] = [];
   const budget = trigger === 'prompt' ? PROMPT_TIMEOUT_MS : SESSION_TIMEOUT_MS;
 
-  // Asana and sync start together so their latency overlaps instead of adding up.
-  const asana = typeof deps.asana === 'function' ? deps.asana() : deps.asana;
-  const workspace = ctx.user.asanaWorkspace;
-  const asanaFetch = asana && workspace ? withTimeout(() => asana.getMyTasks(workspace), budget) : null;
+  // Tickets and sync start together so their latency overlaps instead of adding up.
+  let source: TicketSource | null;
+  try {
+    source = typeof deps.source === 'function' ? deps.source() : deps.source;
+  } catch {
+    source = null;
+  }
+  const ticketFetch = source ? withTimeout(() => source.myTickets(), budget) : null;
   // Handled here so a rejection during the sync wait is not reported as unhandled; it is still
   // awaited (and its error handled) further down.
-  asanaFetch?.catch(() => undefined);
+  ticketFetch?.catch(() => undefined);
   const synced = await withTimeout(() => deps.sync(), budget).catch(() => null);
 
   let fresh: Message[] = [];
@@ -121,23 +139,24 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   const previous = Array.isArray(state.notified) ? state.notified : [];
   state.notified = [...previous.filter((id) => !freshSet.has(id)), ...freshIds].slice(-NOTIFIED_CAP);
 
-  if (!asana) {
-    if (trigger === 'session') parts.push(`Asana token missing (run: ${hubCommand('token set')})`);
-  } else if (asanaFetch) {
+  if (!source || !ticketFetch) {
+    const label = trigger === 'session' ? trackerLabel(ctx, deps) : null;
+    if (label) parts.push(`${label} token missing (run: ${hubCommand('token set')})`);
+  } else {
     try {
-      const tasks = await asanaFetch;
+      const tickets = await ticketFetch;
       const seen: Record<string, unknown> = isRecord(state.seenTaskModified) ? state.seenTaskModified : {};
       const firstRun = Object.keys(seen).length === 0;
-      const changed = tasks.filter((t) => typeof seen[t.gid] === 'string' && seen[t.gid] !== t.modified_at);
-      // Only the tasks seen in this run are kept, so the map stays bounded.
-      state.seenTaskModified = Object.fromEntries(tasks.map((t) => [t.gid, t.modified_at]));
+      const changed = tickets.filter((t) => typeof seen[t.id] === 'string' && seen[t.id] !== t.modifiedAt);
+      // Only the tickets seen in this run are kept, so the map stays bounded.
+      state.seenTaskModified = Object.fromEntries(tickets.map((t) => [t.id, t.modifiedAt]));
       if (!firstRun && changed.length) {
         // Quotes in a name become apostrophes so the name cannot close its own quoting.
-        const names = changed.slice(0, 3).map((t) => `"${clean(t.name).replace(/"/g, "'")}"`).join(', ');
-        parts.push(`Asana updated: ${names}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}`);
+        const names = changed.slice(0, 3).map((t) => `"${clean(t.title).replace(/"/g, "'")}"`).join(', ');
+        parts.push(`${source.label} updated: ${names}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}`);
       }
     } catch {
-      if (trigger === 'session') parts.push('Asana unreachable');
+      if (trigger === 'session') parts.push(`${source.label} unreachable`);
     }
   }
 

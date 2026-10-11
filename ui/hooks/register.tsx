@@ -316,7 +316,7 @@ export const register: Register = on => {
         {more(paused.more, ACCENT.paused)}
 
         {head('▦', (s.sprint?.name ?? 'SPRINT').toUpperCase(), stale ? 'warning' : ACCENT.sprint, s.sprint ? `${stale ? `⚠ ${stale} old · ` : ''}${sprint.shown.length + sprint.more}` : '')}
-        {!s.sprint && empty(s.problems.find(p => p.startsWith('asana')) ?? 'loading from Asana…', ACCENT.sprint)}
+        {!s.sprint && empty(s.problems.find(p => p.startsWith('tickets')) ?? 'loading tickets…', ACCENT.sprint)}
         {s.sprint && sprint.shown.length === 0 && empty('nothing open', ACCENT.sprint)}
         {sprint.shown.map(t => (
           <Box key={`t-${t.task}`}>
@@ -331,7 +331,7 @@ export const register: Register = on => {
         ))}
         {more(sprint.more, ACCENT.sprint)}
 
-        {s.problems.filter(p => !p.startsWith('asana') || s.sprint).map(p => (
+        {s.problems.filter(p => !p.startsWith('tickets') || s.sprint).map(p => (
           <Box key={`pr-${p}`} marginTop={1}>
             <Text backgroundColor="warning" color="inverseText" bold> ! </Text>
             <Text color="warning"> {p}</Text>

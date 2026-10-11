@@ -146,23 +146,3 @@ export class AsanaClient implements AsanaReader {
       .map((s) => ({ created_at: s.created_at, author: s.created_by?.name ?? 'unknown', text: s.text }));
   }
 }
-
-export function fieldValue(task: AsanaTask, prefix: string): string | null {
-  const p = prefix.toLowerCase();
-  const f = (task.custom_fields ?? []).find((c) => c.name.toLowerCase().startsWith(p) && c.display_value);
-  return f?.display_value ?? null;
-}
-
-export async function parentChain(asana: AsanaReader, task: AsanaTask, max = 5): Promise<AsanaTask[]> {
-  const chain = [task];
-  const seen = new Set<string>([task.gid]);
-  let current = task;
-  while (current.parent && chain.length <= max) {
-    const parentGid = current.parent.gid;
-    if (seen.has(parentGid)) break; // parent cycle: stop rather than repeat a task
-    seen.add(parentGid);
-    current = await asana.getTask(parentGid);
-    chain.push(current);
-  }
-  return chain;
-}

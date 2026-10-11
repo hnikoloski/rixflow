@@ -3,7 +3,6 @@ import { basename, dirname, join, relative, sep } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import type { AsanaReader } from '../core/asana';
 import type { SyncResult } from '../core/git';
 import { describeSync } from '../core/runtime';
 import { configDir as getConfigDir, hubDir as getHubDir, saveUserConfig } from '../core/config';
@@ -18,18 +17,22 @@ import { search } from '../core/search';
 import { resumeTask, startTask } from '../core/tasks';
 import { loadSites, loadTeam } from '../core/team';
 import { hubCommand } from '../core/command';
+import type { TicketSource } from '../core/tickets/types';
 import { HubError, assertTicketId, normalizeTicketId, assertSiteCode, type Ctx } from '../core/types';
+import { loadWorkflow, type Workflow } from '../core/workflow';
 
 export interface ServerDeps {
   ctx: () => Ctx;
-  asana: (ctx: Ctx) => AsanaReader | null;
+  source: (ctx: Ctx) => TicketSource | null;
+  // Defaults to the hub's config/workflow.yml (the legacy Asana mapping when it is missing).
+  workflow?: (ctx: Ctx) => Workflow;
   persist: (ctx: Ctx, message: string) => Promise<SyncResult>;
 }
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,100}$/;
 const SHARED_PATH = /^shared\/[A-Za-z0-9._\/-]+\.md$/;
 
-// Every result is scrubbed, so Asana or teammate text can never carry credentials to the model.
+// Every result is scrubbed, so ticket or teammate text can never carry credentials to the model.
 // Errors are `<CODE>: <message>`; anything that is not a HubError becomes a generic code with
 // no message and no stack (set RIXFLOW_DEBUG=1 to see the real error on stderr).
 async function safe(fn: () => unknown): Promise<CallToolResult> {
@@ -76,10 +79,13 @@ function readablePath(ctx: Ctx, path: unknown): string {
 
 export function createServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: 'hub', version: '0.2.0' });
-  const asanaFor = (ctx: Ctx): AsanaReader => {
-    const asana = deps.asana(ctx);
-    if (!asana) throw new HubError('NO_ASANA', `Asana is not configured (run in a terminal: ${hubCommand('init')}, or ${hubCommand('token set')})`);
-    return asana;
+  const workflowFor = (ctx: Ctx): Workflow => (deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir));
+  const sourceFor = (ctx: Ctx): TicketSource => {
+    const source = deps.source(ctx);
+    if (!source) {
+      throw new HubError('NO_TICKETS', `The ticket tracker is not configured (run in a terminal: ${hubCommand('init')}, or ${hubCommand('token set')})`);
+    }
+    return source;
   };
   // The tool result always carries the real sync status: "synced" only when the push went through.
   const persisted = async (ctx: Ctx, message: string) => {
@@ -127,7 +133,8 @@ export function createServer(deps: ServerDeps): McpServer {
     inputSchema: {},
   }, async () => safe(async () => {
     const ctx = deps.ctx();
-    return renderPlate(await gatherPlate(ctx, asanaFor(ctx)));
+    const wf = workflowFor(ctx);
+    return renderPlate(await gatherPlate(ctx, sourceFor(ctx), wf));
   }));
 
   server.registerTool('start_task', {
@@ -136,7 +143,8 @@ export function createServer(deps: ServerDeps): McpServer {
   }, async ({ task: rawTask, cwd }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
-    const result = await startTask(ctx, asanaFor(ctx), { task, cwd });
+    const wf = workflowFor(ctx);
+    const result = await startTask(ctx, sourceFor(ctx), wf, { task, cwd });
     return { ...result, handoverPath: rel(ctx, result.handoverPath), ...(await persisted(ctx, `handover: ${ctx.user.name} ${task}`)) };
   }));
 
@@ -146,7 +154,7 @@ export function createServer(deps: ServerDeps): McpServer {
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
-    return resumeTask(ctx, deps.asana(ctx), task);
+    return resumeTask(ctx, deps.source(ctx), task);
   }));
 
   server.registerTool('remember_site', {
@@ -168,8 +176,9 @@ export function createServer(deps: ServerDeps): McpServer {
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
-    const asana = asanaFor(ctx);
-    const details = { task: await asana.getTask(task), comments: await asana.getComments(task, 20) };
+    const source = sourceFor(ctx);
+    const id = source.normalizeId(task);
+    const details = { task: await source.ticket(id), comments: await source.comments(id, 20) };
     return JSON.stringify(details, null, 2);
   }));
 
@@ -185,7 +194,8 @@ export function createServer(deps: ServerDeps): McpServer {
     optionalSite(args.site);
     let asanaModifiedAt: string | undefined;
     try {
-      asanaModifiedAt = (await deps.asana(ctx)?.getTask(args.task))?.modified_at;
+      const source = deps.source(ctx);
+      asanaModifiedAt = source ? (await source.ticket(source.normalizeId(args.task))).modifiedAt : undefined;
     } catch {
       asanaModifiedAt = undefined;
     }

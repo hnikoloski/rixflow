@@ -1,11 +1,12 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { normalizeDir } from './config';
-import { fieldValue, type AsanaTask } from './asana';
+import type { Mapped } from './mapping';
+import { fieldValue, type Ticket } from './tickets/types';
 import type { SiteDef } from './team';
 import { assertSiteCode, type UserConfig } from './types';
 
-// Site codes come from Asana field text, so only well-formed codes are looked up.
-function isSiteCode(v: string): boolean {
+// Site codes come from ticket field text, so only well-formed codes are looked up.
+export function isSiteCode(v: string): boolean {
   try {
     assertSiteCode(v);
     return true;
@@ -34,7 +35,7 @@ export function folderFor(code: string, sites: Record<string, SiteDef>, user: Us
   return folder;
 }
 
-export function valueFromChain(chain: AsanaTask[], prefix: string): string | null {
+export function valueFromChain(chain: Ticket[], prefix: string): string | null {
   for (const t of chain) {
     const v = fieldValue(t, prefix);
     if (v) return v;
@@ -42,20 +43,16 @@ export function valueFromChain(chain: AsanaTask[], prefix: string): string | nul
   return null;
 }
 
-export function resolveSite(chain: AsanaTask[], sites: Record<string, SiteDef>, user: UserConfig): SiteResolution {
+// A remembered choice wins; otherwise the codes the workflow mapping found in the chain.
+export function resolveSite(chain: Ticket[], mapped: Mapped, sites: Record<string, SiteDef>, user: UserConfig): SiteResolution {
   if (chain.length === 0) return { codes: [], folder: null, source: 'none' };
-  const remembered = Object.hasOwn(user.taskSites, chain[0].gid) ? user.taskSites[chain[0].gid] : undefined;
+  const remembered = Object.hasOwn(user.taskSites, chain[0].id) ? user.taskSites[chain[0].id] : undefined;
   if (remembered && isSiteCode(remembered)) return { codes: [remembered], folder: folderFor(remembered, sites, user), source: 'remembered' };
-  for (let i = 0; i < chain.length; i++) {
-    const value = fieldValue(chain[i], 'Website');
-    if (!value) continue;
-    const codes = value.split(',').map((s) => s.trim()).filter(isSiteCode);
-    if (codes.length === 0) continue;
-    return {
-      codes,
-      folder: codes.length === 1 ? folderFor(codes[0], sites, user) : null,
-      source: i === 0 ? 'task' : 'parent',
-    };
-  }
-  return { codes: [], folder: null, source: 'none' };
+  const codes = mapped.codes.filter(isSiteCode);
+  if (codes.length === 0) return { codes: [], folder: null, source: 'none' };
+  return {
+    codes,
+    folder: codes.length === 1 ? folderFor(codes[0], sites, user) : null,
+    source: (mapped.codesAt ?? 0) === 0 ? 'task' : 'parent',
+  };
 }

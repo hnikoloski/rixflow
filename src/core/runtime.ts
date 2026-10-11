@@ -1,16 +1,32 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { AsanaClient, type AsanaReader } from './asana';
+import { AsanaClient } from './asana';
 import { Git, NO_REMOTE_DETAIL, commitAll, detailLine, ownedPaths, pendingCount, sync, type SyncResult } from './git';
 import { acquireLock } from './lock';
 import { mergeHubGitignore } from './template';
+import { asanaSource } from './tickets/asana';
+import type { TicketSource } from './tickets/types';
 import { getToken } from './token';
 import type { Ctx } from './types';
+import { loadWorkflow, type Workflow } from './workflow';
 
-export function makeAsana(ctx: Ctx, env: Record<string, string | undefined> = process.env): AsanaReader | null {
-  if (!ctx.user.asanaWorkspace) return null;
+// The ticket source for the hub's workflow, or null when it cannot be built (no workspace, no
+// token, or a tracker without a client yet). Throws BAD_CONFIG for an invalid workflow.yml.
+export function makeSource(
+  ctx: Ctx,
+  env: Record<string, string | undefined> = process.env,
+  wf: Workflow = loadWorkflow(ctx.hubDir),
+): TicketSource | null {
+  if (wf.tracker.type !== 'asana') return null; // Jira gets its client in a later step
+  const workspace = wf.tracker.workspace ?? ctx.user.asanaWorkspace;
+  if (!workspace) return null;
   const token = getToken(ctx.configDir, env, undefined, ctx.user.name);
-  return token ? new AsanaClient(token) : null;
+  if (!token) return null;
+  return asanaSource(new AsanaClient(token), {
+    workspace,
+    statusField: wf.status.field ?? undefined,
+    priorityField: wf.urgent.field ?? undefined,
+  });
 }
 
 export const TOOL_LOCK_WAIT_MS = 3_000;

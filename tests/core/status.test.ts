@@ -6,14 +6,15 @@ import { buildStatus, emptyStatus, STATUS_VERSION, type StatusDeps, type StatusO
 import { sendMessage } from '../../src/core/messages';
 import { writeCheckpoint, writeHandover } from '../../src/core/notes';
 import { HubError, type Ctx } from '../../src/core/types';
-import { fakeAsana, field, task } from '../fixtures/asana';
+import { LEGACY_WORKFLOW } from '../../src/core/workflow';
+import { asSource, fakeAsanaSource, fakeSource, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 
 const opts = (o: Partial<StatusOptions> = {}): StatusOptions => ({ cwd: '/nowhere', asana: false, refresh: false, sync: false, ...o });
 const deps = (ctx: Ctx, o: Partial<StatusDeps> = {}): StatusDeps => ({
   loadCtx: () => ctx,
   sync: async () => ({ status: 'ok', detail: '', pending: 0, conflicts: [] }),
-  asana: () => null,
+  source: () => null,
   ...o,
 });
 const as = (ctx: Ctx, name: string): Ctx => ({ ...ctx, user: { ...ctx.user, name } });
@@ -26,7 +27,7 @@ describe('buildStatus', () => {
     const s = await buildStatus(opts(), {
       loadCtx: () => { throw new HubError('NOT_INITIALIZED', 'no config'); },
       sync: async () => null,
-      asana: () => null,
+      source: () => null,
     });
     expect(s).toMatchObject({ v: STATUS_VERSION, initialized: false, user: null, current: null, inbox: [], paused: [], sprint: null });
     expect(s.problems).toEqual(['setup needed']);
@@ -155,14 +156,14 @@ describe('buildStatus', () => {
   it('fetches the sprint from Asana, caches it, and serves the cache within 10 minutes', async () => {
     const ctx = makeCtx();
     const sprint = { project: { gid: '9', name: 'P' }, section: { gid: '8', name: 'Sprint 41 | 5.10 - 9.10' } };
-    const asana = fakeAsana([task({ gid: '111', name: 'Banner', memberships: [sprint], custom_fields: [field('Website', 'AC'), field('Status', 'TODO')], due_on: '2026-10-09' })]);
-    const first = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    const asana = fakeAsanaSource([task({ gid: '111', name: 'Banner', memberships: [sprint], custom_fields: [field('Website', 'AC'), field('Status', 'TODO')], due_on: '2026-10-09' })]);
+    const first = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => asana }));
     expect(first.sprint).toMatchObject({ name: 'Sprint 41 | 5.10 - 9.10' });
     expect(first.sprint!.items).toEqual([{ task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: '2026-10-09', paused: false }]);
     const calls = asana.calls.length;
-    await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    await buildStatus(opts({ asana: true }), deps(ctx, { source: () => asana }));
     expect(asana.calls.length).toBe(calls);
-    await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => asana }));
+    await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { source: () => asana }));
     expect(asana.calls.length).toBeGreaterThan(calls);
     expect(JSON.parse(readFileSync(join(ctx.configDir, 'status-cache.json'), 'utf8')).user).toBe('hristijan');
   });
@@ -171,19 +172,19 @@ describe('buildStatus', () => {
     const ctx = makeCtx();
     handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
     const sprint = { project: { gid: '9', name: 'P' }, section: { gid: '8', name: 'Sprint 41 | 5.10 - 9.10' } };
-    const asana = fakeAsana([task({ gid: '111', name: 'Banner overlap', memberships: [sprint], custom_fields: [field('Status', 'TESTING')], due_on: '2026-10-09' })]);
-    const s = await buildStatus(opts({ task: '111', asana: true }), deps(ctx, { asana: () => asana }));
+    const asana = fakeAsanaSource([task({ gid: '111', name: 'Banner overlap', memberships: [sprint], custom_fields: [field('Status', 'TESTING')], due_on: '2026-10-09' })]);
+    const s = await buildStatus(opts({ task: '111', asana: true }), deps(ctx, { source: () => asana }));
     expect(s.current).toMatchObject({ status: 'TESTING', due: '2026-10-09' });
   });
 
   it('without --asana serves the cached sprint, however old, and never calls Asana', async () => {
     const ctx = makeCtx();
     writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
-      fetchedAt: '2026-10-01T08:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41',
+      fetchedAt: '2026-10-01T08:00:00.000Z', user: 'hristijan', scope: `asana:${ctx.user.asanaWorkspace}`, name: 'Sprint 41',
       items: [{ task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: null, paused: false }],
     }));
-    const asana = fakeAsana([]);
-    const s = await buildStatus(opts({ asana: false }), deps(ctx, { asana: () => asana }));
+    const asana = fakeAsanaSource([]);
+    const s = await buildStatus(opts({ asana: false }), deps(ctx, { source: () => asana }));
     expect(s.sprint).toMatchObject({ name: 'Sprint 41', fetchedAt: '2026-10-01T08:00:00.000Z' });
     expect(asana.calls).toEqual([]);
     expect(s.problems).toEqual([]);
@@ -192,37 +193,37 @@ describe('buildStatus', () => {
   it('keeps the cached sprint when the token goes missing', async () => {
     const ctx = makeCtx();
     writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
-      fetchedAt: '2026-10-01T08:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41', items: [],
+      fetchedAt: '2026-10-01T08:00:00.000Z', user: 'hristijan', scope: `asana:${ctx.user.asanaWorkspace}`, name: 'Sprint 41', items: [],
     }));
-    const s = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => null }));
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => null }));
     expect(s.sprint).toMatchObject({ name: 'Sprint 41' });
-    expect(s.problems).toContain('asana token missing');
+    expect(s.problems).toContain('tickets token missing');
   });
 
   it('counts the time before buildStatus (process start) against the budget', async () => {
     const ctx = makeCtx();
-    const slow = { ...fakeAsana([]), getMyTasks: () => new Promise<never>(() => {}) };
+    const slow = { ...fakeAsanaSource([]), myTickets: () => new Promise<never>(() => {}) };
     const t0 = Date.now();
-    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => slow, budgetMs: 10_000, startedAt: Date.now() - 10_000 }));
+    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { source: () => slow, budgetMs: 10_000, startedAt: Date.now() - 10_000 }));
     expect(Date.now() - t0).toBeLessThan(500);
-    expect(s.problems).toContain('asana timed out');
+    expect(s.problems).toContain('tickets timed out');
   }, 2_000);
 
   it('treats a cache from the future as stale', async () => {
     const ctx = makeCtx();
     writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
-      fetchedAt: '2099-01-01T00:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'old', items: [],
+      fetchedAt: '2099-01-01T00:00:00.000Z', user: 'hristijan', scope: `asana:${ctx.user.asanaWorkspace}`, name: 'old', items: [],
     }));
-    const asana = fakeAsana([]);
-    await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    const asana = fakeAsanaSource([]);
+    await buildStatus(opts({ asana: true }), deps(ctx, { source: () => asana }));
     expect(asana.calls).toContain('getMyTasks');
   });
 
   it('ignores a corrupt cache', async () => {
     const ctx = makeCtx();
     writeFileSync(join(ctx.configDir, 'status-cache.json'), '{"fetchedAt": "2026-10-08T09:59');
-    const asana = fakeAsana([]);
-    const s = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    const asana = fakeAsanaSource([]);
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => asana }));
     expect(asana.calls).toContain('getMyTasks');
     expect(s.problems).toEqual([]);
   });
@@ -230,10 +231,10 @@ describe('buildStatus', () => {
   it('reports a missing token and an unreachable Asana as problems', async () => {
     const ctx = makeCtx();
     const noToken = await buildStatus(opts({ asana: true }), deps(ctx));
-    expect(noToken.problems).toContain('asana token missing');
-    const down = { ...fakeAsana([]), getMyTasks: async () => { throw new Error('ECONNRESET'); } };
-    const unreachable = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => down }));
-    expect(unreachable.problems).toContain('asana unreachable');
+    expect(noToken.problems).toContain('tickets token missing');
+    const down = { ...fakeAsanaSource([]), myTickets: async () => { throw new Error('ECONNRESET'); } };
+    const unreachable = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { source: () => down }));
+    expect(unreachable.problems).toContain('tickets unreachable');
     expect(unreachable.sprint).toBeNull();
   });
 
@@ -242,41 +243,72 @@ describe('buildStatus', () => {
     const hang = ((_url: URL, init: RequestInit) => new Promise<Response>((_ok, fail) => {
       init.signal?.addEventListener('abort', () => fail(init.signal?.reason));
     })) as unknown as typeof fetch;
-    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => new AsanaClient('tok', hang, undefined, 20) }));
-    expect(s.problems).toContain('asana unreachable');
+    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { source: () => asSource(new AsanaClient('tok', hang, undefined, 20)) }));
+    expect(s.problems).toContain('tickets unreachable');
     expect(s.sprint).toBeNull();
   }, 2_000);
 
   it('stops a slow Asana at the overall budget, even when each request answers in time', async () => {
     const ctx = makeCtx();
-    const slow = { ...fakeAsana([]), getMyTasks: () => new Promise<never>(() => {}) };
+    const slow = { ...fakeAsanaSource([]), myTickets: () => new Promise<never>(() => {}) };
     const t0 = Date.now();
-    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => slow, budgetMs: 50 }));
+    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { source: () => slow, budgetMs: 50 }));
     expect(Date.now() - t0).toBeLessThan(1_000);
-    expect(s.problems).toContain('asana timed out');
+    expect(s.problems).toContain('tickets timed out');
     expect(s.sprint).toBeNull();
   }, 2_000);
 
   it('counts the sync against the same budget', async () => {
     const ctx = makeCtx();
     const sync = () => new Promise<null>((done) => setTimeout(() => done(null), 60));
-    const slow = { ...fakeAsana([]), getMyTasks: () => new Promise<never>(() => {}) };
+    const slow = { ...fakeAsanaSource([]), myTickets: () => new Promise<never>(() => {}) };
     const t0 = Date.now();
-    const s = await buildStatus(opts({ asana: true, refresh: true, sync: true }), deps(ctx, { sync, asana: () => slow, budgetMs: 80 }));
+    const s = await buildStatus(opts({ asana: true, refresh: true, sync: true }), deps(ctx, { sync, source: () => slow, budgetMs: 80 }));
     expect(Date.now() - t0).toBeLessThan(500);
-    expect(s.problems).toContain('asana timed out');
+    expect(s.problems).toContain('tickets timed out');
   }, 2_000);
 
   it('keeps showing a stale sprint when the refresh fails, and says so', async () => {
     const ctx = makeCtx();
     writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
-      fetchedAt: '2026-10-08T08:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41',
+      fetchedAt: '2026-10-08T08:00:00.000Z', user: 'hristijan', scope: `asana:${ctx.user.asanaWorkspace}`, name: 'Sprint 41',
       items: [{ task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: null, paused: false }],
     }));
-    const down = { ...fakeAsana([]), getMyTasks: async () => { throw new HubError('ASANA_NETWORK', 'x'); } };
-    const s = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => down }));
+    const down = { ...fakeAsanaSource([]), myTickets: async () => { throw new HubError('ASANA_NETWORK', 'x'); } };
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => down }));
     expect(s.sprint).toMatchObject({ name: 'Sprint 41', fetchedAt: '2026-10-08T08:00:00.000Z' });
-    expect(s.problems).toContain('asana unreachable');
+    expect(s.problems).toContain('tickets unreachable');
+  });
+
+  it('ties the cache to the tracker scope and ignores a v1 cache', async () => {
+    const ctx = makeCtx();
+    const item = { task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: null, paused: false };
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-08T09:59:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41', items: [item],
+    }));
+    expect((await buildStatus(opts(), deps(ctx))).sprint).toBeNull();
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-08T09:59:00.000Z', user: 'hristijan', scope: 'jira:https://jira.example.com', name: 'Sprint 41', items: [item],
+    }));
+    expect((await buildStatus(opts(), deps(ctx))).sprint).toBeNull();
+    const jira = { ...LEGACY_WORKFLOW, legacy: false, tracker: { type: 'jira' as const, url: 'https://jira.example.com', flavor: 'cloud' as const, projects: ['WEB'] } };
+    expect((await buildStatus(opts(), deps(ctx, { workflow: () => jira }))).sprint).toMatchObject({ name: 'Sprint 41' });
+  });
+
+  it('reports an invalid workflow as a tickets problem and keeps the other sections', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.hubDir, 'config', 'workflow.yml'), 'tracker:\n  type: trello\n');
+    sendMessage(as(ctx, 'pm'), { to: 'hristijan', type: 'request', body: 'hi' });
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => fakeAsanaSource([]) }));
+    expect(s.problems).toEqual(['tickets: workflow invalid']);
+    expect(s.inbox).toHaveLength(1);
+  });
+
+  it('reports any *_AUTH error as a rejected token', async () => {
+    const ctx = makeCtx();
+    const denied = { ...fakeSource([]), myTickets: async () => { throw new HubError('JIRA_AUTH', 'no'); } };
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => denied }));
+    expect(s.problems).toEqual(['tickets token rejected']);
   });
 
   it('emptyStatus has the full shape', () => {

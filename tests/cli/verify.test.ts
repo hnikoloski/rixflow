@@ -8,7 +8,7 @@ import { bootstrapHub } from '../../src/core/template';
 import { HubError } from '../../src/core/types';
 import { buildBrief } from '../../src/core/brief';
 import { writeDoc } from '../../src/core/hubfs';
-import { field, task } from '../fixtures/asana';
+import { asTicket, field, task } from '../fixtures/asana';
 
 const ENV = {
   ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
@@ -132,7 +132,7 @@ describe('verifyStaged accepts what the scrubber produces', () => {
       notes: 'Stage: https://acmestage:a1b2c3d4@stage.acme.example.com/en/ and repo https://dev@bitbucket.org/t/r.git, sftp://user:pw@h.sftp.example.com/',
       custom_fields: [field('Stage link - Web', 'https://acmestage:a1b2c3d4@stage.acme.example.com/en/pricing/')],
     });
-    writeDoc(join(dir, 'people/hristijan/handovers/101.md'), { type: 'handover', task: '101', project_dir: '/p' }, buildBrief(leaky, [leaky], []));
+    writeDoc(join(dir, 'people/hristijan/handovers/101.md'), { type: 'handover', task: '101', project_dir: '/p' }, buildBrief(asTicket(leaky), [asTicket(leaky)], [], 'Asana'));
     await git.run(['add', '-A']);
     const staged = await git.run(['show', ':people/hristijan/handovers/101.md']);
     expect(staged).toContain('https://[redacted]@stage.acme.example.com');

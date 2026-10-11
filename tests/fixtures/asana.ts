@@ -1,4 +1,5 @@
 import type { AsanaComment, AsanaReader, AsanaTask } from '../../src/core/asana';
+import { asanaSource, toTicket } from '../../src/core/tickets/asana';
 import type { Discovery, Ticket, TicketComment, TicketSource } from '../../src/core/tickets/types';
 
 export function task(overrides: Partial<AsanaTask> & { gid: string }): AsanaTask {
@@ -39,6 +40,18 @@ export function fakeAsana(
     },
   };
 }
+
+// The Asana source over a reader (fake or real), in the test workspace '111' that makeCtx uses.
+export function asSource(reader: AsanaReader & { calls?: string[] }): TicketSource & Discovery & { calls: string[] } {
+  return Object.assign(asanaSource(reader, { workspace: '111' }), { calls: reader.calls ?? [] });
+}
+
+export function fakeAsanaSource(...args: Parameters<typeof fakeAsana>): TicketSource & Discovery & { calls: string[] } {
+  return asSource(fakeAsana(...args));
+}
+
+// An Asana task as the core sees it.
+export const asTicket = (t: AsanaTask): Ticket => toTicket(t, { workspace: '111' });
 
 export function ticket(overrides: Partial<Ticket> & { id: string }): Ticket {
   return {

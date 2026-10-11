@@ -6,7 +6,7 @@ import { runCheck } from '../../src/core/check';
 import { summarizeSession } from '../../src/core/summarize';
 import { SUMMARY_LOG, SUMMARY_LOG_MAX_LINES, logSummary } from '../../src/core/summarylog';
 import { HubError } from '../../src/core/types';
-import { fakeAsana } from '../fixtures/asana';
+import { fakeAsanaSource } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 
 const fixture = fileURLToPath(new URL('../fixtures/transcript.jsonl', import.meta.url));
@@ -76,7 +76,7 @@ describe('summary-errors.log (I5)', () => {
 
   it('the next session brief shows the last failure once', async () => {
     const ctx = makeCtx();
-    const deps = { asana: fakeAsana([]), sync: async () => null };
+    const deps = { source: fakeAsanaSource([]), sync: async () => null };
     logSummary(ctx.configDir, { sessionId: 's1', outcome: 'fail', reason: 'claude run failed', detail: 'x' });
     expect(await runCheck(ctx, deps, 'prompt')).toBe('');
     const later = (iso: string) => ({ ...ctx, now: () => new Date(iso) });

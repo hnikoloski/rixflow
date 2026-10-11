@@ -2,10 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AsanaClient, fieldValue, parentChain } from '../../src/core/asana';
+import { AsanaClient } from '../../src/core/asana';
 import { KEYCHAIN_TIMEOUT_MS, getToken, setToken } from '../../src/core/token';
 import { HubError } from '../../src/core/types';
-import { fakeAsana, field, task } from '../fixtures/asana';
 
 function fakeFetch(pages: unknown[]) {
   const calls: Array<{ url: string; method: string; auth: string }> = [];
@@ -163,23 +162,6 @@ describe('AsanaClient', () => {
   });
 });
 
-describe('field helpers', () => {
-  it('finds fields by prefix and ignores empty values', () => {
-    const t = task({ gid: '1', custom_fields: [field('Website - Web', 'GL, AC'), field('Status - Web', null)] });
-    expect(fieldValue(t, 'website')).toBe('GL, AC');
-    expect(fieldValue(t, 'Status')).toBeNull();
-  });
-  it('walks the parent chain', async () => {
-    const asana = fakeAsana([
-      task({ gid: '3', parent: { gid: '2', name: 'p' } }),
-      task({ gid: '2', parent: { gid: '1', name: 'gp' } }),
-      task({ gid: '1' }),
-    ]);
-    const chain = await parentChain(asana, await asana.getTask('3'));
-    expect(chain.map((t) => t.gid)).toEqual(['3', '2', '1']);
-  });
-});
-
 describe('token storage', () => {
   const noKeychain = () => { throw new Error('no keychain'); };
   const tmp = () => mkdtempSync(join(tmpdir(), 'tok-'));
@@ -262,26 +244,7 @@ describe('token storage', () => {
   });
 });
 
-describe('hardening: parent chain and token edge cases', () => {
-  it('stops at a parent cycle without repeating gids', async () => {
-    const asana = fakeAsana([
-      task({ gid: '1', parent: { gid: '2', name: 'b' } }),
-      task({ gid: '2', parent: { gid: '1', name: 'a' } }),
-    ]);
-    const chain = await parentChain(asana, await asana.getTask('1'));
-    expect(chain.map((t) => t.gid)).toEqual(['1', '2']);
-  });
-
-  it('caps the parent walk at max parents', async () => {
-    const tasks = Array.from({ length: 10 }, (_, i) =>
-      task({ gid: String(i + 1), parent: i < 9 ? { gid: String(i + 2), name: 'p' } : null }),
-    );
-    const asana = fakeAsana(tasks);
-    const chain = await parentChain(asana, await asana.getTask('1'), 3);
-    expect(chain.map((t) => t.gid)).toEqual(['1', '2', '3', '4']);
-    expect(asana.calls.filter((c) => c.startsWith('getTask:'))).toHaveLength(4);
-  });
-
+describe('hardening: token edge cases', () => {
   it('trims ASANA_TOKEN from the environment', () => {
     const noKeychain = () => { throw new Error('no keychain'); };
     expect(getToken('/nope', { ASANA_TOKEN: '  envtok\n' }, noKeychain)).toBe('envtok');

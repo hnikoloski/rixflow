@@ -86,10 +86,10 @@ describe('plugin package', () => {
       expect(read(src), src).not.toMatch(/run:? hub (init|token)/i);
     }
   });
-  it('resume says when Asana could not be checked (I9)', () => {
+  it('resume says when the ticket tracker could not be checked (I9)', () => {
     const resume = read('plugin/commands/resume.md');
-    expect(resume).toContain('asanaUnavailable');
-    expect(resume).toContain('could not check Asana for changes');
+    expect(resume).toContain('ticketsUnavailable');
+    expect(resume).toContain('could not check the ticket tracker for changes');
   });
   it('checkpoint stores the stash by SHA and message; resume never looks it up by index (M2)', () => {
     const checkpoint = read('plugin/commands/checkpoint.md');

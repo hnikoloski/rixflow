@@ -1,12 +1,12 @@
-import { fieldValue, parentChain, type AsanaReader, type AsanaTask } from './asana';
+import { mapTicket, needsParents, type Mapped } from './mapping';
 import { listInbox, listWaiting, type Message, type MessageType } from './messages';
 import { listCheckpoints, type Checkpoint } from './notes';
-import { resolveSite, valueFromChain } from './sites';
+import { resolveSite } from './sites';
 import { scrub } from './scrub';
-import { isCurrentSprint } from './sprint';
 import { loadSites } from './team';
-import { hubCommand } from './command';
+import { parentChain, type Ticket, type TicketSource } from './tickets/types';
 import { HubError, type Ctx } from './types';
+import type { Workflow } from './workflow';
 
 export interface PlateItem {
   n: number;
@@ -32,25 +32,20 @@ export interface Plate {
   waiting: Array<{ id: string; to: string; title: string; ageDays: number }>;
 }
 
-const URGENT_PRIORITY = /^(urgent|critical|p0|highest)$/i;
-const URGENT_NAME = /hotfix|urgent|\bp0\b/i;
 const INBOX_STATUSES = new Set(['new', 'read']);
-
-function sectionOf(chain: AsanaTask[]): string | null {
-  for (const t of chain) for (const m of t.memberships ?? []) if (m.section) return m.section.name;
-  return null;
-}
 
 // Terminal-bound text: keep the first line and replace C0/C1 control characters and bidi
 // marks/overrides so titles cannot move the cursor, inject escape sequences or reorder text.
 const clean = (text: string) =>
   text.trim().split('\n')[0].slice(0, 80).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ');
-// Every Asana- or message-derived string passes through scrub before it reaches the model or terminal.
+// Every ticket- or message-derived string passes through scrub before it reaches the model or terminal.
 export const display = (text: string) => clean(scrub(text));
 const byDue = (a: PlateItem, b: PlateItem) => (a.due ?? '9999').localeCompare(b.due ?? '9999');
 
+// Placement: done tickets are dropped; urgent → Urgent; in progress or paused → In progress;
+// in the current sprint → This sprint; everything else (waiting included) → Backlog.
 export function buildPlate(input: {
-  tasks: Array<{ task: AsanaTask; chain: AsanaTask[]; sites: string[] }>;
+  tasks: Array<{ ticket: Ticket; mapped: Mapped }>;
   inbox: Message[];
   checkpoints: Checkpoint[];
   waiting: Message[];
@@ -58,19 +53,17 @@ export function buildPlate(input: {
 }): Plate {
   const paused = new Set(input.checkpoints.map((c) => c.task));
   const plate: Plate = { sprintName: null, urgent: [], inProgress: [], sprint: [], inbox: [], backlog: [], waiting: [] };
-  for (const { task, chain, sites } of input.tasks) {
-    const status = valueFromChain([task], 'Status');
-    const priority = valueFromChain(chain, 'Priority');
-    const section = sectionOf(chain);
+  for (const { ticket, mapped } of input.tasks) {
+    if (mapped.bucket === 'done') continue;
     const item: PlateItem = {
-      n: 0, kind: 'task', ref: task.gid, title: display(task.name), sites, status: status === null ? null : display(status), priority,
-      due: task.due_on ?? null, paused: paused.has(task.gid),
+      n: 0, kind: 'task', ref: ticket.id, title: display(ticket.title), sites: mapped.codes,
+      status: ticket.status === null ? null : display(ticket.status), priority: ticket.priority,
+      due: ticket.due, paused: paused.has(ticket.id),
     };
-    const inSprint = !!section && isCurrentSprint(section, input.now);
-    if (inSprint) plate.sprintName = display(section);
-    if ((priority && URGENT_PRIORITY.test(priority)) || URGENT_NAME.test(task.name)) plate.urgent.push(item);
-    else if (item.paused || /in progress/i.test(status ?? '')) plate.inProgress.push(item);
-    else if (inSprint) plate.sprint.push(item);
+    if (mapped.sprint) plate.sprintName = display(mapped.sprint);
+    if (mapped.urgent) plate.urgent.push(item);
+    else if (item.paused || mapped.bucket === 'in_progress') plate.inProgress.push(item);
+    else if (mapped.sprint) plate.sprint.push(item);
     else plate.backlog.push(item);
   }
   for (const m of input.inbox.filter((x) => INBOX_STATUSES.has(x.status))) {
@@ -98,7 +91,7 @@ function line(item: PlateItem): string {
   return `${item.n}. ${tag}${item.title}${extra ? ` — ${extra}` : ''} (${item.ref})`;
 }
 
-// Only the fields the plate shows are rendered. Asana link fields and permalinks are never read here.
+// Only the fields the plate shows are rendered. Link fields and permalinks are never read here.
 export function renderPlate(plate: Plate): string {
   const out: string[] = [];
   if (plate.sprintName) out.push(`**${plate.sprintName}**`, '');
@@ -132,44 +125,44 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
-// Reads only. A failed parent fetch degrades that task to its own fields; auth errors still surface.
-// Each parent gid is fetched once per run: siblings share the same promise, failures included.
-export async function gatherPlate(ctx: Ctx, asana: AsanaReader): Promise<Plate> {
-  const workspace = ctx.user.asanaWorkspace;
-  if (!workspace) throw new HubError('NO_WORKSPACE', `No Asana workspace configured (run in a terminal: ${hubCommand('init')})`);
+const isAuthError = (err: unknown) => err instanceof HubError && err.code.endsWith('_AUTH');
+
+// Reads only. A failed parent fetch degrades that ticket to its own fields; auth errors still surface.
+// Each parent id is fetched once per run: siblings share the same promise, failures included.
+export async function gatherPlate(ctx: Ctx, source: TicketSource, wf: Workflow): Promise<Plate> {
   const sites = loadSites(ctx.hubDir);
-  const mine = await asana.getMyTasks(workspace);
-  const fetches = new Map<string, Promise<AsanaTask>>(mine.map((t) => [t.gid, Promise.resolve(t)]));
-  const cached: AsanaReader = {
-    getMyTasks: (w) => asana.getMyTasks(w),
-    getComments: (g, l) => asana.getComments(g, l),
-    getTask: (gid) => {
-      let p = fetches.get(gid);
+  const now = ctx.now();
+  const mine = await source.myTickets();
+  const fetches = new Map<string, Promise<Ticket>>(mine.map((t) => [t.id, Promise.resolve(t)]));
+  const cached: Pick<TicketSource, 'ticket'> = {
+    ticket: (id) => {
+      let p = fetches.get(id);
       if (!p) {
-        p = asana.getTask(gid);
-        fetches.set(gid, p);
+        p = source.ticket(id);
+        fetches.set(id, p);
       }
       return p;
     },
   };
-  const tasks = await mapLimit(mine, PARENT_FETCH_LIMIT, async (task) => {
-    const needsParents = !task.memberships?.some((m) => m.section) || !fieldValue(task, 'Website');
-    let chain: AsanaTask[] = [task];
-    if (needsParents) {
+  const tasks = await mapLimit(mine, PARENT_FETCH_LIMIT, async (ticket) => {
+    let chain: Ticket[] = [ticket];
+    if (needsParents(ticket, wf)) {
       try {
-        chain = await parentChain(cached, task);
+        chain = await parentChain(cached, ticket);
       } catch (err) {
-        if (err instanceof HubError && err.code === 'ASANA_AUTH') throw err;
-        chain = [task];
+        if (isAuthError(err)) throw err;
+        chain = [ticket];
       }
     }
-    return { task, chain, sites: resolveSite(chain, sites, ctx.user).codes };
+    const mapped = mapTicket(chain, wf, now);
+    // The plate shows the resolved site, so a remembered choice wins over the mapped codes.
+    return { ticket, mapped: { ...mapped, codes: resolveSite(chain, mapped, sites, ctx.user).codes } };
   });
   return buildPlate({
     tasks,
     inbox: listInbox(ctx, ['new', 'read']),
     checkpoints: listCheckpoints(ctx),
     waiting: listWaiting(ctx, 2),
-    now: ctx.now(),
+    now,
   });
 }

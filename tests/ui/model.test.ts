@@ -6,7 +6,7 @@ import {
 import type { Status } from '../../ui/types/status';
 
 const base = (o: Partial<Status> = {}): Status => ({
-  v: 1, at: '2026-10-10T18:00:00.000Z', user: 'hristijan', initialized: true,
+  v: 2, at: '2026-10-10T18:00:00.000Z', user: 'hristijan', initialized: true,
   sync: { status: 'ok', pending: 0, detail: '' }, current: null, inbox: [], paused: [], sprint: null, problems: [], ...o,
 });
 const msg = (id: string, from = 'pm', status: 'new' | 'read' = 'new') =>
@@ -21,8 +21,8 @@ describe('parseStatus', () => {
     expect(parseStatus('{"v":1,')).toEqual({ ok: false, reason: 'invalid' });
     expect(parseStatus('null')).toEqual({ ok: false, reason: 'invalid' });
     expect(parseStatus(JSON.stringify({ ...base(), sync: null }))).toEqual({ ok: false, reason: 'invalid' });
-    expect(parseStatus(JSON.stringify({ ...base(), v: 2 }))).toEqual({ ok: false, reason: 'version' });
-    expect(STATUS_VERSION).toBe(1);
+    expect(parseStatus(JSON.stringify({ ...base(), v: 1 }))).toEqual({ ok: false, reason: 'version' });
+    expect(STATUS_VERSION).toBe(2);
   });
 });
 

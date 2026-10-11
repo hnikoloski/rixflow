@@ -5,12 +5,23 @@ import { folderFor, resolveSite } from '../../src/core/sites';
 import { buildPlate, gatherPlate, renderPlate } from '../../src/core/plate';
 import { sendMessage, type Message } from '../../src/core/messages';
 import { writeCheckpoint } from '../../src/core/notes';
+import { mapTicket } from '../../src/core/mapping';
+import type { AsanaTask } from '../../src/core/asana';
 import { HubError } from '../../src/core/types';
-import { fakeAsana, field, task } from '../fixtures/asana';
+import { LEGACY_WORKFLOW, type Workflow } from '../../src/core/workflow';
+import { asSource, asTicket, fakeAsana, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 
 const sites = { AC: { folder: 'acme' }, GL: { folder: 'globex-web' } };
 const user = { name: 'hristijan', role: 'dev' as const, projectsRoot: '/p', siteFolders: {}, taskSites: {} };
+const LEGACY = structuredClone(LEGACY_WORKFLOW) as Workflow;
+const NOW = new Date('2026-10-08T10:00:00Z');
+// resolveSite over an Asana chain, mapped with the legacy workflow.
+const site = (chain: AsanaTask[], u: typeof user = user) => {
+  const tickets = chain.map(asTicket);
+  return resolveSite(tickets, mapTicket(tickets, LEGACY, NOW), sites, u);
+};
+const entry = (t: AsanaTask, codes: string[]) => ({ ticket: asTicket(t), mapped: { ...mapTicket([asTicket(t)], LEGACY, NOW), codes } });
 const sprintSection = (name: string) => ({ project: { gid: '9', name: 'Growth Web Team Sprints' }, section: { gid: '8', name } });
 
 describe('sprint', () => {
@@ -48,24 +59,24 @@ describe('resolveSite', () => {
   it('uses the task field first, then the parent chain', () => {
     const parent = task({ gid: '1', custom_fields: [field('Website - Web', 'AC')] });
     const child = task({ gid: '2', parent: { gid: '1', name: 'p' }, custom_fields: [field('Website - Web', null)] });
-    expect(resolveSite([child, parent], sites, user)).toEqual({ codes: ['AC'], folder: '/p/acme', source: 'parent' });
-    expect(resolveSite([parent], sites, user).source).toBe('task');
+    expect(site([child, parent], user)).toEqual({ codes: ['AC'], folder: '/p/acme', source: 'parent' });
+    expect(site([parent]).source).toBe('task');
   });
   it('returns no folder for multi-site values so the user is asked', () => {
     const t = task({ gid: '3', custom_fields: [field('Website - Web', 'GL, AC')] });
-    expect(resolveSite([t], sites, user)).toEqual({ codes: ['GL', 'AC'], folder: null, source: 'task' });
+    expect(site([t], user)).toEqual({ codes: ['GL', 'AC'], folder: null, source: 'task' });
   });
   it('prefers a remembered choice and honours folder overrides', () => {
     const t = task({ gid: '3', custom_fields: [field('Website - Web', 'GL, AC')] });
     const u = { ...user, taskSites: { '3': 'GL' }, siteFolders: { GL: '/elsewhere/gl' } };
-    expect(resolveSite([t], sites, u)).toEqual({ codes: ['GL'], folder: '/elsewhere/gl', source: 'remembered' });
+    expect(site([t], u)).toEqual({ codes: ['GL'], folder: '/elsewhere/gl', source: 'remembered' });
     expect(folderFor('XX', sites, user)).toBeNull();
   });
   it('reports none when nothing is set anywhere', () => {
-    expect(resolveSite([task({ gid: '4' })], sites, user)).toEqual({ codes: [], folder: null, source: 'none' });
+    expect(site([task({ gid: '4' })], user)).toEqual({ codes: [], folder: null, source: 'none' });
   });
   it('reports none for an empty chain instead of throwing', () => {
-    expect(resolveSite([], sites, user)).toEqual({ codes: [], folder: null, source: 'none' });
+    expect(site([], user)).toEqual({ codes: [], folder: null, source: 'none' });
   });
 });
 
@@ -94,7 +105,7 @@ describe('buildPlate', () => {
       task({ gid: '13', name: '[Hotfix] checkout broken' }),
       task({ gid: '14', name: 'Doing', custom_fields: [field('Status - Web', 'In Progress')] }),
       task({ gid: '15', name: 'Paused one' }),
-    ].map((t) => ({ task: t, chain: [t], sites: ['AC'] }));
+    ].map((t) => entry(t, ['AC']));
     const plate = buildPlate({
       tasks, inbox: [msg], checkpoints: [{ task: '15', done: '', pending: '', blockers: '', resume: '' }], waiting: [], now,
     });
@@ -122,7 +133,7 @@ describe('buildPlate', () => {
 
   it('renders control characters in titles as spaces', () => {
     const t = task({ gid: '20', name: 'evil\u001b[2J title' });
-    const plate = buildPlate({ tasks: [{ task: t, chain: [t], sites: [] }], inbox: [], checkpoints: [], waiting: [], now });
+    const plate = buildPlate({ tasks: [entry(t, [])], inbox: [], checkpoints: [], waiting: [], now });
     expect(renderPlate(plate)).not.toContain('\u001b');
   });
 });
@@ -133,19 +144,14 @@ describe('gatherPlate', () => {
     const parent = task({ gid: '1', name: 'Components development on dev', custom_fields: [field('Website - Web', 'GL')], memberships: [sprintSection('Sprint 41 | 5.10 - 9.10')] });
     const sub = task({ gid: '2', name: 'Testimonial card', parent: { gid: '1', name: 'Components development on dev' } });
     const asana = fakeAsana([parent, sub], {}, ['2']);
-    const plate = await gatherPlate(ctx, asana);
+    const plate = await gatherPlate(ctx, asSource(asana), LEGACY);
     expect(plate.sprint[0]).toMatchObject({ ref: '2', sites: ['GL'] });
     expect(asana.calls).toEqual(['getMyTasks', 'getTask:1']);
-  });
-  it('fails clearly without a workspace', async () => {
-    const ctx = makeCtx();
-    ctx.user.asanaWorkspace = undefined;
-    await expect(gatherPlate(ctx, fakeAsana([]))).rejects.toMatchObject({ code: 'NO_WORKSPACE' });
   });
   it('shows tasks with a checkpoint as paused', async () => {
     const ctx = makeCtx();
     writeCheckpoint(ctx, { task: '5', done: '', pending: '', blockers: '', resume: '' });
-    const plate = await gatherPlate(ctx, fakeAsana([task({ gid: '5', name: 'Half done' })]));
+    const plate = await gatherPlate(ctx, asSource(fakeAsana([task({ gid: '5', name: 'Half done' })])), LEGACY);
     expect(plate.inProgress[0]).toMatchObject({ ref: '5', paused: true });
   });
   it('degrades a task whose parent fetch fails instead of crashing', async () => {
@@ -154,7 +160,7 @@ describe('gatherPlate', () => {
     const good = task({ gid: '3', name: 'Fine task', memberships: [sprintSection('Sprint 41 | 5.10 - 9.10')] });
     const base = fakeAsana([sub, good], {}, ['2', '3']);
     const asana = { ...base, getTask: async (gid: string) => { throw new HubError('ASANA_NETWORK', `no ${gid}`); } };
-    const plate = await gatherPlate(ctx, asana);
+    const plate = await gatherPlate(ctx, asSource(asana), LEGACY);
     expect(plate.backlog.map((i) => i.ref)).toEqual(['2']);
     expect(plate.backlog[0].sites).toEqual(['AC']);
     expect(plate.sprint.map((i) => i.ref)).toEqual(['3']);
@@ -164,7 +170,7 @@ describe('gatherPlate', () => {
     const sub = task({ gid: '2', name: 'Sub', parent: { gid: '1', name: 'p' } });
     const base = fakeAsana([sub], {}, ['2']);
     const asana = { ...base, getTask: async () => { throw new HubError('ASANA_AUTH', 'rejected'); } };
-    await expect(gatherPlate(ctx, asana)).rejects.toMatchObject({ code: 'ASANA_AUTH' });
+    await expect(gatherPlate(ctx, asSource(asana), LEGACY)).rejects.toMatchObject({ code: 'ASANA_AUTH' });
   });
   it('never writes to the hub and never renders link-field values', async () => {
     const ctx = makeCtx();
@@ -174,7 +180,7 @@ describe('gatherPlate', () => {
       custom_fields: [field('Staging link - Web', secret), field('Status - Web', 'In Progress')],
     });
     const before = readdirSync(ctx.hubDir, { recursive: true }).sort();
-    const plate = await gatherPlate(ctx, fakeAsana([t]));
+    const plate = await gatherPlate(ctx, asSource(fakeAsana([t])), LEGACY);
     expect(readdirSync(ctx.hubDir, { recursive: true }).sort()).toEqual(before);
     expect(renderPlate(plate)).not.toContain('hunter2');
     expect(renderPlate(plate)).not.toContain('example');
@@ -188,10 +194,10 @@ describe('plate output is scrubbed', () => {
       gid: '30', name: 'fix https://u:p@x.example.com/a', custom_fields: [field('Status - Web', 'Blocked https://u:p@x.example.com/s')],
       memberships: [sprintSection('Sprint 41 | 5.10 - 9.10 https://u:p@x.example.com/z')],
     });
-    const plate = buildPlate({ tasks: [{ task: t, chain: [t], sites: [] }], inbox: [], checkpoints: [], waiting: [], now });
+    const plate = buildPlate({ tasks: [entry(t, [])], inbox: [], checkpoints: [], waiting: [], now });
     const msg = { id: '2026-10-08-abcd', type: 'question', from: 'pm', to: 'hristijan', thread: '2026-10-08-abcd', status: 'new', created: now.toISOString(), body: 'see https://u:p@x.example.com/m\nmore', path: '/x' } as Message;
     const waiting = { ...msg, id: '2026-10-07-wxyz', from: 'hristijan', to: 'pm', body: 'wait https://u:p@x.example.com/w' } as Message;
-    const withMsg = buildPlate({ tasks: [{ task: t, chain: [t], sites: [] }], inbox: [msg], checkpoints: [], waiting: [waiting], now });
+    const withMsg = buildPlate({ tasks: [entry(t, [])], inbox: [msg], checkpoints: [], waiting: [waiting], now });
     const text = renderPlate(withMsg);
     expect(text).not.toContain('u:p@');
     expect(text).toContain('[redacted]');
@@ -205,18 +211,18 @@ describe('site lookups ignore inherited properties and bad codes', () => {
   it('does not throw on prototype names and resolves to none', () => {
     for (const value of ['constructor', 'toString']) {
       const t = task({ gid: '40', custom_fields: [field('Website - Web', value)] });
-      expect(resolveSite([t], sites, user)).toEqual({ codes: [], folder: null, source: 'none' });
+      expect(site([t], user)).toEqual({ codes: [], folder: null, source: 'none' });
     }
   });
   it('drops malformed codes from a multi-value field', () => {
     const t = task({ gid: '41', custom_fields: [field('Website - Web', 'constructor, GL')] });
-    expect(resolveSite([t], sites, user)).toEqual({ codes: ['GL'], folder: '/p/globex-web', source: 'task' });
+    expect(site([t], user)).toEqual({ codes: ['GL'], folder: '/p/globex-web', source: 'task' });
   });
   it('uses own properties only for overrides and site definitions', () => {
     expect(folderFor('constructor', sites, user)).toBeNull();
     expect(folderFor('toString', sites, user)).toBeNull();
     const t = task({ gid: '42', custom_fields: [field('Website - Web', 'AC')] });
-    expect(resolveSite([t], sites, { ...user, taskSites: {} as Record<string, string> }).folder).toBe('/p/acme');
+    expect(site([t], { ...user, taskSites: {} as Record<string, string> }).folder).toBe('/p/acme');
   });
 });
 
@@ -227,7 +233,7 @@ describe('gatherPlate parent fetches', () => {
     const base = fakeAsana(subs, {}, ['2', '3', '4']);
     let calls = 0;
     const asana = { ...base, getTask: async () => { calls++; throw new HubError('ASANA_NETWORK', 'down'); } };
-    const plate = await gatherPlate(ctx, asana);
+    const plate = await gatherPlate(ctx, asSource(asana), LEGACY);
     expect(calls).toBe(1);
     expect(plate.backlog.map((i) => i.ref).sort()).toEqual(['2', '3', '4']);
   });
@@ -247,7 +253,7 @@ describe('gatherPlate parent fetches', () => {
         return task({ gid, name: `P ${gid}` });
       },
     };
-    const plate = await gatherPlate(ctx, asana);
+    const plate = await gatherPlate(ctx, asSource(asana), LEGACY);
     expect(peak).toBeGreaterThan(1);
     expect(peak).toBeLessThanOrEqual(5);
     expect(plate.backlog).toHaveLength(12);
