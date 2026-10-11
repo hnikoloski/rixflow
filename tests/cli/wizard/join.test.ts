@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
-import { runJoin } from '../../../src/cli/wizard/join';
-import type { WizardDeps } from '../../../src/cli/wizard/connect';
+import { runJoin, withoutLogin } from '../../../src/cli/wizard/join';
+import { BAD_URL, type WizardDeps } from '../../../src/cli/wizard/connect';
 import type { AsanaTask } from '../../../src/core/asana';
 import { loadWorkflow, writeWorkflow, type Workflow } from '../../../src/core/workflow';
 import type { JiraAuth } from '../../../src/core/tickets/jira';
@@ -53,12 +53,16 @@ const asanaTask = (gid: string, name: string): AsanaTask => ({
   custom_fields: [{ name: 'Website', display_value: 'AC' }, { name: 'Status', display_value: 'In progress' }],
 });
 
-function fakeAsana(tasks: AsanaTask[]) {
+function fakeAsana(tasks: AsanaTask[], failures: string[] = []) {
   const tokens: string[] = [];
   const makeAsana = (token: string) => {
     tokens.push(token);
+    const fail = failures[tokens.length - 1];
     return {
-      getMe: async () => ({ gid: '42', name: 'Me', workspaces: [{ gid: '111', name: 'Acme' }] }),
+      getMe: async () => {
+        if (fail) throw new HubError(fail, 'raw error');
+        return { gid: '42', name: 'Me', workspaces: [{ gid: '111', name: 'Acme' }] };
+      },
       getMyTasks: async () => tasks,
       getTask: async (gid: string) => asanaTask(gid, 'parent'),
       getComments: async () => [],
@@ -67,10 +71,10 @@ function fakeAsana(tasks: AsanaTask[]) {
   return { tokens, makeAsana };
 }
 
-async function jiraHub(members = ['me', 'pm']) {
+async function jiraHub(members = ['me', 'pm'], wf: Workflow = JIRA_WF) {
   const h = await hubWithRemote(members);
   const setup = h.person('setup');
-  writeWorkflow(setup.hubDir, JIRA_WF);
+  writeWorkflow(setup.hubDir, wf);
   h.git(['-C', setup.hubDir, 'add', 'config/workflow.yml']);
   h.git(['-C', setup.hubDir, 'commit', '-q', '-m', 'chore: workflow']);
   h.git(['-C', setup.hubDir, 'push', '-q', 'origin', 'main']);
@@ -208,12 +212,20 @@ describe('runJoin', () => {
     expect(existsSync(m.hub)).toBe(false);
   });
 
-  it('a public hub with RIXFLOW_ALLOW_PUBLIC_HUB=1 still prints a warning', async () => {
+  it('a public hub with RIXFLOW_ALLOW_PUBLIC_HUB=1 still prints a warning, then joins', async () => {
     const h = await hubWithRemote();
-    const m = machine(h.root, 'me', { RIXFLOW_ALLOW_PUBLIC_HUB: '1', GIT_TERMINAL_PROMPT: '0' });
-    const io = scriptedIo(['https://example.invalid/acme/hub.git']);
-    await expect(runJoin(io, deps({ runGit: async () => ({ ok: true, stdout: '' }) }), m.env)).rejects.toThrow();
+    const url = 'https://example.invalid/acme/hub.git';
+    // Offline: git rewrites the public-looking URL to the local remote.
+    const m = machine(h.root, 'me', {
+      RIXFLOW_ALLOW_PUBLIC_HUB: '1', GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.${h.remote}.insteadOf`, GIT_CONFIG_VALUE_0: url,
+    });
+    const a = fakeAsana([asanaTask('1001', 'Acme homepage')]);
+    const io = scriptedIo([url, '1', join(m.home, 'p'), 'tok-1', 'y', 'n']);
+    await runJoin(io, deps({ runGit: async () => ({ ok: true, stdout: '' }), makeAsana: a.makeAsana }), m.env);
     expect(io.logs.join('\n')).toMatch(/WARNING: .*public/);
+    expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8')).name).toBe('me');
+    expect(io.logs[io.logs.length - 1]).toMatch(/^Done\./);
   });
 
   it('explains how to get added when the name is not on the team list', async () => {
@@ -238,5 +250,100 @@ describe('runJoin', () => {
     await runJoin(second, deps({ makeJira: j.makeJira }), m.env);
     expect(second.asked.some((q) => /Hub git URL/.test(q))).toBe(false);
     expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8')).name).toBe('me');
+  });
+
+  it('WORKFLOW_TOO_NEW stops with the update text and keeps the clone', async () => {
+    const h = await jiraHub(['me', 'pm'], { ...JIRA_WF, requires: '9.0.0' });
+    const m = machine(h.root, 'me');
+    const io = scriptedIo([h.remote]);
+    const err = await runJoin(io, deps({}), m.env).catch((e) => e);
+    expect(err).toMatchObject({ code: 'WORKFLOW_TOO_NEW' });
+    expect(err.message).toMatch(/needs RixFlow 9\.0\.0 or newer\. Update RixFlow/);
+    expect(existsSync(join(m.hub, '.git'))).toBe(true);
+  });
+
+  it('ASANA_AUTH and ASANA_NETWORK get plain words, then a retry succeeds', async () => {
+    const h = await hubWithRemote();
+    const m = machine(h.root, 'me');
+    const a = fakeAsana([asanaTask('1001', 'Acme homepage')], ['ASANA_AUTH', 'ASANA_NETWORK']);
+    const io = scriptedIo([h.remote, '1', join(m.home, 'p'), 'tok-a', 'tok-b', 'tok-c', 'y', 'n']);
+    await runJoin(io, deps({ makeAsana: a.makeAsana }), m.env);
+    const out = io.logs.join('\n');
+    expect(out).toContain('Asana did not accept that token.');
+    expect(out).toContain('Could not reach Asana. Check your network connection');
+    expect(out).not.toContain('raw error');
+    for (const t of ['tok-a', 'tok-b', 'tok-c']) expect(out).not.toContain(t);
+    expect(readFileSync(join(m.cfg, 'asana-token'), 'utf8')).toBe('tok-c');
+  });
+
+  it('self-hosted Jira asks for a personal access token only, no email', async () => {
+    const wf: Workflow = { ...JIRA_WF, tracker: { type: 'jira', url: 'https://jira.example.com/jira', flavor: 'server', projects: ['WEB', 'OPS'] } };
+    const h = await jiraHub(['me', 'pm'], wf);
+    const m = machine(h.root, 'me');
+    const j = fakeJira([ticket({})]);
+    const io = scriptedIo([h.remote, '1', join(m.home, 'p'), 'pat-1', 'y', 'n']);
+    await runJoin(io, deps({ makeJira: j.makeJira }), m.env);
+    expect(io.asked.some((q) => /email/i.test(q))).toBe(false);
+    expect(io.asked.some((q) => /Jira personal access token/.test(q))).toBe(true);
+    expect(j.calls[0]).toEqual({ url: 'https://jira.example.com/jira', auth: { flavor: 'server', token: 'pat-1' }, projects: ['WEB', 'OPS'] });
+    expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8')).jiraEmail).toBeUndefined();
+    expect(readFileSync(join(m.cfg, 'jira-token'), 'utf8')).toBe('pat-1');
+  });
+
+  it('a bad Jira URL stops at once instead of asking for the token again', async () => {
+    const h = await jiraHub();
+    const m = machine(h.root, 'me');
+    const makeJira: WizardDeps['makeJira'] = () => { throw new HubError('JIRA_BAD_URL', 'raw'); };
+    const io = scriptedIo([h.remote, '1', join(m.home, 'p'), 'me@example.com', 'tok-1', '', 'tok-2']);
+    await expect(runJoin(io, deps({ makeJira }), m.env)).rejects.toMatchObject({ code: 'JIRA_BAD_URL', message: BAD_URL });
+    expect(io.asked.filter((q) => /token/i.test(q))).toHaveLength(1);
+    expect(existsSync(join(m.cfg, 'jira-token'))).toBe(false);
+  });
+
+  it('resumes at the name step without cloning again or asking for the URL', async () => {
+    const h = await jiraHub();
+    const m = machine(h.root, 'me');
+    const j = fakeJira([ticket({})]);
+    await expect(runJoin(scriptedIo([h.remote]), deps({ makeJira: j.makeJira }), m.env)).rejects.toMatchObject({ code: 'ABORTED' });
+    writeFileSync(join(m.hub, 'marker.tmp-x'), 'still here');
+    const io = scriptedIo(['y', '1', join(m.home, 'p'), 'me@example.com', 'tok-1', 'y', 'n']);
+    await runJoin(io, deps({ makeJira: j.makeJira }), m.env);
+    expect(io.asked.some((q) => /Hub git URL/.test(q))).toBe(false);
+    expect(io.asked[0]).toMatch(/Continue where you stopped \(hub-url\)/);
+    expect(readFileSync(join(m.hub, 'marker.tmp-x'), 'utf8')).toBe('still here');
+  });
+
+  it('resumes at the preview step without asking for the URL, email or token again', async () => {
+    const h = await jiraHub();
+    const m = machine(h.root, 'me');
+    const j = fakeJira([ticket({})]);
+    const first = scriptedIo([h.remote, '1', join(m.home, 'p'), 'me@example.com', 'tok-1']);
+    await expect(runJoin(first, deps({ makeJira: j.makeJira }), m.env)).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(readFileSync(join(m.cfg, 'setup-progress.json'), 'utf8')).not.toMatch(/tok-1|@/);
+    const io = scriptedIo(['y', 'y', 'n']);
+    await runJoin(io, deps({ makeJira: j.makeJira }), m.env);
+    expect(io.asked[0]).toMatch(/Continue where you stopped \(connect\)/);
+    expect(io.asked.some((q) => /Hub git URL|token|email/i.test(q))).toBe(false);
+    expect(io.logs.join('\n')).toMatch(/WEB-1.*Fix the login page/);
+    expect(j.calls.at(-1)).toEqual({ url: 'https://acme.atlassian.net', auth: { flavor: 'cloud', email: 'me@example.com', token: 'tok-1' }, projects: ['WEB', 'OPS'] });
+  });
+
+  it('says so when it reuses a hub clone already on this machine', async () => {
+    const h = await hubWithRemote();
+    const m = machine(h.root, 'me');
+    h.git(['clone', '-q', h.remote, m.hub]);
+    const a = fakeAsana([asanaTask('1001', 'Acme homepage')]);
+    const io = scriptedIo(['1', join(m.home, 'p'), 'tok-1', 'y', 'n']);
+    await runJoin(io, deps({ makeAsana: a.makeAsana }), m.env);
+    expect(io.logs).toContain(`Using the team hub already on this machine (${h.remote}).`);
+    expect(io.asked.some((q) => /Hub git URL/.test(q))).toBe(false);
+  });
+});
+
+describe('withoutLogin', () => {
+  it('drops a user name and password from a URL, leaving other forms alone', () => {
+    expect(withoutLogin('https://bob:hunter2@example.com/acme/hub.git')).toBe('https://example.com/acme/hub.git');
+    expect(withoutLogin('git@github.com:acme/hub.git')).toBe('git@github.com:acme/hub.git');
+    expect(withoutLogin('/srv/hub.git')).toBe('/srv/hub.git');
   });
 });

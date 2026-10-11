@@ -11,22 +11,23 @@ type StepResult = Answers | { goto: string };
 export interface Step { id: string; run: (a: Answers) => Promise<StepResult> }
 
 const file = (configDir: string) => join(configDir, 'setup-progress.json');
-const SUSPECT = /token|password|secret/i;
+// Keys are checked by name (a key called jiraToken is refused whatever it holds); values only by
+// findSecrets, so an ordinary folder like ~/secret-projects is not mistaken for a secret.
+const SUSPECT_KEY = /token|password|secret/i;
 
-function suspicious(text: string): boolean {
-  return SUSPECT.test(text) || findSecrets(text).length > 0;
-}
-
-function assertClean(v: unknown, depth = 0): void {
+function assertClean(v: unknown, depth = 0, key = 'value'): void {
   if (depth > 50) throw new HubError('BAD_PROGRESS', 'Progress is nested too deeply.');
   if (typeof v === 'string') {
-    if (suspicious(v)) throw new HubError('BAD_PROGRESS', 'Refusing to save a secret in the setup progress file.');
+    if (findSecrets(v).length > 0) throw new HubError('BAD_PROGRESS', `Refusing to save a secret in the setup progress file (${key}).`);
   } else if (Array.isArray(v)) {
-    for (const x of v) assertClean(x, depth + 1);
+    for (const x of v) assertClean(x, depth + 1, key);
   } else if (v !== null && typeof v === 'object') {
     for (const [k, x] of Object.entries(v)) {
-      if (suspicious(k)) throw new HubError('BAD_PROGRESS', 'Refusing to save a secret in the setup progress file.');
-      assertClean(x, depth + 1);
+      const shown = k.replace(/[^\w.-]/g, '?').slice(0, 40);
+      if (SUSPECT_KEY.test(k) || findSecrets(k).length > 0) {
+        throw new HubError('BAD_PROGRESS', `Refusing to save a secret in the setup progress file (${shown}).`);
+      }
+      assertClean(x, depth + 1, shown);
     }
   }
 }

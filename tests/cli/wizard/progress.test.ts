@@ -33,11 +33,23 @@ describe('progress file', () => {
   it('refuses secrets at any depth, keys and values', () => {
     const d = dir();
     for (const answers of [
-      { jiraToken: 'x' }, { a: { b: [{ password: '1' }] } }, { a: 'my secret' },
+      { jiraToken: 'x' }, { a: { b: [{ password: '1' }] } },
       { a: ['https://u:p@example.com/x'] }, { a: { b: 'Bearer abcdefghijklmnopqrstuvwxyz' } },
+      { projectsRoot: `ghp_${'a'.repeat(36)}` },
     ]) expect(() => saveProgress(d, prog({ answers }))).toThrow(/secret/);
     try { saveProgress(d, prog({ answers: { jiraToken: 'x' } })); } catch (e) { expect((e as { code: string }).code).toBe('BAD_PROGRESS'); }
     expect(existsSync(join(d, 'setup-progress.json'))).toBe(false);
+  });
+  it('checks keys by name but values only for real secrets', () => {
+    const d = dir();
+    saveProgress(d, prog({ answers: { projectsRoot: '~/secret-projects', other: '~/tokens-work', note: 'my password manager' } }));
+    expect(loadProgress(d)?.answers.projectsRoot).toBe('~/secret-projects');
+    expect(() => saveProgress(d, prog({ answers: { jiraToken: 'x' } }))).toThrow('Refusing to save a secret in the setup progress file (jiraToken).');
+    const fake = `ghp_${'b'.repeat(36)}`;
+    const err = (() => { try { saveProgress(d, prog({ answers: { projectsRoot: fake } })); } catch (e) { return e as Error & { code: string }; } })();
+    expect(err?.code).toBe('BAD_PROGRESS');
+    expect(err?.message).toContain('(projectsRoot)');
+    expect(err?.message).not.toContain(fake);
   });
   it('refuses to write through a symlink', () => {
     const d = dir();

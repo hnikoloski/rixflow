@@ -13404,6 +13404,7 @@ var makeJira = (deps, url, auth, projects) => (deps.makeJira ?? ((u, a, p) => ne
 function asanaFrom(client, wf, workspace) {
   return asanaSource(client, { workspace, statusField: wf.status.field ?? void 0, priorityField: wf.urgent.field ?? void 0 });
 }
+var BAD_URL = `The team's Jira address is not a valid https:// address. Ask a teammate to fix it: they run setup and choose "change team setup".`;
 var isCode = (e, suffix) => e instanceof HubError && e.code.endsWith(suffix);
 function explain(e, wf) {
   const jira = wf.tracker.type === "jira" ? wf.tracker : null;
@@ -13414,7 +13415,6 @@ function explain(e, wf) {
   if (isCode(e, "_NETWORK")) {
     return jira ? `Could not reach Jira at ${jira.url}. Check your network connection (and VPN, if your company needs one), then try again.` : "Could not reach Asana. Check your network connection, then try again.";
   }
-  if (isCode(e, "_BAD_URL")) return `The team's Jira address is not valid. Ask a teammate to check it with "change team setup".`;
   return null;
 }
 async function askToken(io, question) {
@@ -13460,6 +13460,7 @@ async function connect(io, deps, wf, user) {
         conn = { source: asanaFrom(client, wf, workspace), ...own ? { asanaWorkspace: own } : {} };
       }
     } catch (e) {
+      if (isCode(e, "_BAD_URL")) throw new HubError("JIRA_BAD_URL", BAD_URL);
       const why = explain(e, wf);
       if (why === null) throw e;
       io.log(why);
@@ -13514,20 +13515,20 @@ async function previewTickets(io, source, wf, now, opts) {
 var import_node_fs15 = require("node:fs");
 var import_node_path18 = require("node:path");
 var file = (configDir2) => (0, import_node_path18.join)(configDir2, "setup-progress.json");
-var SUSPECT = /token|password|secret/i;
-function suspicious(text2) {
-  return SUSPECT.test(text2) || findSecrets(text2).length > 0;
-}
-function assertClean(v, depth = 0) {
+var SUSPECT_KEY = /token|password|secret/i;
+function assertClean(v, depth = 0, key = "value") {
   if (depth > 50) throw new HubError("BAD_PROGRESS", "Progress is nested too deeply.");
   if (typeof v === "string") {
-    if (suspicious(v)) throw new HubError("BAD_PROGRESS", "Refusing to save a secret in the setup progress file.");
+    if (findSecrets(v).length > 0) throw new HubError("BAD_PROGRESS", `Refusing to save a secret in the setup progress file (${key}).`);
   } else if (Array.isArray(v)) {
-    for (const x of v) assertClean(x, depth + 1);
+    for (const x of v) assertClean(x, depth + 1, key);
   } else if (v !== null && typeof v === "object") {
     for (const [k, x] of Object.entries(v)) {
-      if (suspicious(k)) throw new HubError("BAD_PROGRESS", "Refusing to save a secret in the setup progress file.");
-      assertClean(x, depth + 1);
+      const shown = k.replace(/[^\w.-]/g, "?").slice(0, 40);
+      if (SUSPECT_KEY.test(k) || findSecrets(k).length > 0) {
+        throw new HubError("BAD_PROGRESS", `Refusing to save a secret in the setup progress file (${shown}).`);
+      }
+      assertClean(x, depth + 1, shown);
     }
   }
 }
@@ -13604,6 +13605,17 @@ var PUBLIC_HUB = "This hub repository is public: anyone on the internet can read
 var PUBLIC_OVERRIDE = "WARNING: this hub repository is public, so anyone can read what your team saves. Continuing only because RIXFLOW_ALLOW_PUBLIC_HUB=1 is set.";
 var MAPPING_HINT = 'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "change team setup".';
 var NOT_LISTED = "-";
+function withoutLogin(url) {
+  try {
+    const u = new URL(url);
+    if (!u.username && !u.password) return url;
+    u.username = "";
+    u.password = "";
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
 async function refusePublicHub(io, url, deps, env) {
   if (!await isPublicRepo(url, deps.runGit)) return;
   if (env.RIXFLOW_ALLOW_PUBLIC_HUB !== "1") throw new HubError("PUBLIC_HUB", PUBLIC_HUB);
@@ -13624,6 +13636,7 @@ async function runJoin(io, deps, env = process.env) {
       async run() {
         if ((0, import_node_fs16.existsSync)((0, import_node_path19.join)(hubDir2, ".git"))) {
           const origin = (await new Git(hubDir2, env).tryRun(["remote", "get-url", "origin"])).out.trim();
+          io.log(`Using the team hub already on this machine (${origin ? withoutLogin(origin) : hubDir2}).`);
           if (origin) {
             await refusePublicHub(io, origin, deps, env);
             await withAccessHint(io, () => new Git(hubDir2, env).run(["pull", "-q", "--rebase"]));

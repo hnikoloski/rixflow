@@ -41,6 +41,9 @@ function asanaFrom(client: AsanaLike, wf: Workflow, workspace: string): TicketSo
   return asanaSource(client, { workspace, statusField: wf.status.field ?? undefined, priorityField: wf.urgent.field ?? undefined });
 }
 
+export const BAD_URL =
+  `The team's Jira address is not a valid https:// address. Ask a teammate to fix it: they run setup and choose "change team setup".`;
+
 const isCode = (e: unknown, suffix: string): e is HubError => e instanceof HubError && e.code.endsWith(suffix);
 
 function explain(e: unknown, wf: Workflow): string | null {
@@ -56,7 +59,6 @@ function explain(e: unknown, wf: Workflow): string | null {
       ? `Could not reach Jira at ${jira.url}. Check your network connection (and VPN, if your company needs one), then try again.`
       : 'Could not reach Asana. Check your network connection, then try again.';
   }
-  if (isCode(e, '_BAD_URL')) return `The team's Jira address is not valid. Ask a teammate to check it with "change team setup".`;
   return null;
 }
 
@@ -105,6 +107,8 @@ export async function connect(io: InitIo, deps: WizardDeps, wf: Workflow, user: 
         conn = { source: asanaFrom(client, wf, workspace), ...(own ? { asanaWorkspace: own } : {}) };
       }
     } catch (e) {
+      // A bad team URL will not get better by typing the token again.
+      if (isCode(e, '_BAD_URL')) throw new HubError('JIRA_BAD_URL', BAD_URL);
       const why = explain(e, wf);
       if (why === null) throw e;
       io.log(why);

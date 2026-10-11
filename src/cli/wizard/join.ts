@@ -24,6 +24,19 @@ const MAPPING_HINT =
   'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "change team setup".';
 const NOT_LISTED = '-';
 
+// A URL safe to print: any user name / password in a URL-style address is dropped.
+export function withoutLogin(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!u.username && !u.password) return url;
+    u.username = '';
+    u.password = '';
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 // Refuses a hub anyone can read (anti-goal 1). RIXFLOW_ALLOW_PUBLIC_HUB=1 overrides, with a warning.
 export async function refusePublicHub(io: InitIo, url: string, deps: WizardDeps, env: NodeJS.ProcessEnv): Promise<void> {
   if (!(await isPublicRepo(url, deps.runGit))) return;
@@ -51,6 +64,7 @@ export async function runJoin(io: InitIo, deps: WizardDeps, env: NodeJS.ProcessE
       async run() {
         if (existsSync(join(hubDir, '.git'))) {
           const origin = (await new Git(hubDir, env).tryRun(['remote', 'get-url', 'origin'])).out.trim();
+          io.log(`Using the team hub already on this machine (${origin ? withoutLogin(origin) : hubDir}).`);
           if (origin) {
             await refusePublicHub(io, origin, deps, env);
             await withAccessHint(io, () => new Git(hubDir, env).run(['pull', '-q', '--rebase']));
