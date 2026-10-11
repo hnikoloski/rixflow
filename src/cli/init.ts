@@ -89,13 +89,18 @@ export interface InitIo {
   ask(question: string): Promise<string>;
   askHidden(question: string): Promise<string>;
   log(text: string): void;
+  // Set once stdin has hit EOF; the wizard prompt helpers then abort instead of looping.
+  closed?: boolean;
 }
 
 export function terminalIo(): InitIo {
-  return {
+  const self: InitIo = {
+    closed: false,
     async ask(q) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const a = await rl.question(q);
+      let answered = false;
+      const eof = new Promise<string>((res) => rl.once('close', () => { if (!answered) self.closed = true; res(''); }));
+      const a = await Promise.race([rl.question(q).then((x) => { answered = true; return x; }), eof]);
       rl.close();
       return a.trim();
     },
@@ -110,6 +115,7 @@ export function terminalIo(): InitIo {
     },
     log: (t) => console.log(t),
   };
+  return self;
 }
 
 // Shows the exact changes, asks, backs up the old file, then writes a temp file

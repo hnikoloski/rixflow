@@ -13260,10 +13260,19 @@ function installPreCommit(hubDir2, configDir2, cliPath2) {
   return messages;
 }
 function terminalIo() {
-  return {
+  const self = {
+    closed: false,
     async ask(q) {
       const rl = (0, import_promises.createInterface)({ input: process.stdin, output: process.stdout });
-      const a = await rl.question(q);
+      let answered = false;
+      const eof = new Promise((res) => rl.once("close", () => {
+        if (!answered) self.closed = true;
+        res("");
+      }));
+      const a = await Promise.race([rl.question(q).then((x) => {
+        answered = true;
+        return x;
+      }), eof]);
       rl.close();
       return a.trim();
     },
@@ -13279,6 +13288,7 @@ function terminalIo() {
     },
     log: (t) => console.log(t)
   };
+  return self;
 }
 async function applyClaudeSettings(io, linkPath, hubDir2) {
   let settingsPath = linkPath;
