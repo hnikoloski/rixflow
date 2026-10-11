@@ -56,6 +56,7 @@ export function loadUserConfig(dir: string, env: Env = process.env): UserConfig 
     role: raw.role,
     projectsRoot,
     asanaWorkspace: raw.asanaWorkspace === undefined ? undefined : String(raw.asanaWorkspace),
+    jiraEmail: typeof raw.jiraEmail === 'string' && raw.jiraEmail.trim() ? raw.jiraEmail.trim() : undefined,
     siteFolders: normalizeFolders(raw.siteFolders, env, projectsRoot),
     taskSites: raw.taskSites ?? {},
   };

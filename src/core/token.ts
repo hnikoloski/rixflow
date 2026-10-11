@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { TrackerKind } from './tickets/types';
 import { HubError } from './types';
 
 export type Exec = (cmd: string, args: string[], input?: string) => string;
@@ -12,14 +13,13 @@ export const KEYCHAIN_TIMEOUT_MS = 5000;
 const defaultExec: Exec = (cmd, args, input) =>
   execFileSync(cmd, args, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], timeout: KEYCHAIN_TIMEOUT_MS });
 
-function tokenFile(configDir: string): string {
-  return join(configDir, 'asana-token');
-}
+const tokenFile = (configDir: string, kind: TrackerKind): string => join(configDir, `${kind}-token`);
 
-// One keychain item per hub user (`asana:<user>`), so two personas on one machine never share a
-// token. The legacy single `asana` account is still read as a fallback.
+// One keychain item per system and hub user (`<kind>:<user>`), so two personas on one machine never
+// share a token. The legacy single `asana` account is still read as a fallback for Asana.
 const LEGACY_ACCOUNT = 'asana';
-const accountFor = (user?: string): string => (user ? `asana:${user}` : LEGACY_ACCOUNT);
+const accountFor = (kind: TrackerKind, user?: string): string => (user ? `${kind}:${user}` : kind);
+const ENV_VAR: Record<TrackerKind, string> = { asana: 'ASANA_TOKEN', jira: 'JIRA_TOKEN' };
 
 function keychainLookup(exec: Exec, account: string): string | null {
   try {
@@ -32,12 +32,14 @@ function keychainLookup(exec: Exec, account: string): string | null {
   }
 }
 
-function keychainGet(exec: Exec, user?: string): string | null {
-  return (user ? keychainLookup(exec, accountFor(user)) : null) ?? keychainLookup(exec, LEGACY_ACCOUNT);
+function keychainGet(exec: Exec, kind: TrackerKind, user?: string): string | null {
+  const own = user ? keychainLookup(exec, accountFor(kind, user)) : null;
+  if (own || kind !== 'asana') return own;
+  return keychainLookup(exec, LEGACY_ACCOUNT);
 }
 
-function keychainSet(exec: Exec, token: string, user?: string): boolean {
-  const account = accountFor(user);
+function keychainSet(exec: Exec, token: string, kind: TrackerKind, user?: string): boolean {
+  const account = accountFor(kind, user);
   try {
     if (process.platform === 'darwin') {
       exec('security', ['add-generic-password', '-U', '-s', 'rixflow', '-a', account, '-w', token]);
@@ -62,20 +64,21 @@ export function getToken(
   env: Record<string, string | undefined> = process.env,
   exec: Exec = defaultExec,
   user?: string,
+  kind: TrackerKind = 'asana',
 ): string | null {
-  const fromEnv = env.ASANA_TOKEN?.trim();
+  const fromEnv = env[ENV_VAR[kind]]?.trim();
   if (fromEnv) return fromEnv;
-  const fromKeychain = keychainGet(exec, user);
+  const fromKeychain = keychainGet(exec, kind, user);
   if (fromKeychain) return fromKeychain;
-  const file = tokenFile(configDir);
+  const file = tokenFile(configDir, kind);
   return existsSync(file) ? readFileSync(file, 'utf8').trim() || null : null;
 }
 
-export function setToken(configDir: string, token: string, exec: Exec = defaultExec, user?: string): 'keychain' | 'file' {
+export function setToken(configDir: string, token: string, exec: Exec = defaultExec, user?: string, kind: TrackerKind = 'asana'): 'keychain' | 'file' {
   if (!/^\S+$/.test(token)) throw new HubError('BAD_TOKEN', 'Token must be a single non-empty line without spaces');
-  if (keychainSet(exec, token, user)) return 'keychain';
+  if (keychainSet(exec, token, kind, user)) return 'keychain';
   ensurePrivateDir(configDir);
-  const file = tokenFile(configDir);
+  const file = tokenFile(configDir, kind);
   // Remove any previous file (or symlink) first: writeFileSync keeps the mode of an existing
   // file, so 'wx' + mode 0600 on a fresh file is what guarantees the mode from creation.
   rmSync(file, { force: true });

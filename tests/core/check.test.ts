@@ -57,6 +57,16 @@ describe('runCheck', () => {
     expect(await runCheck(ctx, { source: fakeAsanaSource(v2), sync: noSync }, 'session')).toBe('[rixflow] Asana updated: "Testimonial card"');
   });
 
+  it('hands the workflow to the source factory, loading it once', async () => {
+    const ctx = makeCtx();
+    const jira = { ...LEGACY_WORKFLOW, legacy: false, tracker: { type: 'jira' as const, url: 'https://jira.example.com', flavor: 'cloud' as const, projects: ['WEB'] } };
+    const seen: unknown[] = [];
+    let loads = 0;
+    await runCheck(ctx, { source: (_c, wf) => { seen.push(wf); return null; }, sync: noSync, workflow: () => { loads += 1; return jira; } }, 'session');
+    expect(seen).toEqual([jira]);
+    expect(loads).toBe(1);
+  });
+
   it('explains a missing token only at session start', async () => {
     const ctx = makeCtx();
     expect(await runCheck(ctx, { source: null, sync: noSync }, 'session')).toBe(`[rixflow] Asana token missing (run: ${hubCommand('token set')})`);

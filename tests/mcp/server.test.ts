@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../../src/mcp/server';
+import { LEGACY_WORKFLOW } from '../../src/core/workflow';
 import { loadUserConfig } from '../../src/core/config';
 import { fakeAsanaSource, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
@@ -165,6 +166,21 @@ describe('MCP server', () => {
     const r = await call('finish_task', { task: '101' });
     expect(JSON.parse(r.text).handoverEnded).toBe(true);
     expect(readHandover(ctx, '101')?.outcome).toBe('finished');
+  });
+
+  it('hands the workflow it loaded to the source factory', async () => {
+    const ctx = makeCtx();
+    const wf = { ...structuredClone(LEGACY_WORKFLOW), legacy: false };
+    const seen: unknown[] = [];
+    const server = createServer({
+      ctx: () => ctx, workflow: () => wf, source: (_c, w) => { seen.push(w); return fakeAsanaSource([]); },
+      persist: async () => ({ status: 'ok', detail: '', pending: 0, conflicts: [] }),
+    });
+    const client = new Client({ name: 't', version: '1' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(a), server.connect(b)]);
+    await client.callTool({ name: 'plate', arguments: {} });
+    expect(seen[0]).toBe(wf);
   });
 
   it('reports a clear error without a ticket source', async () => {

@@ -5,6 +5,8 @@ export interface UserConfig {
   role: Role;
   projectsRoot: string;
   asanaWorkspace?: string;
+  // Jira Cloud login. It identifies the account, not the team, so it lives on the machine.
+  jiraEmail?: string;
   siteFolders: Record<string, string>;
   taskSites: Record<string, string>;
 }

@@ -23,6 +23,13 @@ const handover = (ctx: Ctx, gid: string, title: string, projectDir?: string) =>
   writeHandover(ctx, { task: gid, site: 'AC', projectDir, asanaModifiedAt: '', brief: brief(title), related: [] });
 
 describe('buildStatus', () => {
+  it('hands the workflow it loaded to the source factory', async () => {
+    const ctx = makeCtx();
+    const wf = { ...structuredClone(LEGACY_WORKFLOW), legacy: false, tracker: { type: 'asana' as const, workspace: '999' } };
+    const seen: unknown[] = [];
+    await buildStatus(opts({ asana: true }), deps(ctx, { workflow: () => wf, source: (_c, w) => { seen.push(w); return null; } }));
+    expect(seen).toEqual([wf]);
+  });
   it('reports not initialized without throwing', async () => {
     const s = await buildStatus(opts(), {
       loadCtx: () => { throw new HubError('NOT_INITIALIZED', 'no config'); },

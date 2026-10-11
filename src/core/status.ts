@@ -21,7 +21,7 @@ export interface StatusOptions { cwd: string; task?: string; asana: boolean; ref
 export interface StatusDeps {
   loadCtx: () => Ctx;
   sync: (ctx: Ctx) => Promise<SyncResult | null>;
-  source: (ctx: Ctx) => TicketSource | null;
+  source: (ctx: Ctx, wf: Workflow) => TicketSource | null;
   // Defaults to the hub's config/workflow.yml (the legacy Asana mapping when it is missing).
   workflow?: (ctx: Ctx) => Workflow;
   syncBudgetMs?: number;
@@ -121,7 +121,7 @@ async function ticketSection(
   if (cached && !opts.refresh && age >= 0 && age < ASANA_CACHE_TTL_MS) return cached;
   let source: TicketSource | null;
   try {
-    source = deps.source(ctx);
+    source = deps.source(ctx, wf);
   } catch {
     source = null;
   }

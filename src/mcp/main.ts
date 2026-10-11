@@ -9,7 +9,7 @@ import { createServer } from './server';
 refreshHookCopy(configDir(), hubCliPath());
 
 // stdout carries only MCP protocol messages; everything else goes to stderr.
-const server = createServer({ ctx: () => loadCtx(), source: (ctx) => makeSource(ctx), persist });
+const server = createServer({ ctx: () => loadCtx(), source: (ctx, wf) => makeSource(ctx, process.env, wf), persist });
 server.connect(new StdioServerTransport()).catch((e) => {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);

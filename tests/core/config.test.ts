@@ -29,6 +29,13 @@ describe('user config', () => {
     expect(cfg.asanaWorkspace).toBe('1198828799176805');
     expect(cfg.siteFolders.AC).toBe('/p/acme-v2');
   });
+  it('keeps the Jira email on the machine config', () => {
+    const dir = tmp();
+    saveUserConfig(dir, { name: 'dev', role: 'dev', projectsRoot: '/p', jiraEmail: 'dev@acme.example.com', siteFolders: {}, taskSites: {} });
+    expect(loadUserConfig(dir).jiraEmail).toBe('dev@acme.example.com');
+    saveUserConfig(dir, { name: 'dev', role: 'dev', projectsRoot: '/p', siteFolders: {}, taskSites: {} });
+    expect(loadUserConfig(dir).jiraEmail).toBeUndefined();
+  });
   it('throws NOT_INITIALIZED when missing', () => {
     expect(() => loadUserConfig(tmp())).toThrowError(expect.objectContaining({ code: 'NOT_INITIALIZED' }));
   });

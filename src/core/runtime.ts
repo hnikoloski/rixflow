@@ -5,19 +5,27 @@ import { Git, NO_REMOTE_DETAIL, commitAll, detailLine, ownedPaths, pendingCount,
 import { acquireLock } from './lock';
 import { mergeHubGitignore } from './template';
 import { asanaSource } from './tickets/asana';
+import { JiraClient } from './tickets/jira';
 import type { TicketSource } from './tickets/types';
 import { getToken } from './token';
 import type { Ctx } from './types';
 import { loadWorkflow, type Workflow } from './workflow';
 
 // The ticket source for the hub's workflow, or null when it cannot be built (no workspace, no
-// token, or a tracker without a client yet). Throws BAD_CONFIG for an invalid workflow.yml.
+// token, or no Jira Cloud email). Throws BAD_CONFIG for an invalid workflow.yml.
 export function makeSource(
   ctx: Ctx,
   env: Record<string, string | undefined> = process.env,
   wf: Workflow = loadWorkflow(ctx.hubDir),
 ): TicketSource | null {
-  if (wf.tracker.type !== 'asana') return null; // Jira gets its client in a later step
+  if (wf.tracker.type === 'jira') {
+    const { url, flavor, projects } = wf.tracker;
+    const token = getToken(ctx.configDir, env, undefined, ctx.user.name, 'jira');
+    if (!token) return null;
+    if (flavor === 'server') return new JiraClient(url, { flavor, token }, { projects });
+    const email = ctx.user.jiraEmail;
+    return email ? new JiraClient(url, { flavor, email, token }, { projects }) : null;
+  }
   const workspace = wf.tracker.workspace ?? ctx.user.asanaWorkspace;
   if (!workspace) return null;
   const token = getToken(ctx.configDir, env, undefined, ctx.user.name);

@@ -25,7 +25,7 @@ const CONTROL_CHARS = new RegExp(
 export interface CheckDeps {
   // A factory is called only after the prompt rate limit passes, so a rate-limited prompt never
   // spawns a keychain lookup.
-  source: TicketSource | null | (() => TicketSource | null);
+  source: TicketSource | null | ((ctx: Ctx, wf: Workflow) => TicketSource | null);
   sync: () => Promise<SyncResult | null>;
   // Names the tracker when no source could be built. Defaults to the hub's config/workflow.yml.
   workflow?: () => Workflow;
@@ -33,10 +33,10 @@ export interface CheckDeps {
 
 const LABELS: Record<Workflow['tracker']['type'], string> = { asana: 'Asana', jira: 'Jira' };
 
-// The tracker's name for user-facing lines; null when the workflow cannot be read (hooks stay quiet).
-function trackerLabel(ctx: Ctx, deps: CheckDeps): string | null {
+// The workflow, loaded once per check; null when it cannot be read (hooks stay quiet).
+function workflowOf(ctx: Ctx, deps: CheckDeps): Workflow | null {
   try {
-    return LABELS[(deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir)).tracker.type];
+    return deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir);
   } catch {
     return null;
   }
@@ -112,9 +112,10 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   const budget = trigger === 'prompt' ? PROMPT_TIMEOUT_MS : SESSION_TIMEOUT_MS;
 
   // Tickets and sync start together so their latency overlaps instead of adding up.
+  const wf = workflowOf(ctx, deps);
   let source: TicketSource | null;
   try {
-    source = typeof deps.source === 'function' ? deps.source() : deps.source;
+    source = typeof deps.source === 'function' ? (wf ? deps.source(ctx, wf) : null) : deps.source;
   } catch {
     source = null;
   }
@@ -140,7 +141,7 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   state.notified = [...previous.filter((id) => !freshSet.has(id)), ...freshIds].slice(-NOTIFIED_CAP);
 
   if (!source || !ticketFetch) {
-    const label = trigger === 'session' ? trackerLabel(ctx, deps) : null;
+    const label = trigger === 'session' && wf ? LABELS[wf.tracker.type] : null;
     if (label) parts.push(`${label} token missing (run: ${hubCommand('token set')})`);
   } else {
     try {

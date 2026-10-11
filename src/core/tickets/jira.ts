@@ -7,7 +7,6 @@ const MAX_PAGES = 50;
 const PAGE_SIZE = 100;
 const SEARCH_FIELDS = '*all,-comment,-worklog,-attachment,-issuelinks,-subtasks';
 const clampLimit = (n: number) => Math.min(100, Math.max(1, Math.floor(Number(n)) || 1));
-const BASE_FIELDS = 'summary,description,updated,duedate,parent,status,priority,components,labels,project,security';
 const PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
 
 export type JiraAuth = { flavor: 'cloud'; email: string; token: string } | { flavor: 'server'; token: string };

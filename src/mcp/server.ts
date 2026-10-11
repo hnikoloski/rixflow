@@ -23,7 +23,7 @@ import { loadWorkflow, type Workflow } from '../core/workflow';
 
 export interface ServerDeps {
   ctx: () => Ctx;
-  source: (ctx: Ctx) => TicketSource | null;
+  source: (ctx: Ctx, wf: Workflow) => TicketSource | null;
   // Defaults to the hub's config/workflow.yml (the legacy Asana mapping when it is missing).
   workflow?: (ctx: Ctx) => Workflow;
   persist: (ctx: Ctx, message: string) => Promise<SyncResult>;
@@ -80,8 +80,8 @@ function readablePath(ctx: Ctx, path: unknown): string {
 export function createServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: 'hub', version: '0.2.0' });
   const workflowFor = (ctx: Ctx): Workflow => (deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir));
-  const sourceFor = (ctx: Ctx): TicketSource => {
-    const source = deps.source(ctx);
+  const sourceFor = (ctx: Ctx, wf: Workflow): TicketSource => {
+    const source = deps.source(ctx, wf);
     if (!source) {
       throw new HubError('NO_TICKETS', `The ticket tracker is not configured (run in a terminal: ${hubCommand('init')}, or ${hubCommand('token set')})`);
     }
@@ -134,7 +134,7 @@ export function createServer(deps: ServerDeps): McpServer {
   }, async () => safe(async () => {
     const ctx = deps.ctx();
     const wf = workflowFor(ctx);
-    return renderPlate(await gatherPlate(ctx, sourceFor(ctx), wf));
+    return renderPlate(await gatherPlate(ctx, sourceFor(ctx, wf), wf));
   }));
 
   server.registerTool('start_task', {
@@ -144,7 +144,7 @@ export function createServer(deps: ServerDeps): McpServer {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
     const wf = workflowFor(ctx);
-    const result = await startTask(ctx, sourceFor(ctx), wf, { task, cwd });
+    const result = await startTask(ctx, sourceFor(ctx, wf), wf, { task, cwd });
     return { ...result, handoverPath: rel(ctx, result.handoverPath), ...(await persisted(ctx, `handover: ${ctx.user.name} ${task}`)) };
   }));
 
@@ -154,7 +154,7 @@ export function createServer(deps: ServerDeps): McpServer {
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
-    return resumeTask(ctx, deps.source(ctx), task);
+    return resumeTask(ctx, deps.source(ctx, workflowFor(ctx)), task);
   }));
 
   server.registerTool('remember_site', {
@@ -176,7 +176,7 @@ export function createServer(deps: ServerDeps): McpServer {
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
-    const source = sourceFor(ctx);
+    const source = sourceFor(ctx, workflowFor(ctx));
     const id = source.normalizeId(task);
     const details = { task: await source.ticket(id), comments: await source.comments(id, 20) };
     return JSON.stringify(details, null, 2);
@@ -194,7 +194,7 @@ export function createServer(deps: ServerDeps): McpServer {
     optionalSite(args.site);
     let asanaModifiedAt: string | undefined;
     try {
-      const source = deps.source(ctx);
+      const source = deps.source(ctx, workflowFor(ctx));
       asanaModifiedAt = source ? (await source.ticket(source.normalizeId(args.task))).modifiedAt : undefined;
     } catch {
       asanaModifiedAt = undefined;

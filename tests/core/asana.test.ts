@@ -273,3 +273,39 @@ describe('hardening: token edge cases', () => {
     expect(KEYCHAIN_TIMEOUT_MS).toBe(5000);
   });
 });
+
+describe('per-system tokens', () => {
+  const noKeychain = () => { throw new Error('no keychain'); };
+  const tmp = () => mkdtempSync(join(tmpdir(), 'tok-'));
+
+  it('stores a jira token under jira-token, apart from the asana one', () => {
+    const dir = tmp();
+    expect(setToken(dir, 'jiratok', noKeychain, 'dev', 'jira')).toBe('file');
+    expect(readFileSync(join(dir, 'jira-token'), 'utf8')).toBe('jiratok');
+    expect(statSync(join(dir, 'jira-token')).mode & 0o777).toBe(0o600);
+    expect(getToken(dir, {}, noKeychain, 'dev', 'jira')).toBe('jiratok');
+    expect(getToken(dir, {}, noKeychain, 'dev')).toBeNull();
+  });
+  it('JIRA_TOKEN wins for jira and ASANA_TOKEN is ignored there', () => {
+    expect(getToken('/nope', { JIRA_TOKEN: 'envj', ASANA_TOKEN: 'enva' }, noKeychain, undefined, 'jira')).toBe('envj');
+    expect(getToken('/nope', { ASANA_TOKEN: 'enva' }, noKeychain, undefined, 'jira')).toBeNull();
+  });
+  it('keeps the keychain account per system and reads the legacy asana account', () => {
+    const accounts: string[] = [];
+    const exec = (_c: string, args: string[], input?: string) => {
+      const acct = args[args.indexOf('account') + 1] ?? args[args.indexOf('-a') + 1];
+      if (args.includes('store') || args.includes('add-generic-password')) { accounts.push(acct); return ''; }
+      if (acct === 'asana') return 'legacy\n';
+      throw new Error('missing');
+    };
+    setToken('/nope', 'tok', exec, 'dev', 'jira');
+    expect(accounts).toEqual(['jira:dev']);
+    expect(getToken('/nope', {}, exec, 'dev')).toBe('legacy');
+    expect(getToken('/nope', {}, exec, 'dev', 'jira')).toBeNull();
+  });
+  it('still reads an old asana-token file', () => {
+    const dir = tmp();
+    writeFileSync(join(dir, 'asana-token'), 'old\n', { mode: 0o600 });
+    expect(getToken(dir, {}, noKeychain, 'dev')).toBe('old');
+  });
+});

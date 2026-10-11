@@ -10,6 +10,8 @@ import { runClaude, summarizeSession } from '../core/summarize';
 import { logSummary } from '../core/summarylog';
 import { bootstrapHub } from '../core/template';
 import { setToken } from '../core/token';
+import type { TrackerKind } from '../core/tickets/types';
+import { loadWorkflow } from '../core/workflow';
 import { HubError, type Ctx, type Role } from '../core/types';
 import { detachedSummarySpawner, detachedSync, runHook } from './hooks';
 import { refreshHookCopy, runInit, terminalIo } from './init';
@@ -48,7 +50,7 @@ function printAndExit0(text: string): void {
 const syncChild = detachedSync(cliPath);
 
 const check = (ctx: Ctx, trigger: 'session' | 'prompt') =>
-  runCheck(ctx, { source: () => makeSource(ctx), sync: syncChild }, trigger);
+  runCheck(ctx, { source: (c, wf) => makeSource(c, process.env, wf), sync: syncChild }, trigger);
 
 // Once per start, best effort: keep the pre-commit copy of the CLI in step with this bundle.
 refreshHookCopy(configDir(), hubCliPath());
@@ -100,7 +102,7 @@ program
     try {
       out = await buildStatus(
         { cwd: opts.cwd ?? process.cwd(), task: opts.task, asana: !!opts.asana, refresh: !!opts.refresh, sync: opts.sync !== false },
-        { loadCtx: () => loadCtx(), sync: syncChild, source: (ctx) => makeSource(ctx), pending: (ctx) => pendingCount(new Git(ctx.hubDir)),
+        { loadCtx: () => loadCtx(), sync: syncChild, source: (ctx, wf) => makeSource(ctx, process.env, wf), pending: (ctx) => pendingCount(new Git(ctx.hubDir)),
           startedAt: performance.timeOrigin },
       );
     } catch {
@@ -164,15 +166,18 @@ program.command('scrub').description('redact secrets from stdin').action(async (
   process.stdout.write(scrub(await readStdin()));
 });
 
-program.command('token').command('set').description('store the Asana token').action(async () => {
-  const token = await terminalIo().askHidden('Asana personal access token (input hidden): ');
+program.command('token').command('set').description("store the token for the hub's ticket system").action(async () => {
   let user: string | undefined;
+  let kind: TrackerKind = 'asana';
   try {
-    user = loadCtx().user.name;
+    const ctx = loadCtx();
+    user = ctx.user.name;
+    kind = loadWorkflow(ctx.hubDir).tracker.type;
   } catch {
-    user = undefined; // before init: the legacy keychain account
+    // Before init (no user): the legacy keychain account. An unreadable workflow keeps Asana.
   }
-  console.log(`stored in ${setToken(configDir(), token, undefined, user)}`);
+  const token = await terminalIo().askHidden(`${kind === 'jira' ? 'Jira' : 'Asana'} token (input hidden): `);
+  console.log(`stored in ${setToken(configDir(), token, undefined, user, kind)}`);
 });
 
 function parseMembers(list: string): { name: string; role: Role }[] {
