@@ -21,4 +21,12 @@ describe('adfToText', () => {
     expect(adfToText(null)).toBe('');
     expect(adfToText('plain')).toBe('plain');
   });
+  it('never throws on malformed input', () => {
+    const bad: unknown[] = [
+      { type: 'paragraph', content: 'oops' }, { type: 'paragraph', content: {} }, { type: 'mention', attrs: { text: 5 } },
+      { type: 'listItem', content: {} }, null, 42, [],
+      { type: 'doc', content: [{ type: 'bulletList', content: [{ type: 'listItem', content: {} }, 7] }, { type: 'mention', attrs: { text: 5 } }] },
+    ];
+    for (const b of bad) expect(typeof adfToText(b)).toBe('string');
+  });
 });

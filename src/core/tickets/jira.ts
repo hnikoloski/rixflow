@@ -6,6 +6,7 @@ export const JIRA_TIMEOUT_MS = 5_000;
 const MAX_PAGES = 50;
 const PAGE_SIZE = 100;
 const BASE_FIELDS = 'summary,description,updated,duedate,parent,status,priority,components,labels,project,security';
+const JIRA_KEY = /^[A-Z][A-Z0-9_]{0,19}-\d{1,10}$/;
 const PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
 
 export type JiraAuth = { flavor: 'cloud'; email: string; token: string } | { flavor: 'server'; token: string };
@@ -13,10 +14,27 @@ export type JiraAuth = { flavor: 'cloud'; email: string; token: string } | { fla
 interface JiraIssue {
   key: string;
   fields: Record<string, unknown>;
-  names?: Record<string, string>;
 }
 
 type Obj = Record<string, unknown>;
+interface FieldMeta {
+  sprint: string | null;
+  names: Record<string, string>;
+  custom: string[];
+}
+
+function parseBase(raw: string): string {
+  const bad = () => new HubError('JIRA_BAD_URL', 'Jira URL must be an https:// address without a login, query or #fragment.');
+  let u: URL;
+  try {
+    u = new URL(String(raw).trim());
+  } catch {
+    throw bad();
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) throw bad();
+  return (u.origin + u.pathname).replace(/\/+$/, '');
+}
+
 const obj = (v: unknown): Obj => (typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Obj) : {});
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
 const named = (v: unknown): string | null => str(obj(v).name);
@@ -31,10 +49,10 @@ export class JiraClient implements TicketSource, Discovery {
   readonly #projects: string[];
   readonly #fetchFn: typeof fetch;
   readonly #timeoutMs: number;
-  #sprintField: string | null | undefined;
+  #meta: Promise<FieldMeta> | undefined;
 
   constructor(baseUrl: string, auth: JiraAuth, opts: { projects?: string[]; fetchFn?: typeof fetch; timeoutMs?: number } = {}) {
-    this.#base = baseUrl.trim().replace(/\/+$/, '');
+    this.#base = parseBase(baseUrl);
     this.#auth = auth;
     this.#projects = (opts.projects ?? []).map((p) => this.#projectKey(p));
     this.#fetchFn = opts.fetchFn ?? fetch;
@@ -104,15 +122,42 @@ export class JiraClient implements TicketSource, Discovery {
   async whoAmI(): Promise<{ id: string; name: string }> {
     const me = obj(await this.#get(`${this.#api}/myself`));
     const id = str(me.accountId) ?? str(me.name) ?? str(me.key) ?? '';
+    if (!id) throw new HubError('JIRA_HTTP', 'Jira returned no user id for /myself');
     return { id, name: str(me.displayName) ?? id };
   }
 
-  #resolveSprint(names: Record<string, string> | undefined): void {
-    if (this.#sprintField !== undefined || !names) return;
-    this.#sprintField = Object.entries(names).find(([, n]) => n === 'Sprint')?.[0] ?? null;
+  // Field metadata is fetched once per client so every search page requests the same field list.
+  #fieldMeta(): Promise<FieldMeta> {
+    this.#meta ??= this.#loadMeta().catch((e) => {
+      this.#meta = undefined;
+      throw e;
+    });
+    return this.#meta;
+  }
+
+  async #loadMeta(): Promise<FieldMeta> {
+    const res = await this.#get<unknown>(`${this.#api}/field`);
+    if (!Array.isArray(res)) throw new HubError('JIRA_HTTP', `Jira returned no field list for ${this.#api}/field`);
+    const names: Record<string, string> = {};
+    const custom: string[] = [];
+    let bySchema: string | null = null;
+    let byName: string | null = null;
+    for (const f of res) {
+      const o = obj(f);
+      const id = str(o.id);
+      if (!id) continue;
+      const name = str(o.name);
+      if (name) names[id] = name;
+      if (id.startsWith('customfield_')) custom.push(id);
+      if (obj(o.schema).custom === 'com.pyxis.greenhopper.jira:gh-sprint') bySchema ??= id;
+      if (name === 'Sprint') byName ??= id;
+    }
+    return { sprint: bySchema ?? byName, names, custom };
   }
 
   async #search(jql: string, max: number): Promise<JiraIssue[]> {
+    const meta = await this.#fieldMeta();
+    const fields = [...new Set([...BASE_FIELDS.split(','), ...(meta.sprint ? [meta.sprint] : []), ...meta.custom])].join(',');
     const cloud = this.#auth.flavor === 'cloud';
     const path = `${this.#api}${cloud ? '/search/jql' : '/search'}`;
     const out: JiraIssue[] = [];
@@ -120,15 +165,14 @@ export class JiraClient implements TicketSource, Discovery {
     let token: string | undefined;
     let startAt = 0;
     for (let page = 0; page < MAX_PAGES; page++) {
-      const fields = this.#sprintField === undefined ? '*all' : [BASE_FIELDS, this.#sprintField].filter(Boolean).join(',');
-      const params: Record<string, string> = { jql, fields, expand: 'names', maxResults: String(Math.min(PAGE_SIZE, max - out.length)) };
+      const params: Record<string, string> = { jql, fields, maxResults: String(Math.min(PAGE_SIZE, max - out.length)) };
       if (cloud && token) params.nextPageToken = token;
       if (!cloud) params.startAt = String(startAt);
       const res = obj(await this.#get(path, params));
       if (!Array.isArray(res.issues)) throw new HubError('JIRA_HTTP', `Jira returned no issue list for ${path}`);
-      this.#resolveSprint(res.names as Record<string, string> | undefined);
       const issues = res.issues as JiraIssue[];
-      out.push(...issues.map((i) => ({ ...i, names: res.names as Record<string, string> | undefined })));
+      // Keys become hub file names, so anything that is not a Jira key is dropped.
+      out.push(...issues.filter((i) => typeof obj(i).key === 'string' && JIRA_KEY.test(i.key)));
       if (out.length >= max) return out.slice(0, max);
       if (cloud) {
         const next = str(res.nextPageToken);
@@ -149,10 +193,10 @@ export class JiraClient implements TicketSource, Discovery {
     return this.#auth.flavor === 'cloud' ? adfToText(v) : (str(v) ?? '');
   }
 
-  #toTicket(issue: JiraIssue): Ticket {
+  #toTicket(issue: JiraIssue, meta: FieldMeta): Ticket {
     const f = issue.fields ?? {};
-    const names = issue.names ?? {};
-    const sprintId = this.#sprintField ?? Object.entries(names).find(([, n]) => n === 'Sprint')?.[0] ?? null;
+    const names = meta.names;
+    const sprintId = meta.sprint;
     const listNames = (v: unknown) => (Array.isArray(v) ? v.map(named).filter((n): n is string => !!n) : []);
     const components = listNames(f.components);
     const labels = Array.isArray(f.labels) ? f.labels.filter((l): l is string => typeof l === 'string') : [];
@@ -206,15 +250,17 @@ export class JiraClient implements TicketSource, Discovery {
   async myTickets(): Promise<Ticket[]> {
     const scope = this.#scopeJql(this.#projects);
     const jql = 'assignee = currentUser() AND statusCategory != Done' + (scope ? ` AND ${scope}` : '');
-    return (await this.#search(jql, 1000)).map((i) => this.#toTicket(i));
+    const issues = await this.#search(jql, 1000);
+    const meta = await this.#fieldMeta();
+    return issues.map((i) => this.#toTicket(i, meta));
   }
 
   async ticket(id: string): Promise<Ticket> {
     const key = this.normalizeId(id);
-    const issue = obj(await this.#get(`${this.#api}/issue/${key}`, { expand: 'names' }));
-    this.#resolveSprint(issue.names as Record<string, string> | undefined);
-    if (typeof issue.key !== 'string') throw new HubError('JIRA_HTTP', `Jira returned no issue for /issue/${key}`);
-    return this.#toTicket(issue as unknown as JiraIssue);
+    const meta = await this.#fieldMeta();
+    const issue = obj(await this.#get(`${this.#api}/issue/${key}`));
+    if (typeof issue.key !== 'string' || !JIRA_KEY.test(issue.key)) throw new HubError('JIRA_HTTP', `Jira returned no issue for /issue/${key}`);
+    return this.#toTicket(issue as unknown as JiraIssue, meta);
   }
 
   async comments(id: string, limit = 10): Promise<TicketComment[]> {
@@ -250,8 +296,12 @@ export class JiraClient implements TicketSource, Discovery {
   }
 
   async sample(scope: string[], limit: number): Promise<Ticket[]> {
-    const where = this.#scopeJql(scope);
-    return (await this.#search(`${where ? where + ' ' : ''}ORDER BY updated DESC`, limit)).map((i) => this.#toTicket(i));
+    // Jira Cloud rejects an unbounded JQL query, so an empty scope means no request.
+    if (scope.length === 0) return [];
+    const max = Math.min(100, Math.max(1, Math.floor(Number(limit)) || 1));
+    const issues = await this.#search(`${this.#scopeJql(scope)} ORDER BY updated DESC`, max);
+    const meta = await this.#fieldMeta();
+    return issues.map((i) => this.#toTicket(i, meta));
   }
 
   async statuses(scope: string[]): Promise<string[]> {

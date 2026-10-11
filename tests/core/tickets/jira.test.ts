@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { HubError } from '../../../src/core/types';
 import { JiraClient } from '../../../src/core/tickets/jira';
-import { CLOUD, NAMES, SERVER, issue, jiraFetch } from '../../fixtures/jira';
+import { CLOUD, FIELDS, SERVER, issue, jiraFetch } from '../../fixtures/jira';
 
 const CLOUD_URL = 'https://acme.atlassian.net';
 const SERVER_URL = 'https://jira.example.com/jira';
@@ -54,15 +55,19 @@ describe('JiraClient tickets', () => {
   it('cloud search scopes JQL, pages by token, and maps fields', async () => {
     let n = 0;
     const { fn, calls } = jiraFetch({
+      '/rest/api/3/field': FIELDS,
       '/rest/api/3/search/jql': () => (n++ === 0
-        ? { issues: [issue('WEB-1', { security: { name: 'Internal' } })], names: NAMES, nextPageToken: 't2' }
-        : { issues: [issue('OPS-2')], names: NAMES }),
+        ? { issues: [issue('WEB-1', { security: { name: 'Internal' } })], nextPageToken: 't2' }
+        : { issues: [issue('OPS-2')] }),
     });
     const tickets = await new JiraClient(CLOUD_URL, CLOUD, { projects: ['WEB', 'OPS'], fetchFn: fn }).myTickets();
-    expect(calls.map((c) => c.method)).toEqual(['GET', 'GET']);
-    expect(calls[0].url.searchParams.get('jql')).toBe('assignee = currentUser() AND statusCategory != Done AND project in (WEB, OPS)');
-    expect(calls[1].url.searchParams.get('nextPageToken')).toBe('t2');
-    expect(calls[1].url.searchParams.get('fields')).toContain('customfield_10020');
+    const searches = calls.filter((c) => c.url.pathname.endsWith('/search/jql'));
+    expect(calls.every((c) => c.method === 'GET')).toBe(true);
+    expect(searches[0].url.searchParams.get('jql')).toBe('assignee = currentUser() AND statusCategory != Done AND project in (WEB, OPS)');
+    expect(searches[1].url.searchParams.get('nextPageToken')).toBe('t2');
+    expect(searches[1].url.searchParams.get('fields')).toBe(searches[0].url.searchParams.get('fields'));
+    expect(searches[0].url.searchParams.get('fields')).toContain('customfield_10030');
+    expect(searches[0].url.searchParams.get('fields')).not.toContain('*all');
     expect(tickets.map((t) => t.id)).toEqual(['WEB-1', 'OPS-2']);
     const t = tickets[0];
     expect(t.restricted).toBe(true);
@@ -80,26 +85,28 @@ describe('JiraClient tickets', () => {
   });
 
   it('pagination stops on a repeated token', async () => {
-    const { fn } = jiraFetch({ '/rest/api/3/search/jql': { issues: [issue('WEB-1')], names: NAMES, nextPageToken: 'same' } });
+    const { fn } = jiraFetch({ '/rest/api/3/field': FIELDS, '/rest/api/3/search/jql': { issues: [issue('WEB-1')], nextPageToken: 'same' } });
     await expect(new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).myTickets()).rejects.toMatchObject({ code: 'JIRA_PAGINATION' });
   });
 
   it('server search pages by startAt and reads plain-text bodies', async () => {
     const { fn, calls } = jiraFetch({
+      '/jira/rest/api/2/field': FIELDS,
       '/jira/rest/api/2/search': (u: URL) => (u.searchParams.get('startAt') === '0'
-        ? { issues: [issue('WEB-1', { description: 'plain text' })], names: NAMES, total: 2 }
-        : { issues: [issue('WEB-2')], names: NAMES, total: 2 }),
+        ? { issues: [issue('WEB-1', { description: 'plain text' })], total: 2 }
+        : { issues: [issue('WEB-2')], total: 2 }),
     });
     const tickets = await new JiraClient(SERVER_URL, SERVER, { fetchFn: fn }).myTickets();
     expect(tickets.map((t) => t.id)).toEqual(['WEB-1', 'WEB-2']);
     expect(tickets[0].notes).toBe('plain text');
-    expect(calls[1].url.searchParams.get('startAt')).toBe('1');
+    expect(calls.filter((c) => c.url.pathname.endsWith('/search'))[1].url.searchParams.get('startAt')).toBe('1');
   });
 
   it('ticket() converts ADF; comments() are oldest first', async () => {
     const adf = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'body' }] }] };
     const { fn, calls } = jiraFetch({
-      '/rest/api/3/issue/WEB-9': { ...issue('WEB-9', { description: adf, parent: { key: 'WEB-1', fields: { summary: 'Epic' } } }), names: NAMES },
+      '/rest/api/3/field': FIELDS,
+      '/rest/api/3/issue/WEB-9': { ...issue('WEB-9', { description: adf, parent: { key: 'WEB-1', fields: { summary: 'Epic' } } }) },
       '/rest/api/3/issue/WEB-9/comment': { comments: [
         { created: '2026-10-02', author: { displayName: 'B' }, body: adf },
         { created: '2026-10-01', author: { displayName: 'A' }, body: adf },
@@ -111,8 +118,9 @@ describe('JiraClient tickets', () => {
     expect(t.parent).toEqual({ id: 'WEB-1', title: 'Epic' });
     const cs = await c.comments('WEB-9', 5);
     expect(cs.map((x) => x.author)).toEqual(['A', 'B']);
-    expect(calls[1].url.searchParams.get('orderBy')).toBe('-created');
-    expect(calls[1].url.searchParams.get('maxResults')).toBe('5');
+    const cc = calls.find((c) => c.url.pathname.endsWith('/comment'))!;
+    expect(cc.url.searchParams.get('orderBy')).toBe('-created');
+    expect(cc.url.searchParams.get('maxResults')).toBe('5');
   });
 });
 
@@ -135,6 +143,84 @@ describe('JiraClient discovery', () => {
   it('server lists projects from /project', async () => {
     const { fn } = jiraFetch({ '/jira/rest/api/2/project': [{ key: 'OPS', name: 'Operations' }] });
     expect(await new JiraClient(SERVER_URL, SERVER, { fetchFn: fn }).scopes()).toEqual([{ id: 'OPS', name: 'Operations' }]);
+  });
+});
+
+describe('JiraClient hardening', () => {
+  it('maps custom fields on page 2 and on a second call', async () => {
+    const pages = [
+      { issues: [issue('WEB-1')], nextPageToken: 'p2' },
+      { issues: [issue('WEB-2')] },
+    ];
+    let n = 0;
+    const { fn, calls } = jiraFetch({ '/rest/api/3/field': FIELDS, '/rest/api/3/search/jql': () => pages[n++ % 2] });
+    const c = new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn });
+    const first = await c.myTickets();
+    const second = await c.myTickets();
+    for (const t of [...first, ...second]) expect(t.fields.some((f) => f.name === 'Team' && f.value === 'Acme core')).toBe(true);
+    expect(calls.filter((x) => x.url.pathname.endsWith('/field')).length).toBe(1);
+  });
+
+  it('finds the sprint field by name when there is no schema', async () => {
+    const { fn } = jiraFetch({
+      '/rest/api/3/field': [{ id: 'customfield_10020', name: 'Sprint' }],
+      '/rest/api/3/search/jql': { issues: [issue('WEB-1')] },
+    });
+    expect((await new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).myTickets())[0].sprints[0].name).toBe('Sprint 4');
+  });
+
+  it('parses the legacy server sprint string', async () => {
+    const legacy = 'com.atlassian.greenhopper.service.sprint.Sprint@1a2b[id=3,rapidViewId=12,state=ACTIVE,name=Sprint 4,goal=]';
+    const { fn } = jiraFetch({
+      '/jira/rest/api/2/field': FIELDS,
+      '/jira/rest/api/2/search': { issues: [issue('WEB-1', { customfield_10020: [legacy] })], total: 1 },
+    });
+    const t = (await new JiraClient(SERVER_URL, SERVER, { fetchFn: fn }).myTickets())[0];
+    expect(t.sprints).toEqual([{ name: 'Sprint 4', active: true, boardId: 12 }]);
+  });
+
+  it('403 is JIRA_AUTH', async () => {
+    const f = (async () => new Response('{}', { status: 403 })) as unknown as typeof fetch;
+    await expect(new JiraClient(CLOUD_URL, CLOUD, { fetchFn: f }).whoAmI()).rejects.toMatchObject({ code: 'JIRA_AUTH' });
+  });
+
+  it('stops a runaway of distinct page tokens', async () => {
+    let n = 0;
+    const { fn } = jiraFetch({ '/rest/api/3/field': FIELDS, '/rest/api/3/search/jql': () => ({ issues: [issue('WEB-1')], nextPageToken: `t${n++}` }) });
+    await expect(new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).myTickets()).rejects.toMatchObject({ code: 'JIRA_PAGINATION' });
+    expect(n).toBe(50);
+  });
+
+  it('drops search results whose key is not a Jira key', async () => {
+    const { fn } = jiraFetch({ '/rest/api/3/field': FIELDS, '/rest/api/3/search/jql': { issues: [issue('../evil'), issue('WEB-1')] } });
+    expect((await new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).myTickets()).map((t) => t.id)).toEqual(['WEB-1']);
+  });
+
+  it('sample() with no scope makes no request and clamps the limit', async () => {
+    const { fn, calls } = jiraFetch({ '/rest/api/3/field': FIELDS, '/rest/api/3/search/jql': { issues: [] } });
+    const c = new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn });
+    expect(await c.sample([], 10)).toEqual([]);
+    expect(calls.length).toBe(0);
+    await c.sample(['WEB'], 5000);
+    expect(calls.find((x) => x.url.pathname.endsWith('/search/jql'))!.url.searchParams.get('maxResults')).toBe('100');
+  });
+
+  it('whoAmI without an id fails', async () => {
+    const { fn } = jiraFetch({ '/rest/api/3/myself': { displayName: 'Dana' } });
+    await expect(new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).whoAmI()).rejects.toMatchObject({ code: 'JIRA_HTTP', message: 'Jira returned no user id for /myself' });
+  });
+
+  it.each([
+    'http://jira.example.com', 'https://user:pw@jira.example.com', 'https://jira.example.com/?a=1', 'https://jira.example.com/#x', 'not a url', 'ftp://jira.example.com',
+  ])('rejects base URL %s', (u) => {
+    expect(() => new JiraClient(u, SERVER)).toThrowError(expect.objectContaining({ code: 'JIRA_BAD_URL' }));
+    expect(() => new JiraClient(u, SERVER)).toThrow(HubError);
+  });
+
+  it('uses the normalized base in request and ticket urls', async () => {
+    const { fn, calls } = jiraFetch({ '/jira/rest/api/2/myself': { name: 'd' } });
+    await new JiraClient('https://jira.example.com/jira//', SERVER, { fetchFn: fn }).whoAmI();
+    expect(calls[0].url.pathname).toBe('/jira/rest/api/2/myself');
   });
 });
 

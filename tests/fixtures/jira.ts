@@ -20,7 +20,11 @@ export function jiraFetch(routes: Record<string, unknown | ((url: URL) => unknow
 export const CLOUD = { flavor: 'cloud', email: 'dev@example.com', token: 'cloudtok-123' } as const;
 export const SERVER = { flavor: 'server', token: 'pat-456' } as const;
 
-export const NAMES = { summary: 'Summary', customfield_10020: 'Sprint', customfield_10030: 'Team' };
+export const FIELDS = [
+  { id: 'summary', name: 'Summary' },
+  { id: 'customfield_10020', name: 'Sprint (agile)', schema: { custom: 'com.pyxis.greenhopper.jira:gh-sprint' } },
+  { id: 'customfield_10030', name: 'Team', schema: { custom: 'x:select' } },
+];
 
 export function issue(key: string, extra: Record<string, unknown> = {}) {
   return {
