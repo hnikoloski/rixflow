@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { InboxItem, Status, View } from '../types'
 import {
-  ACCENT, bandParts, canFill, cell, contextBadge, cliPath, staleAge, titleHasSite, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, RIXFLOW_TOOL,
+  ACCENT, bandParts, canFill, cell, contextBadge, cliPath, fitRow, staleAge, titleHasSite, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, RIXFLOW_TOOL,
   PANE_PAD_X, refreshGate, rule, shouldFetchAsana, statusArgv, statusLine, syncBadge, TOOL, unseen, type Action, type Refresh,
 } from './model'
 
@@ -232,6 +232,7 @@ export const register: Register = on => {
     const width = Math.max(32, e.props.bodyColumns ?? e.viewport?.columns ?? 60) - 2 * PANE_PAD_X
     if (error === 'setup' || (s && !s.initialized)) {
       return (
+        <Box flexDirection="column" paddingX={PANE_PAD_X} paddingY={1}>
         <Box flexDirection="column" borderStyle="round" borderColor="warning" paddingX={1}>
           <Text color="warning" bold>◆ RIXFLOW · SETUP NEEDED</Text>
           <Text color="subtle">RixFlow is not set up on this machine.</Text>
@@ -239,10 +240,11 @@ export const register: Register = on => {
             <Button key="setup" variant="primary" label="Setup" onPress={() => fill($, { kind: 'setup' })} />
           </Box>
         </Box>
+        </Box>
       )
     }
-    if (error === 'version') return <Text color="warning">▲ update rixflow / rixflow-ui</Text>
-    if (!s) return <Text color="subtle">◆ RIXFLOW · loading…</Text>
+    if (error === 'version') return <Box paddingX={PANE_PAD_X} paddingY={1}><Text color="warning" wrap="truncate">▲ update rixflow / rixflow-ui</Text></Box>
+    if (!s) return <Box paddingX={PANE_PAD_X} paddingY={1}><Text color="subtle">◆ RIXFLOW · loading…</Text></Box>
     const rows = Math.max(8, (e.viewport?.rows ?? 30) - 14)
     const per = Math.max(2, Math.floor(rows / 3))
     const inbox = fit(s.inbox, per)
@@ -256,24 +258,33 @@ export const register: Register = on => {
     // Room left on a row for its text after the gutter (2) and its button (~10).
     const text = Math.max(12, width - 12)
 
+    // The title row stacks (name above, badges below) when both do not fit side by side.
+    const rightLen = (badge ? [...badge.label].length : 0) + (mod.context ? [...mod.context.text].length : 0) + (badge && mod.context ? 1 : 0)
+    const user = `@${s.user ?? '?'}`
+    const stacked = 9 + 2 + [...user].length + 1 + rightLen > width
+    const userText = cell(user, Math.max(2, width - 11)).trimEnd()
+
     // A section: an inverse chip in the section's color, a rule to the right edge and a count.
-    const head = (icon: string, label: string, color: string, meta: string) => (
+    const head = (icon: string, full: string, color: string, meta: string) => {
+      const label = cell(full, Math.max(4, width - meta.length - 9)).trimEnd()
+      return (
       <Box marginTop={1}>
         <Text backgroundColor={color} color="inverseText" bold> {icon} {label} </Text>
         <Text color={color}> {rule(width, label.length + meta.length + 9)} </Text>
         <Text color={color} bold>{meta}</Text>
       </Box>
-    )
+      )
+    }
     const gutter = (color: string) => <Text color={color}>▎ </Text>
     const more = (n: number, color: string) => n > 0 && <Box>{gutter(color)}<Text color="subtle">+{n} more</Text></Box>
     const empty = (label: string, color: string) => <Box>{gutter(color)}<Text color="inactive" italic>{label}</Text></Box>
 
     return (
       <Box flexDirection="column" paddingX={PANE_PAD_X} paddingY={1}>
-        <Box justifyContent="space-between">
+        <Box justifyContent="space-between" flexDirection={stacked ? 'column' : 'row'}>
           <Box>
             <Text color={ACCENT.brand} bold>◆ RIXFLOW</Text>
-            <Text color="subtle">  @{s.user ?? '?'}</Text>
+            <Text color="subtle">  {userText}</Text>
           </Box>
           <Box gap={1}>
             {badge && <Text color={badge.color} bold>{badge.label}</Text>}
@@ -292,8 +303,8 @@ export const register: Register = on => {
               <Text bold wrap="truncate">{s.current.title}</Text>
             </Box>
             <Box>
-              {s.current.status && <Text color="subtle">{s.current.status.toUpperCase()}</Text>}
-              {s.current.due && <Text color="warning">{s.current.status ? '  ·  ' : ''}due {s.current.due}</Text>}
+              {s.current.status && <Text color="subtle" wrap="truncate">{s.current.status.toUpperCase()}</Text>}
+              {s.current.due && <Text color="warning" wrap="truncate">{s.current.status ? '  ·  ' : ''}due {s.current.due}</Text>}
             </Box>
             <Box marginTop={1} gap={2}>
               <Button key="checkpoint" variant="primary" hotkey="c" label="Checkpoint" onPress={() => fill($, { kind: 'checkpoint' })} />
@@ -309,49 +320,59 @@ export const register: Register = on => {
 
         {head('✦', 'INBOX', ACCENT.inbox, fresh ? `${fresh} NEW / ${s.inbox.length}` : `${s.inbox.length}`)}
         {inbox.shown.length === 0 && empty('no messages', ACCENT.inbox)}
-        {inbox.shown.map(m => (
+        {inbox.shown.map(m => {
+          const dot = m.status === 'new' ? '● ' : '○ '
+          const r = fitRow(text, [[dot, 2], [m.from, 11], [m.type.toUpperCase(), 9], [relTime(m.created, now), 5]], m.preview)
+          return (
           <Box key={`m-${m.id}`}>
             {gutter(ACCENT.inbox)}
             <Box flexGrow={1} flexShrink={1}>
-              <Text color={m.status === 'new' ? ACCENT.inbox : 'inactive'}>{m.status === 'new' ? '● ' : '○ '}</Text>
-              <Text bold={m.status === 'new'}>{cell(m.from, 11)}</Text>
-              <Text color="subtle">{cell(m.type.toUpperCase(), 9)}{cell(relTime(m.created, now), 5)}</Text>
-              <Text bold={m.status === 'new'} wrap="truncate">{cell(m.preview, Math.max(4, text - 27))}</Text>
+              <Text color={m.status === 'new' ? ACCENT.inbox : 'inactive'}>{dot}</Text>
+              {r.cols[1] !== undefined && <Text bold={m.status === 'new'}>{r.cols[1]}</Text>}
+              {r.cols[2] !== undefined && <Text color="subtle">{r.cols[2]}{r.cols[3] ?? ''}</Text>}
+              <Text bold={m.status === 'new'}>{r.flex}</Text>
             </Box>
             <Button key={`open-${m.id}`} dimColor={m.status !== 'new'} label="Open" onPress={() => fill($, { kind: 'inbox', id: m.id })} />
           </Box>
-        ))}
+          )
+        })}
         {more(inbox.more, ACCENT.inbox)}
 
         {head('‖', 'PAUSED', ACCENT.paused, `${s.paused.length}`)}
         {paused.shown.length === 0 && empty('nothing paused', ACCENT.paused)}
-        {paused.shown.map(p => (
+        {paused.shown.map(p => {
+          const r = fitRow(text, [[p.site ?? '', 6]], p.title, ` ${relTime(p.pausedAt, now)}`)
+          return (
           <Box key={`p-${p.task}`}>
             {gutter(ACCENT.paused)}
             <Box flexGrow={1} flexShrink={1}>
-              <Text color={ACCENT.paused} bold>{cell(p.site ?? '', 6)}</Text>
-              <Text wrap="truncate">{cell(p.title, Math.max(4, text - 12))}</Text>
-              <Text color="subtle"> {relTime(p.pausedAt, now)}</Text>
+              <Text color={ACCENT.paused} bold>{r.cols[0]}</Text>
+              <Text>{r.flex}</Text>
+              {r.tail && <Text color="subtle">{r.tail}</Text>}
             </Box>
             <Button key={`resume-${p.task}`} dimColor label="Resume" onPress={() => fill($, { kind: 'resume', task: p.task })} />
           </Box>
-        ))}
+          )
+        })}
         {more(paused.more, ACCENT.paused)}
 
         {head('▦', (s.sprint?.name ?? 'SPRINT').toUpperCase(), stale ? 'warning' : ACCENT.sprint, s.sprint ? `${stale ? `▲ ${stale} old · ` : ''}${sprint.shown.length + sprint.more}` : '')}
         {!s.sprint && empty(s.problems.find(p => p.startsWith('tickets')) ?? 'loading tickets…', ACCENT.sprint)}
         {s.sprint && sprint.shown.length === 0 && empty('nothing open', ACCENT.sprint)}
-        {sprint.shown.map(t => (
+        {sprint.shown.map(t => {
+          const r = fitRow(text, [[t.sites.join(','), 6]], t.title, ` ${cell((t.status ?? '—').toUpperCase(), 17)}`)
+          return (
           <Box key={`t-${t.task}`}>
             {gutter(ACCENT.sprint)}
             <Box flexGrow={1} flexShrink={1}>
-              <Text color={ACCENT.sprint} bold>{cell(t.sites.join(','), 6)}</Text>
-              <Text wrap="truncate">{cell(t.title, Math.max(4, text - 24))}</Text>
-              <Text color="subtle"> {cell((t.status ?? '—').toUpperCase(), 17)}</Text>
+              <Text color={ACCENT.sprint} bold>{r.cols[0]}</Text>
+              <Text>{r.flex}</Text>
+              {r.tail && <Text color="subtle">{r.tail}</Text>}
             </Box>
             <Button key={`start-${t.task}`} dimColor label="Start" onPress={() => fill($, { kind: 'start', task: t.task })} />
           </Box>
-        ))}
+          )
+        })}
         {more(sprint.more, ACCENT.sprint)}
 
         {s.problems.filter(p => !p.startsWith('tickets') || s.sprint).map(p => (

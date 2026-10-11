@@ -109,6 +109,19 @@ export function cell(text: string, n: number): string {
   return fitted + ' '.repeat(Math.max(1, n - [...fitted].length))
 }
 
+// One list row inside `budget` columns: fixed leading columns `cols` ([text, width] each), then
+// a flexible `flex` text, then a `tail`. Too narrow: the tail goes first, then the columns from the
+// right, so the row's total never exceeds `budget`. The first column is always kept.
+export function fitRow(budget: number, cols: ReadonlyArray<readonly [string, number]>, flex: string, tail = '', minFlex = 8): { cols: string[]; flex: string; tail: string } {
+  const keep = cols.slice()
+  let tl = tail
+  const used = () => keep.reduce((n, c) => n + c[1], 0) + [...tl].length
+  if (budget - used() < minFlex) tl = ''
+  while (keep.length > 1 && budget - used() < minFlex) keep.pop()
+  const rest = Math.max(1, budget - used())
+  return { cols: keep.map(c => cell(c[0], c[1])), flex: cell(flex, rest), tail: tl }
+}
+
 // Asana titles often start with the site code ("AC: …", "AC - …"); then the code is not repeated.
 // A title that only begins with the same letters ("ACME import") still gets it.
 export function titleHasSite(title: string, sites: readonly string[]): boolean {

@@ -332,19 +332,43 @@ const rowWidths = (n: unknown, out: number[] = []): number[] => {
   if (!node || typeof node !== 'object') return out
   const kids = node.children ?? []
   const engineCut = kids.some(k => (k as Node)?.props?.wrap === 'truncate' && !/…/.test(textOf(k)))
-  if (node.type === 'Box' && node.props?.flexDirection !== 'column' && !node.props?.borderStyle && !engineCut) out.push([...textOf(node)].length)
+  if (node.type === 'Box' && node.props?.flexDirection !== 'column' && !node.props?.borderStyle && !engineCut) { out.push([...textOf(node)].length) }
   kids.forEach(k => rowWidths(k, out))
   return out
 }
 
-test('at a narrow width the pane is padded and long rows are truncated inside it', async ($, on) => {
+for (const cols of [32, 40, 60]) {
+  test(`at ${cols} columns every pane row fits inside the padding`, async ($, on) => {
+    const clock = world(on)
+    const long = 'An extremely long ticket title that keeps going well past any narrow pane edge'
+    on('process.run', async () => ran(status({
+      current: { task: '1', title: long, sites: ['AC'], status: 'IN PROGRESS WITH A VERY LONG NAME', due: 'Wednesday the fourteenth of October', startedAt: '2026-10-10T17:00:00.000Z', source: 'session' },
+      inbox: [{ id: '2026-10-10-8qsc', from: 'a-very-long-sender-name', type: 'clarification', task: '111', preview: long, status: 'new', created: '2026-10-10T17:58:00.000Z' }],
+      paused: [{ task: '2', title: long, site: 'GLOBEX1', pausedAt: '2026-10-09T17:00:00.000Z' }],
+      sprint: { name: 'A VERY LONG SPRINT NAME THAT KEEPS GOING', fetchedAt: '2026-10-10T17:59:00.000Z', items: [{ task: '3', title: long, sites: ['ACME', 'GLOBEX'], status: 'In review by the whole team', due: null, paused: false }] },
+    })))
+    on('fs.stat', async () => FILE)
+    on('ui.status', async () => ({ value: undefined }))
+    await $.session.start(START)
+    await clock.settle()
+    const pane = await $.ui.mount({
+      plugin: 'rixflow-ui', surface: 'terminal', component: 'Pane', requestId: 'rixflow',
+      props: { title: 'RixFlow', isFocused: false, bodyColumns: cols, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+      viewport: { columns: cols, rows: 40 },
+    })
+    const root = await pane.drawn()
+    expect((root as Node).props).toMatchObject({ paddingX: 2, paddingY: 1 })
+    const inner = cols - 2 * 2
+    const widths = rowWidths(root)
+    expect(widths.length).toBeGreaterThan(5)
+    for (const w of widths) expect(w).toBeLessThanOrEqual(inner)
+    if (cols < 60) expect((await pane.findAll({ type: 'Text', text: /…/ })).length).toBeGreaterThanOrEqual(2)
+  })
+}
+
+test('the setup box and the version and loading views are padded like the pane', async ($, on) => {
   const clock = world(on)
-  const long = 'An extremely long ticket title that keeps going well past any narrow pane edge'
-  on('process.run', async () => ran(status({
-    current: { task: '1', title: long, sites: ['AC'], status: 'TODO', due: null, startedAt: '2026-10-10T17:00:00.000Z', source: 'session' },
-    paused: [{ task: '2', title: long, site: 'GL', pausedAt: '2026-10-09T17:00:00.000Z' }],
-    sprint: { name: 'SPRINT 1', fetchedAt: '2026-10-10T17:59:00.000Z', items: [{ task: '3', title: long, sites: ['AC'], status: null, due: null, paused: false }] },
-  })))
+  on('process.run', async () => ran(status({ initialized: false })))
   on('fs.stat', async () => FILE)
   on('ui.status', async () => ({ value: undefined }))
   await $.session.start(START)
@@ -354,13 +378,7 @@ test('at a narrow width the pane is padded and long rows are truncated inside it
     props: { title: 'RixFlow', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
     viewport: { columns: 40, rows: 40 },
   })
-  const root = await pane.drawn()
-  expect((root as Node).props).toMatchObject({ paddingX: 2, paddingY: 1 })
-  const inner = 40 - 2 * 2
-  for (const w of rowWidths(root)) expect(w).toBeLessThanOrEqual(inner)
-  const paused = await pane.findAll({ type: 'Text', text: /…/ })
-  expect(paused.length).toBeGreaterThanOrEqual(2)
-  for (const t of paused) expect([...t.text].length).toBeLessThanOrEqual(inner)
+  expect(((await pane.drawn()) as Node).props).toMatchObject({ paddingX: 2, paddingY: 1 })
 })
 
 test('the band has a column of padding either side', async ($, on) => {

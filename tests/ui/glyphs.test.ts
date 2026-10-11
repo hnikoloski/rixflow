@@ -8,8 +8,8 @@ describe('mod glyphs', () => {
     it(`${file} has no emoji-capable glyph or variation selector`, () => {
       const text = readFileSync(file, 'utf8');
       expect(text.match(/\p{Extended_Pictographic}/gu) ?? []).toEqual([]);
-      expect(text).not.toContain('️');
-      expect(text).not.toContain('︎');
+      expect(text).not.toContain('\uFE0F');
+      expect(text).not.toContain('\uFE0E');
     });
   }
 });
