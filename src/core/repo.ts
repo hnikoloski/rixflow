@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { devNull, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { HubError } from './types';
 
-export type RunGit = (args: string[], env: NodeJS.ProcessEnv) => Promise<{ ok: boolean; stdout: string }>;
+export type RunGit = (args: string[], env: NodeJS.ProcessEnv, cwd?: string) => Promise<{ ok: boolean; stdout: string }>;
 
 const LS_REMOTE_TIMEOUT_MS = 15_000;
 const GH_TIMEOUT_MS = 60_000;
@@ -26,30 +29,49 @@ export function anonymousUrl(url: string): string | null {
   }
 }
 
-const systemGit: RunGit = (args, env) =>
+const systemGit: RunGit = (args, env, cwd) =>
   new Promise((resolve) => {
-    execFile('git', args, { env, timeout: LS_REMOTE_TIMEOUT_MS, encoding: 'utf8', maxBuffer: 1 << 20 }, (err, stdout) =>
+    execFile('git', args, { env, cwd, timeout: LS_REMOTE_TIMEOUT_MS, encoding: 'utf8', maxBuffer: 1 << 20 }, (err, stdout) =>
       resolve({ ok: !err, stdout: err ? '' : stdout }));
   });
+
+// Env for a check that must not authenticate: no user, system or repo git config, no ssh, no prompts.
+function cleanEnv(home: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const k of Object.keys(env)) if (k.startsWith('GIT_CONFIG_')) delete env[k];
+  for (const k of ['GIT_SSH_COMMAND', 'GIT_SSH', 'GIT_DIR']) delete env[k];
+  return {
+    ...env,
+    GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull,
+    HOME: home, XDG_CONFIG_HOME: home, USERPROFILE: home,
+    GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '', GCM_INTERACTIVE: 'never',
+  };
+}
 
 export async function isPublicRepo(url: string, run: RunGit = systemGit): Promise<boolean> {
   const anon = anonymousUrl(url);
   if (!anon) return false;
-  const env = {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '', GCM_INTERACTIVE: 'never',
-  };
+  let dir: string | undefined;
   try {
-    return (await run(['-c', 'credential.helper=', 'ls-remote', anon], env)).ok;
+    dir = await mkdtemp(join(tmpdir(), 'rixflow-anon-'));
+    const args = [
+      '-c', 'credential.helper=', '-c', 'http.extraHeader=',
+      '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always',
+      'ls-remote', '--', anon,
+    ];
+    return (await run(args, cleanEnv(dir), dir)).ok;
   } catch {
     return false;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
 export async function checkReach(url: string, run: RunGit = systemGit): Promise<{ ok: boolean; empty: boolean }> {
+  if (url.startsWith('-')) return { ok: false, empty: false };
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' };
   try {
-    const r = await run(['ls-remote', url], env);
+    const r = await run(['ls-remote', '--', url], env);
     return r.ok ? { ok: true, empty: r.stdout.trim() === '' } : { ok: false, empty: false };
   } catch {
     return { ok: false, empty: false };
@@ -73,7 +95,7 @@ export function systemGh(): Gh {
       const view = await runGh(['repo', 'view', name, '--json', 'sshUrl']);
       let ssh: unknown;
       try { ssh = (JSON.parse(view.stdout) as { sshUrl?: unknown }).sshUrl; } catch { /* handled below */ }
-      if (!view.ok || typeof ssh !== 'string' || !ssh) throw new HubError('GH_FAILED', 'gh could not read the new repository URL.');
+      if (!view.ok || typeof ssh !== 'string' || !ssh) throw new HubError('GH_FAILED', `Created the repo, but could not read its address. Run gh repo view ${name} --json sshUrl.`);
       return ssh;
     },
   };
