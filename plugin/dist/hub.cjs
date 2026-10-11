@@ -12599,6 +12599,15 @@ function hasPrivateBrief(configDir2, task) {
   }
   return false;
 }
+var privateDirIsLink = (configDir2) => isLink((0, import_node_path14.join)(configDir2, "private"));
+function privateIds(configDir2) {
+  try {
+    if (privateDirIsLink(configDir2)) return [];
+    return (0, import_node_fs12.readdirSync)((0, import_node_path14.join)(configDir2, "private")).filter((f) => /\.(md|restricted)$/.test(f)).map((f) => f.replace(/\.(md|restricted)$/, ""));
+  } catch {
+    return [];
+  }
+}
 
 // src/core/notes.ts
 var import_node_fs13 = require("node:fs");
@@ -12772,6 +12781,11 @@ function readHandover(ctx, task) {
   const path = handoverPath(ctx, task);
   return (0, import_node_fs13.existsSync)(path) ? toHandover(path) : null;
 }
+function restrictedHandoverTasks(ctx) {
+  const dir = (0, import_node_path16.join)(personDir(ctx), "handovers");
+  if (!(0, import_node_fs13.existsSync)(dir)) return [];
+  return readAll2((0, import_node_fs13.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path16.join)(dir, f)), toHandover).filter((h) => h.restricted).map((h) => h.task);
+}
 function findActiveHandover(ctx, cwd) {
   const dir = (0, import_node_path16.join)(personDir(ctx), "handovers");
   if (!(0, import_node_fs13.existsSync)(dir)) return null;
@@ -12908,10 +12922,18 @@ function eachLine(path, fn) {
     (0, import_node_fs14.closeSync)(fd);
   }
 }
-function touchedTasks(path) {
+function idPattern(ids) {
+  if (!ids.length) return null;
+  const alt = ids.map((i) => i.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return new RegExp(`(?<![A-Za-z0-9_])(?:${alt})(?![A-Za-z0-9_]|-\\d)`, "i");
+}
+function scanTranscript(path, known = []) {
   const ids = /* @__PURE__ */ new Set();
+  const pattern = idPattern(known);
+  let mentioned = false;
   try {
     eachLine(path, (line2) => {
+      if (pattern && !mentioned && pattern.test(line2)) mentioned = true;
       if (!line2.includes('"tool_use"')) return;
       const entry = parseLine(line2);
       const content = entry?.message?.content;
@@ -12926,7 +12948,7 @@ function touchedTasks(path) {
   } catch {
     return null;
   }
-  return [...ids];
+  return { touched: [...ids], mentioned };
 }
 function isRestricted(ctx, task) {
   try {
@@ -13004,12 +13026,13 @@ async function summarizeSession(ctx, input, deps) {
     return null;
   }
   const active = findActiveHandover(ctx, normalizeDir(input.cwd));
-  const touched = touchedTasks(input.transcriptPath);
-  if (touched === null) {
+  const known = [.../* @__PURE__ */ new Set([...privateIds(ctx.configDir), ...restrictedHandoverTasks(ctx)])];
+  const scan = scanTranscript(input.transcriptPath, known);
+  if (scan === null) {
     log("skip", "transcript unreadable");
     return null;
   }
-  if (active?.restricted || touched.some((t) => isRestricted(ctx, t))) {
+  if (active?.restricted || privateDirIsLink(ctx.configDir) || scan.mentioned || scan.touched.some((t) => isRestricted(ctx, t))) {
     log("skip", "restricted ticket");
     return null;
   }

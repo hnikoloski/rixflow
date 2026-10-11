@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
-import { hasPrivateBrief } from './private';
-import { findActiveHandover, hasSessionSummary, readHandover, writeSession, type Phase, type Trigger } from './notes';
+import { hasPrivateBrief, privateDirIsLink, privateIds } from './private';
+import { findActiveHandover, hasSessionSummary, readHandover, restrictedHandoverTasks, writeSession, type Phase, type Trigger } from './notes';
 import { normalizeDir } from './config';
 import type { SyncResult } from './git';
 import { scrub } from './scrub';
@@ -134,7 +134,7 @@ const TASK_TOOLS = ['start_task', 'resume_task', 'task_details', 'checkpoint', '
 // `mcp__plugin_rixflow_hub__start_task`, OpenCode `hub_start_task`). Extra matches fail closed.
 const isTaskTool = (name: string): boolean => TASK_TOOLS.some((t) => name === t || name.endsWith(`_${t}`));
 
-// Calls fn for each line of the whole file, reading in chunks.
+// Calls fn for each line of the whole file, reading in chunks. Memory is bounded by the longest line.
 function eachLine(path: string, fn: (line: string) => void): void {
   const fd = openSync(path, 'r');
   try {
@@ -154,11 +154,22 @@ function eachLine(path: string, fn: (line: string) => void): void {
   }
 }
 
-// Task ids named in RixFlow task tool inputs anywhere in the transcript, or null when it cannot be read.
-export function touchedTasks(path: string): string[] | null {
+// Matches any known id on token boundaries: WEB-7 never matches WEB-70 or XWEB-7.
+function idPattern(ids: string[]): RegExp | null {
+  if (!ids.length) return null;
+  const alt = ids.map((i) => i.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return new RegExp(`(?<![A-Za-z0-9_])(?:${alt})(?![A-Za-z0-9_]|-\\d)`, 'i');
+}
+
+// Task ids named in RixFlow task tool inputs anywhere in the transcript, plus whether any of
+// `known` is mentioned anywhere in it. Null when the transcript cannot be read.
+export function scanTranscript(path: string, known: string[] = []): { touched: string[]; mentioned: boolean } | null {
   const ids = new Set<string>();
+  const pattern = idPattern(known);
+  let mentioned = false;
   try {
     eachLine(path, (line) => {
+      if (pattern && !mentioned && pattern.test(line)) mentioned = true;
       if (!line.includes('"tool_use"')) return;
       const entry = parseLine(line);
       const content = entry?.message?.content;
@@ -173,8 +184,10 @@ export function touchedTasks(path: string): string[] | null {
   } catch {
     return null;
   }
-  return [...ids];
+  return { touched: [...ids], mentioned };
 }
+
+export const touchedTasks = (path: string): string[] | null => scanTranscript(path)?.touched ?? null;
 
 function isRestricted(ctx: Ctx, task: string): boolean {
   try {
@@ -276,12 +289,14 @@ export async function summarizeSession(
   const active = findActiveHandover(ctx, normalizeDir(input.cwd));
   // A summary of a restricted ticket's session could quote its description or comments. The
   // transcript decides (tasks the session touched, ended or not); the cwd is an extra signal.
-  const touched = touchedTasks(input.transcriptPath);
-  if (touched === null) {
+  const known = [...new Set([...privateIds(ctx.configDir), ...restrictedHandoverTasks(ctx)])];
+  const scan = scanTranscript(input.transcriptPath, known);
+  if (scan === null) {
     log('skip', 'transcript unreadable');
     return null;
   }
-  if (active?.restricted || touched.some((t) => isRestricted(ctx, t))) {
+  // A symlinked private dir cannot be trusted, so it counts as restricted (fail closed).
+  if (active?.restricted || privateDirIsLink(ctx.configDir) || scan.mentioned || scan.touched.some((t) => isRestricted(ctx, t))) {
     log('skip', 'restricted ticket');
     return null;
   }

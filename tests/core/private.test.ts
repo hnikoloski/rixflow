@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HubError } from '../../src/core/types';
-import { mkdtempSync, appendFileSync } from 'node:fs';
 import { markRestricted, readPrivateBrief, restrictedBrief, writePrivateBrief } from '../../src/core/private';
 import { readHandover, writeHandover, endHandover } from '../../src/core/notes';
 import { resumeTask, startTask } from '../../src/core/tasks';
@@ -190,5 +189,37 @@ describe('restricted marker and full scan', () => {
   });
   it('touchedTasks returns null for an unreadable transcript', () => {
     expect(touchedTasks(join(makeCtx().configDir, 'missing.jsonl'))).toBeNull();
+  });
+});
+
+describe('ids mentioned in the transcript', () => {
+  const say = (text: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `${text} ${'x'.repeat(900)}` }] } });
+  async function run(ctx: ReturnType<typeof makeCtx>, text: string) {
+    const t = join(ctx.configDir, 'tr.jsonl');
+    writeFileSync(t, say(text) + '\n');
+    const st = { called: false };
+    const out = await summarizeSession(ctx, { sessionId: 's', transcriptPath: t, trigger: 'precompact', cwd: '/' }, {
+      run: () => { st.called = true; return '{"phase":"done","goal":"g"}'; }, persist: async () => {},
+    });
+    return { out, called: st.called };
+  }
+  it('skips on a marked id, not on an unmarked one or a longer key', async () => {
+    const ctx = makeCtx();
+    markRestricted(ctx.configDir, 'WEB-7', ctx.now());
+    expect((await run(ctx, 'The subagent says WEB-7 needs payroll access')).called).toBe(false);
+    expect((await run(ctx, 'Working on WEB-8 today')).called).toBe(true);
+    expect((await run(ctx, 'Working on WEB-70 today')).called).toBe(true);
+  });
+  it('matches gids only as whole numbers', async () => {
+    const ctx = makeCtx();
+    markRestricted(ctx.configDir, '1234', ctx.now());
+    expect((await run(ctx, 'ticket 12345 is fine')).called).toBe(true);
+    expect((await run(ctx, 'ticket 1234 is not')).called).toBe(false);
+  });
+  it('a symlinked private dir fails closed', async () => {
+    const ctx = makeCtx();
+    mkdirSync(join(ctx.configDir, 'real'));
+    symlinkSync(join(ctx.configDir, 'real'), join(ctx.configDir, 'private'));
+    expect((await run(ctx, 'anything')).called).toBe(false);
   });
 });

@@ -232,6 +232,14 @@ export function endHandover(ctx: Ctx, task: string, outcome: 'finished' | 'dropp
   return true;
 }
 
+// Tasks whose own handover is restricted (ended or not).
+export function restrictedHandoverTasks(ctx: Ctx): string[] {
+  const dir = join(personDir(ctx), 'handovers');
+  if (!existsSync(dir)) return [];
+  return readAll(readdirSync(dir).filter((f) => f.endsWith('.md') && f !== '_index.md').map((f) => join(dir, f)), toHandover)
+    .filter((h) => h.restricted).map((h) => h.task);
+}
+
 export function findActiveHandover(ctx: Ctx, cwd: string): Handover | null {
   const dir = join(personDir(ctx), 'handovers');
   if (!existsSync(dir)) return null;

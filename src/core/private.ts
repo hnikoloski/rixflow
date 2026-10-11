@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, readdirSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { oneLine } from './brief';
 import { scrub } from './scrub';
@@ -88,4 +88,16 @@ export function restrictedBrief(ticket: Ticket, label: string, user: string): st
     `- ${oneLine(label)}: ${oneLine(ticket.url ?? ticket.id)}`,
     `- Restricted ticket: its description and comments are kept on ${oneLine(user)}'s machine only.`,
   ].join('\n'));
+}
+
+export const privateDirIsLink = (configDir: string): boolean => isLink(join(configDir, 'private'));
+
+// Ids with a private brief or a restricted marker on this machine.
+export function privateIds(configDir: string): string[] {
+  try {
+    if (privateDirIsLink(configDir)) return [];
+    return readdirSync(join(configDir, 'private')).filter((f) => /\.(md|restricted)$/.test(f)).map((f) => f.replace(/\.(md|restricted)$/, ''));
+  } catch {
+    return [];
+  }
 }
