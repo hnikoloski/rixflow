@@ -192,11 +192,49 @@ describe('runInit clone failure', () => {
   it('prints a one-line ssh-agent / credential helper hint when its clone fails', async () => {
     const root = tmp();
     const env = { ...process.env, HOME: root, RIXFLOW_DIR: join(root, 'hub'), RIXFLOW_CONFIG_DIR: join(root, 'cfg') };
-    const i = io(['yes', join(root, 'missing.git')]);
+    const i = io(['yes', '1', join(root, 'missing.git')]);
     await expect(runInit(i, '/x/hub.cjs', env)).rejects.toThrow();
     expect(i.logs).toContain(ACCESS_HINT);
     expect(ACCESS_HINT.split('\n')).toHaveLength(1);
     expect(existsSync(join(root, 'cfg'))).toBe(false);
+  });
+});
+
+describe('runInit dispatcher', () => {
+  const envFor = (root: string) => ({ ...process.env, HOME: root, RIXFLOW_DIR: join(root, 'hub'), RIXFLOW_CONFIG_DIR: join(root, 'cfg') });
+  it('asks join or create on a machine that is not set up; create is not ready yet', async () => {
+    const root = tmp();
+    const i = io(['yes', '2']);
+    await expect(runInit(i, '/x/hub.cjs', envFor(root))).rejects.toMatchObject({
+      code: 'NOT_READY', message: 'Creating a team arrives in the next update.',
+    });
+    expect(i.logs.join('\n')).toContain('Join an existing team, or create a new one?');
+  });
+  it('stops before anything else without consent', async () => {
+    const i = io(['no']);
+    await expect(runInit(i, '/x/hub.cjs', envFor(tmp()))).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(i.asked).toHaveLength(1);
+  });
+  it('keeps the original init on a machine that is already set up', async () => {
+    const root = tmp();
+    mkdirSync(join(root, 'cfg'));
+    writeFileSync(join(root, 'cfg', 'config.yml'), 'name: me\nrole: dev\nprojectsRoot: /p\n');
+    const i = io(['yes', join(root, 'missing.git')]);
+    await expect(runInit(i, '/x/hub.cjs', envFor(root))).rejects.toThrow();
+    expect(i.logs.join('\n')).not.toContain('Join an existing team');
+    expect(i.asked[1]).toMatch(/^Hub git URL/);
+    expect(i.logs).toContain(ACCESS_HINT);
+  });
+  it('goes straight back into an unfinished join', async () => {
+    const root = tmp();
+    mkdirSync(join(root, 'cfg'));
+    writeFileSync(join(root, 'cfg', 'setup-progress.json'), JSON.stringify({ flow: 'join', done: ['hub-url'], answers: {}, updatedAt: 't' }));
+    writeFileSync(join(root, 'cfg', 'config.yml'), 'name: me\nrole: dev\nprojectsRoot: /p\n');
+    const i = io(['yes', 'n', join(root, 'missing.git')]);
+    await expect(runInit(i, '/x/hub.cjs', envFor(root))).rejects.toThrow();
+    expect(i.logs.join('\n')).not.toContain('Join an existing team');
+    expect(i.asked[1]).toMatch(/Continue where you stopped \(hub-url\)/);
+    expect(i.asked[2]).toMatch(/^Hub git URL/);
   });
 });
 

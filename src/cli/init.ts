@@ -13,6 +13,10 @@ import { mergeHubGitignore } from '../core/template';
 import { loadTeam } from '../core/team';
 import { setToken } from '../core/token';
 import { HubError } from '../core/types';
+import type { WizardDeps } from './wizard/connect';
+import { runJoin } from './wizard/join';
+import { loadProgress } from './wizard/progress';
+import { choose } from './wizard/prompts';
 
 export const MCP_ALLOW_RULE = 'mcp__plugin_rixflow_hub__*';
 
@@ -188,7 +192,7 @@ export const ACCESS_HINT =
   `(ssh-add); for an https URL, set up a git credential helper. Then run again: ${hubCommand('init')}`;
 
 // Hooks and tools sync without a terminal, so access that only works with a prompt is explained here.
-async function withAccessHint(io: InitIo, work: () => Promise<unknown>): Promise<void> {
+export async function withAccessHint(io: InitIo, work: () => Promise<unknown>): Promise<void> {
   try {
     await work();
   } catch (e) {
@@ -197,12 +201,35 @@ async function withAccessHint(io: InitIo, work: () => Promise<unknown>): Promise
   }
 }
 
-export async function runInit(io: InitIo, cliPath: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+// Task 11 replaces this with the guided create flow.
+export async function runCreate(_io: InitIo, _deps: WizardDeps, _env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  throw new HubError('NOT_READY', 'Creating a team arrives in the next update.');
+}
+
+// Consent first. A machine that is not set up yet (no config.yml, or an unfinished wizard) gets
+// "join or create"; an already set-up machine keeps the original init.
+export async function runInit(
+  io: InitIo, cliPath: string, env: NodeJS.ProcessEnv = process.env, deps: Omit<WizardDeps, 'cliPath'> = {},
+): Promise<void> {
   const configDir = getConfigDir(env);
-  const hubDir = getHubDir(env);
 
   io.log('Everything you save to the team hub (notes, session summaries, checkpoints) is visible to the whole team.');
   if ((await io.ask('Type "yes" to continue: ')).toLowerCase() !== 'yes') throw new HubError('ABORTED', 'init cancelled');
+
+  const progress = loadProgress(configDir);
+  if (!progress && existsSync(join(configDir, 'config.yml'))) return reinit(io, cliPath, env);
+  const flow = progress?.flow ?? await choose(io, 'Join an existing team, or create a new one?', [
+    { value: 'join', label: 'Join an existing team' },
+    { value: 'create', label: 'Create a new team' },
+  ]);
+  const all: WizardDeps = { ...deps, cliPath };
+  return flow === 'join' ? runJoin(io, all, env) : runCreate(io, all, env);
+}
+
+// The original init, for a machine that is already set up. Task 12 puts a menu in front of it.
+async function reinit(io: InitIo, cliPath: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const configDir = getConfigDir(env);
+  const hubDir = getHubDir(env);
 
   if (!existsSync(join(hubDir, '.git'))) {
     const url = await io.ask('Hub git URL (e.g. git@github.com:org/rixflow-hub.git): ');

@@ -10786,7 +10786,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli/main.ts
-var import_node_path20 = require("node:path");
+var import_node_path23 = require("node:path");
 
 // node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
@@ -10953,11 +10953,11 @@ function parseDoc(text2) {
   return { data, body: text2.slice(match[0].length) };
 }
 function stringifyDoc(data, body) {
-  const clean3 = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== void 0));
+  const clean4 = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== void 0));
   const text2 = body.endsWith("\n") ? body : `${body}
 `;
   return `---
-${import_yaml2.default.stringify(clean3).trimEnd()}
+${import_yaml2.default.stringify(clean4).trimEnd()}
 ---
 ${text2}`;
 }
@@ -11032,8 +11032,8 @@ function writeGuarded(path, content, opts = {}) {
   }
 }
 function writeDoc(path, data, body, opts = {}) {
-  const clean3 = scrubDeep(data);
-  writeGuarded(path, stringifyDoc(clean3, scrub(body)), opts);
+  const clean4 = scrubDeep(data);
+  writeGuarded(path, stringifyDoc(clean4, scrub(body)), opts);
 }
 function readDoc(path) {
   return parseDoc((0, import_node_fs2.readFileSync)(path, "utf8"));
@@ -11210,22 +11210,22 @@ async function resolveRebase(git, user) {
     if (files.length === 0 || round >= MAX_CONFLICT_ROUNDS) {
       throw new HubError("SYNC_FAILED", result.err || "rebase made no progress");
     }
-    for (const file of files) {
-      const local = await git.tryRun(["show", `:3:${file}`]);
+    for (const file2 of files) {
+      const local = await git.tryRun(["show", `:3:${file2}`]);
       if (local.ok) {
-        const copy = `${file.replace(/\.md$/, "")}.conflict-${user}.md`;
-        if (import_node_path4.posix.dirname(copy) !== import_node_path4.posix.dirname(file)) throw new HubError("SYNC_FAILED", `bad conflict path: ${copy}`);
+        const copy = `${file2.replace(/\.md$/, "")}.conflict-${user}.md`;
+        if (import_node_path4.posix.dirname(copy) !== import_node_path4.posix.dirname(file2)) throw new HubError("SYNC_FAILED", `bad conflict path: ${copy}`);
         writeGuarded((0, import_node_path4.join)(git.cwd, copy), scrub(local.out));
         await git.run(["add", "--", copy]);
       }
-      const upstream = await git.tryRun(["show", `:2:${file}`]);
+      const upstream = await git.tryRun(["show", `:2:${file2}`]);
       if (upstream.ok) {
-        writeGuarded((0, import_node_path4.join)(git.cwd, file), scrub(upstream.out));
-        await git.run(["add", "--", file]);
+        writeGuarded((0, import_node_path4.join)(git.cwd, file2), scrub(upstream.out));
+        await git.run(["add", "--", file2]);
       } else {
-        await git.run(["rm", "-q", "--cached", "--ignore-unmatch", "--", file]);
+        await git.run(["rm", "-q", "--cached", "--ignore-unmatch", "--", file2]);
       }
-      conflicts.push(file);
+      conflicts.push(file2);
     }
     const noEditor = new Git(git.cwd, { ...git.env, GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true" });
     result = await noEditor.tryRun(["-c", "core.editor=true", "rebase", "--continue"]);
@@ -11250,8 +11250,8 @@ var import_node_fs4 = require("node:fs");
 var import_node_path5 = require("node:path");
 var import_yaml3 = __toESM(require_dist(), 1);
 var FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-function fail(file, reason) {
-  throw new HubError("BAD_CONFIG", `${file}: ${reason}`);
+function fail(file2, reason) {
+  throw new HubError("BAD_CONFIG", `${file2}: ${reason}`);
 }
 var isMapping = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 function readYaml(path, label = path) {
@@ -11267,25 +11267,25 @@ function readYaml(path, label = path) {
   return parsed;
 }
 function loadTeam(hubDir2) {
-  const file = (0, import_node_path5.join)(hubDir2, "config", "team.yml");
-  const raw = readYaml(file);
+  const file2 = (0, import_node_path5.join)(hubDir2, "config", "team.yml");
+  const raw = readYaml(file2);
   if (raw.members === void 0 || raw.members === null) return [];
-  if (!Array.isArray(raw.members)) fail(file, "members must be a list");
+  if (!Array.isArray(raw.members)) fail(file2, "members must be a list");
   return raw.members.map((m, i) => {
-    if (!isMapping(m)) fail(file, `member ${i} must be a mapping`);
+    if (!isMapping(m)) fail(file2, `member ${i} must be a mapping`);
     try {
       assertName(m.name);
     } catch {
-      fail(file, `member ${i} has an invalid name: ${String(m.name)}`);
+      fail(file2, `member ${i} has an invalid name: ${String(m.name)}`);
     }
-    if (m.role !== "dev" && m.role !== "pm") fail(file, `member ${m.name}: role must be dev or pm`);
+    if (m.role !== "dev" && m.role !== "pm") fail(file2, `member ${m.name}: role must be dev or pm`);
     const member = { name: m.name, role: m.role };
     if (m.asanaGid !== void 0 && m.asanaGid !== null) {
       const gid = String(m.asanaGid);
       try {
         assertGid(gid);
       } catch {
-        fail(file, `member ${m.name}: invalid asanaGid`);
+        fail(file2, `member ${m.name}: invalid asanaGid`);
       }
       member.asanaGid = gid;
     }
@@ -11293,24 +11293,24 @@ function loadTeam(hubDir2) {
   });
 }
 function loadSites(hubDir2) {
-  const file = (0, import_node_path5.join)(hubDir2, "config", "sites.yml");
-  const raw = readYaml(file);
+  const file2 = (0, import_node_path5.join)(hubDir2, "config", "sites.yml");
+  const raw = readYaml(file2);
   if (raw.sites === void 0 || raw.sites === null) return {};
-  if (!isMapping(raw.sites)) fail(file, "sites must be a mapping");
+  if (!isMapping(raw.sites)) fail(file2, "sites must be a mapping");
   const out = {};
   for (const [code, def] of Object.entries(raw.sites)) {
     try {
       assertSiteCode(code);
     } catch {
-      fail(file, `invalid site code: ${code}`);
+      fail(file2, `invalid site code: ${code}`);
     }
-    if (!isMapping(def)) fail(file, `site ${code} must be a mapping`);
+    if (!isMapping(def)) fail(file2, `site ${code} must be a mapping`);
     const { folder, aliases } = def;
     if (typeof folder !== "string" || !FOLDER.test(folder) || folder.includes("..")) {
-      fail(file, `site ${code}: invalid folder`);
+      fail(file2, `site ${code}: invalid folder`);
     }
     if (aliases !== void 0 && (!Array.isArray(aliases) || !aliases.every((a) => typeof a === "string"))) {
-      fail(file, `site ${code}: aliases must be a list of strings`);
+      fail(file2, `site ${code}: aliases must be a list of strings`);
     }
     out[code] = aliases === void 0 ? { folder } : { folder, aliases };
   }
@@ -12447,16 +12447,16 @@ function getToken(configDir2, env = process.env, exec = defaultExec, user, kind 
   if (fromEnv) return fromEnv;
   const fromKeychain = keychainGet(exec, kind, user);
   if (fromKeychain) return fromKeychain;
-  const file = tokenFile(configDir2, kind);
-  return (0, import_node_fs10.existsSync)(file) ? (0, import_node_fs10.readFileSync)(file, "utf8").trim() || null : null;
+  const file2 = tokenFile(configDir2, kind);
+  return (0, import_node_fs10.existsSync)(file2) ? (0, import_node_fs10.readFileSync)(file2, "utf8").trim() || null : null;
 }
 function setToken(configDir2, token, exec = defaultExec, user, kind = "asana") {
   if (!/^\S+$/.test(token)) throw new HubError("BAD_TOKEN", "Token must be a single non-empty line without spaces");
   if (keychainSet(exec, token, kind, user)) return "keychain";
   ensurePrivateDir(configDir2);
-  const file = tokenFile(configDir2, kind);
-  (0, import_node_fs10.rmSync)(file, { force: true });
-  (0, import_node_fs10.writeFileSync)(file, token, { mode: 384, flag: "wx" });
+  const file2 = tokenFile(configDir2, kind);
+  (0, import_node_fs10.rmSync)(file2, { force: true });
+  (0, import_node_fs10.writeFileSync)(file2, token, { mode: 384, flag: "wx" });
   return "file";
 }
 
@@ -12591,9 +12591,9 @@ var markerFile = (configDir2, task) => {
 };
 function hasPrivateBrief(configDir2, task) {
   if (isLink((0, import_node_path14.join)(configDir2, "private"))) return false;
-  for (const file of [privateFile(configDir2, task), markerFile(configDir2, task)]) {
+  for (const file2 of [privateFile(configDir2, task), markerFile(configDir2, task)]) {
     try {
-      if ((0, import_node_fs12.lstatSync)(file).isFile()) return true;
+      if ((0, import_node_fs12.lstatSync)(file2).isFile()) return true;
     } catch {
     }
   }
@@ -12618,11 +12618,11 @@ var import_node_path15 = require("node:path");
 function rebuildIndex(hubDir2, relDir, title) {
   const dir = (0, import_node_path15.join)(hubDir2, relDir);
   const groups = /* @__PURE__ */ new Map();
-  for (const file of listMd(dir)) {
-    if ((0, import_node_path15.basename)(file) === "_index.md") continue;
-    const inDir = (0, import_node_path15.relative)(dir, file);
+  for (const file2 of listMd(dir)) {
+    if ((0, import_node_path15.basename)(file2) === "_index.md") continue;
+    const inDir = (0, import_node_path15.relative)(dir, file2);
     const group = inDir.includes(import_node_path15.sep) ? inDir.split(import_node_path15.sep)[0] : "(root)";
-    const link = (0, import_node_path15.relative)(hubDir2, file).split(import_node_path15.sep).join("/").replace(/\.md$/, "");
+    const link = (0, import_node_path15.relative)(hubDir2, file2).split(import_node_path15.sep).join("/").replace(/\.md$/, "");
     groups.set(group, [...groups.get(group) ?? [], link]);
   }
   const lines = [`# ${title}`, "", "_Generated by RixFlow. Do not edit._", ""];
@@ -13168,255 +13168,84 @@ function detachedSync(cliPath2, env = process.env, spawnFn = import_node_child_p
 }
 
 // src/cli/init.ts
-var import_node_child_process5 = require("node:child_process");
-var import_node_fs16 = require("node:fs");
-var import_node_path18 = require("node:path");
+var import_node_child_process6 = require("node:child_process");
+var import_node_fs18 = require("node:fs");
+var import_node_path21 = require("node:path");
 var import_node_readline = require("node:readline");
 
-// src/core/hookcopy.ts
-var import_node_crypto2 = require("node:crypto");
-var import_node_fs15 = require("node:fs");
+// src/cli/wizard/join.ts
+var import_node_fs16 = require("node:fs");
+var import_node_path19 = require("node:path");
+
+// src/core/repo.ts
+var import_node_child_process5 = require("node:child_process");
+var import_promises = require("node:fs/promises");
+var import_node_os2 = require("node:os");
 var import_node_path17 = require("node:path");
-function refreshHookCopy(configDir2, runningCli) {
+var LS_REMOTE_TIMEOUT_MS = 15e3;
+var HOST = /^[A-Za-z0-9.-]+$/;
+var PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/;
+function anonymousUrl(url) {
+  const u = url.trim();
+  const scp = /^[A-Za-z0-9._-]+@([^:/\s]+):([^\s]+)$/.exec(u);
+  if (scp) return HOST.test(scp[1]) && PATH.test(scp[2]) ? `https://${scp[1]}/${scp[2]}` : null;
   try {
-    if (!runningCli) return false;
-    const copy = (0, import_node_path17.join)(configDir2, "hub.cjs");
-    if (!(0, import_node_fs15.existsSync)(copy) || (0, import_node_path17.resolve)(copy) === (0, import_node_path17.resolve)(runningCli)) return false;
-    const next = (0, import_node_fs15.readFileSync)(runningCli);
-    const digest = (b) => (0, import_node_crypto2.createHash)("sha256").update(b).digest("hex");
-    if (digest(next) === digest((0, import_node_fs15.readFileSync)(copy))) return false;
-    const tmp = `${copy}.tmp-${process.pid}`;
-    try {
-      (0, import_node_fs15.writeFileSync)(tmp, next, { mode: 420 });
-      (0, import_node_fs15.renameSync)(tmp, copy);
-    } finally {
-      (0, import_node_fs15.rmSync)(tmp, { force: true });
-    }
-    return true;
+    const p = new URL(u);
+    if (p.protocol !== "https:" && p.protocol !== "ssh:") return null;
+    const path = p.pathname.replace(/^\/+/, "");
+    if (!p.hostname || !HOST.test(p.hostname) || !PATH.test(path)) return null;
+    return p.protocol === "https:" ? `https://${p.host}/${path}` : `https://${p.hostname}/${path}`;
+  } catch {
+    return null;
+  }
+}
+var systemGit = (args, env, cwd) => new Promise((resolve9) => {
+  (0, import_node_child_process5.execFile)("git", args, { env, cwd, timeout: LS_REMOTE_TIMEOUT_MS, encoding: "utf8", maxBuffer: 1 << 20 }, (err, stdout) => resolve9({ ok: !err, stdout: err ? "" : stdout }));
+});
+function cleanEnv(home) {
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) if (k.startsWith("GIT_CONFIG_")) delete env[k];
+  for (const k of ["GIT_SSH_COMMAND", "GIT_SSH", "GIT_DIR"]) delete env[k];
+  return {
+    ...env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: import_node_os2.devNull,
+    GIT_CONFIG_SYSTEM: import_node_os2.devNull,
+    HOME: home,
+    XDG_CONFIG_HOME: home,
+    USERPROFILE: home,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
+    GCM_INTERACTIVE: "never"
+  };
+}
+async function isPublicRepo(url, run = systemGit) {
+  const anon = anonymousUrl(url);
+  if (!anon) return false;
+  let dir;
+  try {
+    dir = await (0, import_promises.mkdtemp)((0, import_node_path17.join)((0, import_node_os2.tmpdir)(), "rixflow-anon-"));
+    const args = [
+      "-c",
+      "credential.helper=",
+      "-c",
+      "http.extraHeader=",
+      "-c",
+      "protocol.allow=never",
+      "-c",
+      "protocol.https.allow=always",
+      "ls-remote",
+      "--",
+      anon
+    ];
+    return (await run(args, cleanEnv(dir), dir)).ok;
   } catch {
     return false;
-  }
-}
-
-// src/cli/init.ts
-var MCP_ALLOW_RULE = "mcp__plugin_rixflow_hub__*";
-var isRecord2 = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-function stringList2(v, label) {
-  if (v === void 0) return [];
-  if (!Array.isArray(v)) throw new HubError("BAD_SETTINGS", `${label} in settings.json is not a list; refusing to overwrite it`);
-  return [...v];
-}
-function mergeClaudeSettings(settings, hubDir2) {
-  if (settings.permissions !== void 0 && !isRecord2(settings.permissions)) {
-    throw new HubError("BAD_SETTINGS", "permissions in settings.json is not an object; refusing to overwrite it");
-  }
-  const permissions = { ...settings.permissions };
-  const allow = stringList2(permissions.allow, "permissions.allow");
-  const dirs = stringList2(permissions.additionalDirectories, "permissions.additionalDirectories");
-  const changes = [];
-  if (!allow.includes(MCP_ALLOW_RULE)) {
-    allow.push(MCP_ALLOW_RULE);
-    changes.push(`permissions.allow += ${MCP_ALLOW_RULE}`);
-  }
-  const norm = (d) => d.length > 1 ? d.replace(/\/+$/, "") : d;
-  if (!dirs.some((d) => norm(String(d)) === norm(hubDir2))) {
-    dirs.push(hubDir2);
-    changes.push(`permissions.additionalDirectories += ${hubDir2}`);
-  }
-  return { settings: { ...settings, permissions: { ...permissions, allow, additionalDirectories: dirs } }, changes };
-}
-var shellQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
-var PRE_COMMIT_MARKER = "# rixflow pre-commit (managed)";
-function preCommitScript(cliPath2, configDir2) {
-  return `#!/bin/sh
-${PRE_COMMIT_MARKER}
-RIXFLOW_CONFIG_DIR=${shellQuote(configDir2)}
-export RIXFLOW_CONFIG_DIR
-exec node ${shellQuote(cliPath2)} verify-commit
-`;
-}
-function installPreCommit(hubDir2, configDir2, cliPath2) {
-  const messages = [];
-  (0, import_node_fs16.mkdirSync)(configDir2, { recursive: true });
-  const cliCopy = (0, import_node_path18.join)(configDir2, "hub.cjs");
-  (0, import_node_fs16.copyFileSync)(cliPath2, cliCopy);
-  const hooksDir = (0, import_node_path18.join)(hubDir2, ".git", "hooks");
-  (0, import_node_fs16.mkdirSync)(hooksDir, { recursive: true });
-  const hook = (0, import_node_path18.join)(hooksDir, "pre-commit");
-  if ((0, import_node_fs16.existsSync)(hook) && !(0, import_node_fs16.readFileSync)(hook, "utf8").includes(PRE_COMMIT_MARKER)) {
-    (0, import_node_fs16.copyFileSync)(hook, `${hook}.bak`);
-    messages.push(`Existing pre-commit hook backed up to ${hook}.bak and replaced.`);
-  }
-  (0, import_node_fs16.writeFileSync)(hook, preCommitScript(cliCopy, configDir2));
-  (0, import_node_fs16.chmodSync)(hook, 493);
-  let hooksPath = "";
-  try {
-    hooksPath = (0, import_node_child_process5.execFileSync)("git", ["-C", hubDir2, "config", "core.hooksPath"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch {
-  }
-  if (hooksPath && hooksPath !== ".git/hooks" && (0, import_node_path18.resolve)(hubDir2, hooksPath) !== (0, import_node_path18.resolve)(hooksDir)) {
-    messages.push(`WARNING: core.hooksPath is set to "${hooksPath}", so the pre-commit ownership gate is INACTIVE for the hub.`);
-  }
-  return messages;
-}
-function terminalIo() {
-  const lines = [];
-  const waiters = [];
-  let rl;
-  let eof = false;
-  let muted = false;
-  const self = { closed: false, ask: (q) => read(q, false), askHidden: (q) => read(q, true), log: (t) => console.log(t) };
-  function start() {
-    if (rl) return rl;
-    const r = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
-    const hook = r;
-    const write = typeof hook._writeToOutput === "function" ? hook._writeToOutput.bind(r) : void 0;
-    if (write) hook._writeToOutput = (str3) => {
-      if (!muted) write(str3);
-    };
-    else {
-      const out = process.stdout;
-      const orig = out.write.bind(out);
-      out.write = (...a) => muted ? true : orig(...a);
-    }
-    r.on("line", (l) => {
-      const w = waiters.shift();
-      if (w) w(l);
-      else lines.push(l);
-    });
-    const end = () => {
-      eof = true;
-      for (const w of waiters.splice(0)) w("");
-    };
-    r.on("close", end);
-    r.on("SIGINT", () => {
-      r.close();
-    });
-    rl = r;
-    return r;
-  }
-  async function read(q, hidden) {
-    const queued = lines.shift();
-    if (queued !== void 0) {
-      process.stdout.write(q);
-      if (hidden && process.stdin.isTTY) process.stdout.write("\n");
-      return queued.trim();
-    }
-    if (self.closed || eof || process.stdin.readableEnded || process.stdin.destroyed) {
-      self.closed = true;
-      return "";
-    }
-    const r = start();
-    r.resume();
-    r.setPrompt(q);
-    r.prompt();
-    muted = hidden;
-    let line2;
-    try {
-      line2 = await new Promise((res) => {
-        waiters.push(res);
-      });
-    } finally {
-      muted = false;
-    }
-    if (hidden && process.stdin.isTTY) process.stdout.write("\n");
-    if (eof && line2 === "") self.closed = true;
-    else r.pause();
-    return line2.trim();
-  }
-  return self;
-}
-async function applyClaudeSettings(io, linkPath, hubDir2) {
-  let settingsPath = linkPath;
-  let current = {};
-  if ((0, import_node_fs16.existsSync)(settingsPath)) {
-    let parsed;
-    try {
-      parsed = JSON.parse((0, import_node_fs16.readFileSync)(settingsPath, "utf8"));
-    } catch {
-      throw new HubError("BAD_SETTINGS", `${settingsPath} is not valid JSON; fix it by hand and re-run init`);
-    }
-    if (!isRecord2(parsed)) throw new HubError("BAD_SETTINGS", `${settingsPath} is not a JSON object`);
-    current = parsed;
-  }
-  const { settings, changes } = mergeClaudeSettings(current, hubDir2);
-  if (!changes.length) return;
-  io.log(`These changes will be made to ${settingsPath}:
-${changes.map((c) => `  - ${c}`).join("\n")}`);
-  if ((await io.ask("Apply? (y/n): ")).toLowerCase() !== "y") {
-    io.log("Skipped. You will get permission prompts for RixFlow tools.");
-    return;
-  }
-  (0, import_node_fs16.mkdirSync)((0, import_node_path18.dirname)(settingsPath), { recursive: true });
-  const existed = (0, import_node_fs16.existsSync)(settingsPath);
-  if (existed) settingsPath = (0, import_node_fs16.realpathSync)(settingsPath);
-  if (existed) (0, import_node_fs16.copyFileSync)(settingsPath, `${settingsPath}.bak`);
-  const tmp = `${settingsPath}.tmp-${process.pid}`;
-  try {
-    (0, import_node_fs16.writeFileSync)(tmp, `${JSON.stringify(settings, null, 2)}
-`, { mode: existed ? (0, import_node_fs16.statSync)(settingsPath).mode & 511 : 420 });
-    (0, import_node_fs16.renameSync)(tmp, settingsPath);
   } finally {
-    (0, import_node_fs16.rmSync)(tmp, { force: true });
-  }
-  io.log(`Settings updated${existed ? " (backup: settings.json.bak)" : ""}.`);
-}
-var ACCESS_HINT = `Hint: RixFlow syncs in the background and cannot ask for passwords. For an ssh URL, load your key into ssh-agent (ssh-add); for an https URL, set up a git credential helper. Then run again: ${hubCommand("init")}`;
-async function withAccessHint(io, work) {
-  try {
-    await work();
-  } catch (e) {
-    io.log(ACCESS_HINT);
-    throw e;
+    if (dir) await (0, import_promises.rm)(dir, { recursive: true, force: true }).catch(() => void 0);
   }
 }
-async function runInit(io, cliPath2, env = process.env) {
-  const configDir2 = configDir(env);
-  const hubDir2 = hubDir(env);
-  io.log("Everything you save to the team hub (notes, session summaries, checkpoints) is visible to the whole team.");
-  if ((await io.ask('Type "yes" to continue: ')).toLowerCase() !== "yes") throw new HubError("ABORTED", "init cancelled");
-  if (!(0, import_node_fs16.existsSync)((0, import_node_path18.join)(hubDir2, ".git"))) {
-    const url = await io.ask("Hub git URL (e.g. git@github.com:org/rixflow-hub.git): ");
-    await withAccessHint(io, () => new Git(homeDir(env), env, { interactive: true }).run(["clone", "-q", "--", url, hubDir2]));
-  } else {
-    await withAccessHint(io, () => new Git(hubDir2, env).run(["pull", "-q", "--rebase"]));
-  }
-  const team = loadTeam(hubDir2);
-  io.log(`Team: ${team.map((m) => `${m.name} (${m.role})`).join(", ")}`);
-  const name = await io.ask("Your name (as listed above): ");
-  const member = team.find((m) => m.name === name);
-  if (!member) throw new HubError("UNKNOWN_MEMBER", `${name} is not in config/team.yml; add them first`);
-  const defaultRoot = (0, import_node_path18.join)(homeDir(env), "projects");
-  const projectsRoot = normalizeDir(await io.ask(`Projects folder [${defaultRoot}]: `) || defaultRoot, env);
-  const token = await io.askHidden("Asana personal access token (input hidden): ");
-  const me = await new AsanaClient(token).getMe();
-  let workspace = me.workspaces[0];
-  if (me.workspaces.length > 1) {
-    me.workspaces.forEach((w, i) => io.log(`${i + 1}. ${w.name}`));
-    workspace = me.workspaces[Number(await io.ask("Workspace number: ")) - 1];
-  }
-  if (!workspace) throw new HubError("NO_WORKSPACE", "no Asana workspace selected");
-  io.log(`Asana token stored in ${setToken(configDir2, token, void 0, name)}.`);
-  saveUserConfig(configDir2, {
-    name,
-    role: member.role,
-    projectsRoot,
-    asanaWorkspace: workspace.gid,
-    siteFolders: {},
-    taskSites: {}
-  });
-  for (const m of installPreCommit(hubDir2, configDir2, cliPath2)) io.log(m);
-  if (mergeHubGitignore(hubDir2)) {
-    const res = await persistHub(hubDir2, name, `chore: ignore editor files in the hub (${name})`, {}, env);
-    io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
-  }
-  await applyClaudeSettings(io, (0, import_node_path18.join)(homeDir(env), ".claude", "settings.json"), hubDir2);
-  io.log(`Done. Hub: ${hubDir2}. Config: ${configDir2}.`);
-}
-
-// src/core/status.ts
-var import_node_fs17 = require("node:fs");
-var import_node_path19 = require("node:path");
 
 // src/core/sprint.ts
 var SPRINT = /Sprint\s+(\d+)\s*\|\s*(\d{1,2})\.(\d{1,2})\.?\s*-\s*(\d{1,2})\.(\d{1,2})/i;
@@ -13520,10 +13349,645 @@ function mapTicket(chain, wf, now) {
   return mapped;
 }
 
+// src/cli/wizard/prompts.ts
+var ABORTED_MESSAGE = "Setup stopped. Run it again to continue where you left off.";
+var MAX_TRIES = 3;
+var aborted = () => new HubError("ABORTED", ABORTED_MESSAGE);
+async function ask(io, question) {
+  if (io.closed) throw aborted();
+  const a = (await io.ask(question)).trim();
+  if (io.closed && a === "") throw aborted();
+  return a;
+}
+async function choose(io, question, options, fallback) {
+  const fb = fallback === void 0 ? -1 : options.findIndex((o) => o.value === fallback);
+  const lines = options.map((o, i) => `  ${i + 1}) ${o.label}${i === fb ? " (default)" : ""}`);
+  for (let i = 0; i < MAX_TRIES; i++) {
+    io.log(`${question}
+${lines.join("\n")}`);
+    const a = await ask(io, `Choose 1-${options.length}${fb >= 0 ? ` [${fb + 1}]` : ""}: `);
+    if (a === "" && fb >= 0) return options[fb].value;
+    if (/^\d+$/.test(a)) {
+      const n = Number(a);
+      if (n >= 1 && n <= options.length) return options[n - 1].value;
+    }
+    io.log(`Please enter a number from 1 to ${options.length}.`);
+  }
+  throw aborted();
+}
+async function confirm(io, question, defaultYes = true) {
+  const hint = defaultYes ? "Y/n" : "y/N";
+  for (let i = 0; i < MAX_TRIES; i++) {
+    const a = (await ask(io, `${question} (${hint}) `)).toLowerCase();
+    if (a === "") return defaultYes;
+    if (a === "y" || a === "yes") return true;
+    if (a === "n" || a === "no") return false;
+    io.log("Please answer y or n.");
+  }
+  throw aborted();
+}
+async function askValid(io, question, validate2, fallback) {
+  for (let i = 0; i < MAX_TRIES; i++) {
+    let a = await ask(io, fallback !== void 0 ? `${question} [${fallback}] ` : `${question} `);
+    if (a === "" && fallback !== void 0) a = fallback;
+    const err = validate2(a);
+    if (err === null) return a;
+    io.log(err);
+  }
+  throw aborted();
+}
+
+// src/cli/wizard/connect.ts
+var MAX_TRIES2 = 3;
+var makeAsana = (deps, token) => (deps.makeAsana ?? ((t) => new AsanaClient(t)))(token);
+var makeJira = (deps, url, auth, projects) => (deps.makeJira ?? ((u, a, p) => new JiraClient(u, a, { projects: p })))(url, auth, projects);
+function asanaFrom(client, wf, workspace) {
+  return asanaSource(client, { workspace, statusField: wf.status.field ?? void 0, priorityField: wf.urgent.field ?? void 0 });
+}
+var isCode = (e, suffix) => e instanceof HubError && e.code.endsWith(suffix);
+function explain(e, wf) {
+  const jira = wf.tracker.type === "jira" ? wf.tracker : null;
+  if (isCode(e, "_AUTH")) {
+    if (!jira) return "Asana did not accept that token. Check that you copied the whole personal access token, then try again.";
+    return jira.flavor === "cloud" ? "Jira did not accept that email and API token. Check both (the email is the one you log in to Jira with), then try again." : "Jira did not accept that personal access token. Check that you copied all of it, then try again.";
+  }
+  if (isCode(e, "_NETWORK")) {
+    return jira ? `Could not reach Jira at ${jira.url}. Check your network connection (and VPN, if your company needs one), then try again.` : "Could not reach Asana. Check your network connection, then try again.";
+  }
+  if (isCode(e, "_BAD_URL")) return `The team's Jira address is not valid. Ask a teammate to check it with "change team setup".`;
+  return null;
+}
+async function askToken(io, question) {
+  if (io.closed) throw new HubError("ABORTED", "Setup stopped. Run it again to continue where you left off.");
+  const t = (await io.askHidden(question)).trim();
+  if (io.closed && t === "") throw new HubError("ABORTED", "Setup stopped. Run it again to continue where you left off.");
+  return t;
+}
+var validEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? null : "Please enter the email address you log in to Jira with.";
+async function connect(io, deps, wf, user) {
+  const t = wf.tracker;
+  let email;
+  for (let i = 0; i < MAX_TRIES2; i++) {
+    let token;
+    let conn;
+    try {
+      if (t.type === "jira") {
+        if (t.flavor === "cloud") email = await askValid(io, "Your Jira login email:", validEmail, email);
+        token = await askToken(io, t.flavor === "cloud" ? "Jira API token (input hidden; create one at https://id.atlassian.com/manage-profile/security/api-tokens): " : "Jira personal access token (input hidden; create one in Jira under Profile > Personal Access Tokens): ");
+        if (!token) {
+          io.log("No token entered.");
+          continue;
+        }
+        const auth = t.flavor === "cloud" ? { flavor: "cloud", email, token } : { flavor: "server", token };
+        const source = makeJira(deps, t.url, auth, t.projects);
+        await source.whoAmI();
+        conn = t.flavor === "cloud" ? { source, jiraEmail: email } : { source };
+      } else {
+        token = await askToken(io, "Asana personal access token (input hidden): ");
+        if (!token) {
+          io.log("No token entered.");
+          continue;
+        }
+        const client = makeAsana(deps, token);
+        const me = await client.getMe();
+        let workspace = t.workspace;
+        let own;
+        if (!workspace) {
+          if (me.workspaces.length === 0) throw new HubError("NO_WORKSPACE", "Your Asana account has no workspace. Ask the team which workspace to join.");
+          workspace = me.workspaces.length === 1 ? me.workspaces[0].gid : await choose(io, "Which Asana workspace does the team use?", me.workspaces.map((w) => ({ value: w.gid, label: w.name })));
+          own = workspace;
+        }
+        conn = { source: asanaFrom(client, wf, workspace), ...own ? { asanaWorkspace: own } : {} };
+      }
+    } catch (e) {
+      const why = explain(e, wf);
+      if (why === null) throw e;
+      io.log(why);
+      continue;
+    }
+    const where = setToken(user.configDir, token, deps.tokenExec, user.name, t.type);
+    io.log(`${conn.source.label} token stored in ${where === "keychain" ? "your keychain" : "a private file in the config folder"}.`);
+    return conn;
+  }
+  const label = t.type === "jira" ? "Jira" : "Asana";
+  throw new HubError("CONNECT_FAILED", `Could not connect to ${label} after ${MAX_TRIES2} tries. Check your login and network, then run setup again.`);
+}
+function storedSource(deps, wf, user, env = process.env) {
+  const t = wf.tracker;
+  const token = getToken(user.configDir, env, deps.tokenExec, user.name, t.type);
+  if (!token) return null;
+  if (t.type === "jira") {
+    if (t.flavor === "server") return makeJira(deps, t.url, { flavor: "server", token }, t.projects);
+    return user.jiraEmail ? makeJira(deps, t.url, { flavor: "cloud", email: user.jiraEmail, token }, t.projects) : null;
+  }
+  const workspace = t.workspace ?? user.asanaWorkspace;
+  return workspace ? asanaFrom(makeAsana(deps, token), wf, workspace) : null;
+}
+var BUCKET_LABEL = { todo: "to do", in_progress: "in progress", waiting: "waiting", done: "done" };
+var PREVIEW_COUNT = 5;
+var clean2 = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+function scopeLabel(wf) {
+  if (wf.tracker.type === "jira") return wf.tracker.projects.length ? wf.tracker.projects.join(", ") : "this Jira site";
+  return "your Asana workspace";
+}
+async function previewTickets(io, source, wf, now, opts) {
+  const scope = wf.tracker.type === "jira" ? wf.tracker.projects : [];
+  const all = opts.mine ? await source.myTickets() : await source.sample(scope, PREVIEW_COUNT);
+  const tickets = all.slice(0, PREVIEW_COUNT);
+  if (tickets.length === 0) {
+    io.log(`Your account can't see any open tickets in ${scopeLabel(wf)}. Check that you have access to those projects in ${source.label}, then run setup again.`);
+    return 0;
+  }
+  io.log(`${opts.mine ? "Your next tickets" : "Some tickets"} as RixFlow sees them:`);
+  for (const t of tickets) {
+    let chain = [t];
+    if (needsParents(t, wf)) chain = await parentChain(source, t).catch(() => [t]);
+    const m = mapTicket(chain, wf, now);
+    const project = m.codes.length ? `project ${m.codes.join(", ")}` : "no project";
+    const bucket = m.bucket ? BUCKET_LABEL[m.bucket] : `status "${clean2(t.status ?? "none")}" not mapped`;
+    io.log(`  ${t.id}  ${clean2(t.title)}  -> ${project}, ${bucket}, sprint: ${m.sprint ? "yes" : "no"}, urgent: ${m.urgent ? "yes" : "no"}`);
+  }
+  return tickets.length;
+}
+
+// src/cli/wizard/progress.ts
+var import_node_fs15 = require("node:fs");
+var import_node_path18 = require("node:path");
+var file = (configDir2) => (0, import_node_path18.join)(configDir2, "setup-progress.json");
+var SUSPECT = /token|password|secret/i;
+function suspicious(text2) {
+  return SUSPECT.test(text2) || findSecrets(text2).length > 0;
+}
+function assertClean(v, depth = 0) {
+  if (depth > 50) throw new HubError("BAD_PROGRESS", "Progress is nested too deeply.");
+  if (typeof v === "string") {
+    if (suspicious(v)) throw new HubError("BAD_PROGRESS", "Refusing to save a secret in the setup progress file.");
+  } else if (Array.isArray(v)) {
+    for (const x of v) assertClean(x, depth + 1);
+  } else if (v !== null && typeof v === "object") {
+    for (const [k, x] of Object.entries(v)) {
+      if (suspicious(k)) throw new HubError("BAD_PROGRESS", "Refusing to save a secret in the setup progress file.");
+      assertClean(x, depth + 1);
+    }
+  }
+}
+function loadProgress(configDir2) {
+  try {
+    const p = JSON.parse((0, import_node_fs15.readFileSync)(file(configDir2), "utf8"));
+    if (!p || p.flow !== "create" && p.flow !== "join") return null;
+    if (!Array.isArray(p.done) || !p.done.every((d) => typeof d === "string")) return null;
+    if (p.answers === null || typeof p.answers !== "object" || Array.isArray(p.answers)) return null;
+    return { flow: p.flow, done: p.done, answers: p.answers, updatedAt: String(p.updatedAt ?? "") };
+  } catch {
+    return null;
+  }
+}
+function saveProgress(configDir2, p) {
+  assertClean(p.answers);
+  assertClean(p.done);
+  const target = file(configDir2);
+  (0, import_node_fs15.mkdirSync)(configDir2, { recursive: true, mode: 448 });
+  for (const f of [target, `${target}.tmp`]) {
+    if (lstatOrNull(f)?.isSymbolicLink()) throw new HubError("BAD_PROGRESS", `${f} is a symlink; refusing to write it.`);
+  }
+  const tmp = `${target}.tmp`;
+  (0, import_node_fs15.rmSync)(tmp, { force: true });
+  (0, import_node_fs15.writeFileSync)(tmp, JSON.stringify(p, null, 2) + "\n", { mode: 384, flag: "wx" });
+  (0, import_node_fs15.renameSync)(tmp, target);
+}
+function lstatOrNull(f) {
+  try {
+    return (0, import_node_fs15.lstatSync)(f);
+  } catch {
+    return null;
+  }
+}
+function clearProgress(configDir2) {
+  (0, import_node_fs15.rmSync)(file(configDir2), { force: true });
+}
+async function runSteps(io, configDir2, flow, steps) {
+  let state = { flow, done: [], answers: {}, updatedAt: "" };
+  const prev = loadProgress(configDir2);
+  if (prev && prev.flow === flow) {
+    const last = prev.done[prev.done.length - 1];
+    if (last === void 0) clearProgress(configDir2);
+    else if (await confirm(io, `Continue where you stopped (${last})?`, true)) state = prev;
+    else clearProgress(configDir2);
+  }
+  let i = 0;
+  while (i < steps.length) {
+    const step = steps[i];
+    if (state.done.includes(step.id)) {
+      i++;
+      continue;
+    }
+    const out = await step.run(state.answers);
+    if ("goto" in out && typeof out.goto === "string" && Object.keys(out).length === 1) {
+      const t = steps.findIndex((s) => s.id === out.goto);
+      if (t < 0) throw new HubError("BAD_STEP", `Unknown step: ${out.goto}`);
+      const drop = new Set(steps.slice(t).map((s) => s.id));
+      state = { ...state, done: state.done.filter((d) => !drop.has(d)) };
+      i = t;
+    } else {
+      state = { ...state, done: [...state.done, step.id], answers: { ...state.answers, ...out }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      i++;
+    }
+    saveProgress(configDir2, state);
+  }
+  clearProgress(configDir2);
+  return state.answers;
+}
+
+// src/cli/wizard/join.ts
+var NOT_ON_TEAM = `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "change team setup"), then run setup again.`;
+var PUBLIC_HUB = "This hub repository is public: anyone on the internet can read it. Make the repository private, or use a private one, then run setup again.";
+var PUBLIC_OVERRIDE = "WARNING: this hub repository is public, so anyone can read what your team saves. Continuing only because RIXFLOW_ALLOW_PUBLIC_HUB=1 is set.";
+var MAPPING_HINT = 'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "change team setup".';
+var NOT_LISTED = "-";
+async function refusePublicHub(io, url, deps, env) {
+  if (!await isPublicRepo(url, deps.runGit)) return;
+  if (env.RIXFLOW_ALLOW_PUBLIC_HUB !== "1") throw new HubError("PUBLIC_HUB", PUBLIC_HUB);
+  io.log(PUBLIC_OVERRIDE);
+}
+async function runJoin(io, deps, env = process.env) {
+  const configDir2 = configDir(env);
+  const hubDir2 = hubDir(env);
+  let connection;
+  const member = (name) => {
+    const m = loadTeam(hubDir2).find((x) => x.name === name);
+    if (!m) throw new HubError("UNKNOWN_MEMBER", NOT_ON_TEAM);
+    return m;
+  };
+  await runSteps(io, configDir2, "join", [
+    {
+      id: "hub-url",
+      async run() {
+        if ((0, import_node_fs16.existsSync)((0, import_node_path19.join)(hubDir2, ".git"))) {
+          const origin = (await new Git(hubDir2, env).tryRun(["remote", "get-url", "origin"])).out.trim();
+          if (origin) {
+            await refusePublicHub(io, origin, deps, env);
+            await withAccessHint(io, () => new Git(hubDir2, env).run(["pull", "-q", "--rebase"]));
+          }
+        } else {
+          const url = await askValid(
+            io,
+            "Hub git URL (e.g. git@github.com:org/rixflow-hub.git):",
+            (s) => s && !s.startsWith("-") ? null : "Please paste the git URL of the team hub (ask a teammate for it)."
+          );
+          await refusePublicHub(io, url, deps, env);
+          await withAccessHint(io, () => new Git(homeDir(env), env, { interactive: true }).run(["clone", "-q", "--", url, hubDir2]));
+        }
+        loadWorkflow(hubDir2);
+        return {};
+      }
+    },
+    {
+      id: "name",
+      async run() {
+        const team = loadTeam(hubDir2);
+        const options = [
+          ...team.map((m) => ({ value: m.name, label: `${m.name} (${m.role})` })),
+          { value: NOT_LISTED, label: "I'm not on this list" }
+        ];
+        const name = await choose(io, "Which one are you?", options);
+        if (name === NOT_LISTED) throw new HubError("UNKNOWN_MEMBER", NOT_ON_TEAM);
+        return { name };
+      }
+    },
+    {
+      id: "projects-root",
+      async run() {
+        const fallback = (0, import_node_path19.join)(homeDir(env), "projects");
+        const dir = await askValid(io, "Projects folder (where your project folders live):", (s) => s ? null : "Please enter a folder.", fallback);
+        return { projectsRoot: normalizeDir(dir, env) };
+      }
+    },
+    {
+      id: "connect",
+      async run(a) {
+        const name = String(a.name);
+        const m = member(name);
+        const wf = loadWorkflow(hubDir2);
+        connection = await connect(io, deps, wf, { name, configDir: configDir2 });
+        const cfg = {
+          name,
+          role: m.role,
+          projectsRoot: String(a.projectsRoot),
+          ...connection.asanaWorkspace ? { asanaWorkspace: connection.asanaWorkspace } : {},
+          ...connection.jiraEmail ? { jiraEmail: connection.jiraEmail } : {},
+          siteFolders: {},
+          taskSites: {}
+        };
+        saveUserConfig(configDir2, cfg);
+        return {};
+      }
+    },
+    {
+      id: "preview",
+      async run() {
+        const wf = loadWorkflow(hubDir2);
+        const source = connection?.source ?? storedSource(deps, wf, { ...loadUserConfig(configDir2, env), configDir: configDir2 }, env);
+        if (!source) {
+          io.log("Skipping the ticket preview: no stored login was found. Your plate will show your tickets once you are connected.");
+          return {};
+        }
+        let shown = 0;
+        try {
+          shown = await previewTickets(io, source, wf, (deps.now ?? (() => /* @__PURE__ */ new Date()))(), { mine: true });
+        } catch (e) {
+          io.log(`Could not load your tickets for a preview (${e instanceof Error ? e.message : String(e)}). Your setup is saved; the plate will try again.`);
+          return {};
+        }
+        if (shown > 0 && !await confirm(io, "Do these look right?", true)) io.log(MAPPING_HINT);
+        return {};
+      }
+    },
+    {
+      id: "hub-hooks",
+      async run(a) {
+        const name = String(a.name);
+        for (const msg of installPreCommit(hubDir2, configDir2, deps.cliPath)) io.log(msg);
+        if (mergeHubGitignore(hubDir2)) {
+          const res = await persistHub(hubDir2, name, `chore: ignore editor files in the hub (${name})`, {}, env);
+          io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
+        }
+        return {};
+      }
+    },
+    {
+      id: "claude-settings",
+      async run() {
+        await applyClaudeSettings(io, (0, import_node_path19.join)(homeDir(env), ".claude", "settings.json"), hubDir2);
+        return {};
+      }
+    }
+  ]);
+  io.log(`Done. Hub: ${hubDir2}. Config: ${configDir2}.`);
+}
+
+// src/core/hookcopy.ts
+var import_node_crypto2 = require("node:crypto");
+var import_node_fs17 = require("node:fs");
+var import_node_path20 = require("node:path");
+function refreshHookCopy(configDir2, runningCli) {
+  try {
+    if (!runningCli) return false;
+    const copy = (0, import_node_path20.join)(configDir2, "hub.cjs");
+    if (!(0, import_node_fs17.existsSync)(copy) || (0, import_node_path20.resolve)(copy) === (0, import_node_path20.resolve)(runningCli)) return false;
+    const next = (0, import_node_fs17.readFileSync)(runningCli);
+    const digest = (b) => (0, import_node_crypto2.createHash)("sha256").update(b).digest("hex");
+    if (digest(next) === digest((0, import_node_fs17.readFileSync)(copy))) return false;
+    const tmp = `${copy}.tmp-${process.pid}`;
+    try {
+      (0, import_node_fs17.writeFileSync)(tmp, next, { mode: 420 });
+      (0, import_node_fs17.renameSync)(tmp, copy);
+    } finally {
+      (0, import_node_fs17.rmSync)(tmp, { force: true });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// src/cli/init.ts
+var MCP_ALLOW_RULE = "mcp__plugin_rixflow_hub__*";
+var isRecord2 = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+function stringList2(v, label) {
+  if (v === void 0) return [];
+  if (!Array.isArray(v)) throw new HubError("BAD_SETTINGS", `${label} in settings.json is not a list; refusing to overwrite it`);
+  return [...v];
+}
+function mergeClaudeSettings(settings, hubDir2) {
+  if (settings.permissions !== void 0 && !isRecord2(settings.permissions)) {
+    throw new HubError("BAD_SETTINGS", "permissions in settings.json is not an object; refusing to overwrite it");
+  }
+  const permissions = { ...settings.permissions };
+  const allow = stringList2(permissions.allow, "permissions.allow");
+  const dirs = stringList2(permissions.additionalDirectories, "permissions.additionalDirectories");
+  const changes = [];
+  if (!allow.includes(MCP_ALLOW_RULE)) {
+    allow.push(MCP_ALLOW_RULE);
+    changes.push(`permissions.allow += ${MCP_ALLOW_RULE}`);
+  }
+  const norm = (d) => d.length > 1 ? d.replace(/\/+$/, "") : d;
+  if (!dirs.some((d) => norm(String(d)) === norm(hubDir2))) {
+    dirs.push(hubDir2);
+    changes.push(`permissions.additionalDirectories += ${hubDir2}`);
+  }
+  return { settings: { ...settings, permissions: { ...permissions, allow, additionalDirectories: dirs } }, changes };
+}
+var shellQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+var PRE_COMMIT_MARKER = "# rixflow pre-commit (managed)";
+function preCommitScript(cliPath2, configDir2) {
+  return `#!/bin/sh
+${PRE_COMMIT_MARKER}
+RIXFLOW_CONFIG_DIR=${shellQuote(configDir2)}
+export RIXFLOW_CONFIG_DIR
+exec node ${shellQuote(cliPath2)} verify-commit
+`;
+}
+function installPreCommit(hubDir2, configDir2, cliPath2) {
+  const messages = [];
+  (0, import_node_fs18.mkdirSync)(configDir2, { recursive: true });
+  const cliCopy = (0, import_node_path21.join)(configDir2, "hub.cjs");
+  (0, import_node_fs18.copyFileSync)(cliPath2, cliCopy);
+  const hooksDir = (0, import_node_path21.join)(hubDir2, ".git", "hooks");
+  (0, import_node_fs18.mkdirSync)(hooksDir, { recursive: true });
+  const hook = (0, import_node_path21.join)(hooksDir, "pre-commit");
+  if ((0, import_node_fs18.existsSync)(hook) && !(0, import_node_fs18.readFileSync)(hook, "utf8").includes(PRE_COMMIT_MARKER)) {
+    (0, import_node_fs18.copyFileSync)(hook, `${hook}.bak`);
+    messages.push(`Existing pre-commit hook backed up to ${hook}.bak and replaced.`);
+  }
+  (0, import_node_fs18.writeFileSync)(hook, preCommitScript(cliCopy, configDir2));
+  (0, import_node_fs18.chmodSync)(hook, 493);
+  let hooksPath = "";
+  try {
+    hooksPath = (0, import_node_child_process6.execFileSync)("git", ["-C", hubDir2, "config", "core.hooksPath"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+  }
+  if (hooksPath && hooksPath !== ".git/hooks" && (0, import_node_path21.resolve)(hubDir2, hooksPath) !== (0, import_node_path21.resolve)(hooksDir)) {
+    messages.push(`WARNING: core.hooksPath is set to "${hooksPath}", so the pre-commit ownership gate is INACTIVE for the hub.`);
+  }
+  return messages;
+}
+function terminalIo() {
+  const lines = [];
+  const waiters = [];
+  let rl;
+  let eof = false;
+  let muted = false;
+  const self = { closed: false, ask: (q) => read(q, false), askHidden: (q) => read(q, true), log: (t) => console.log(t) };
+  function start() {
+    if (rl) return rl;
+    const r = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
+    const hook = r;
+    const write = typeof hook._writeToOutput === "function" ? hook._writeToOutput.bind(r) : void 0;
+    if (write) hook._writeToOutput = (str3) => {
+      if (!muted) write(str3);
+    };
+    else {
+      const out = process.stdout;
+      const orig = out.write.bind(out);
+      out.write = (...a) => muted ? true : orig(...a);
+    }
+    r.on("line", (l) => {
+      const w = waiters.shift();
+      if (w) w(l);
+      else lines.push(l);
+    });
+    const end = () => {
+      eof = true;
+      for (const w of waiters.splice(0)) w("");
+    };
+    r.on("close", end);
+    r.on("SIGINT", () => {
+      r.close();
+    });
+    rl = r;
+    return r;
+  }
+  async function read(q, hidden) {
+    const queued = lines.shift();
+    if (queued !== void 0) {
+      process.stdout.write(q);
+      if (hidden && process.stdin.isTTY) process.stdout.write("\n");
+      return queued.trim();
+    }
+    if (self.closed || eof || process.stdin.readableEnded || process.stdin.destroyed) {
+      self.closed = true;
+      return "";
+    }
+    const r = start();
+    r.resume();
+    r.setPrompt(q);
+    r.prompt();
+    muted = hidden;
+    let line2;
+    try {
+      line2 = await new Promise((res) => {
+        waiters.push(res);
+      });
+    } finally {
+      muted = false;
+    }
+    if (hidden && process.stdin.isTTY) process.stdout.write("\n");
+    if (eof && line2 === "") self.closed = true;
+    else r.pause();
+    return line2.trim();
+  }
+  return self;
+}
+async function applyClaudeSettings(io, linkPath, hubDir2) {
+  let settingsPath = linkPath;
+  let current = {};
+  if ((0, import_node_fs18.existsSync)(settingsPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse((0, import_node_fs18.readFileSync)(settingsPath, "utf8"));
+    } catch {
+      throw new HubError("BAD_SETTINGS", `${settingsPath} is not valid JSON; fix it by hand and re-run init`);
+    }
+    if (!isRecord2(parsed)) throw new HubError("BAD_SETTINGS", `${settingsPath} is not a JSON object`);
+    current = parsed;
+  }
+  const { settings, changes } = mergeClaudeSettings(current, hubDir2);
+  if (!changes.length) return;
+  io.log(`These changes will be made to ${settingsPath}:
+${changes.map((c) => `  - ${c}`).join("\n")}`);
+  if ((await io.ask("Apply? (y/n): ")).toLowerCase() !== "y") {
+    io.log("Skipped. You will get permission prompts for RixFlow tools.");
+    return;
+  }
+  (0, import_node_fs18.mkdirSync)((0, import_node_path21.dirname)(settingsPath), { recursive: true });
+  const existed = (0, import_node_fs18.existsSync)(settingsPath);
+  if (existed) settingsPath = (0, import_node_fs18.realpathSync)(settingsPath);
+  if (existed) (0, import_node_fs18.copyFileSync)(settingsPath, `${settingsPath}.bak`);
+  const tmp = `${settingsPath}.tmp-${process.pid}`;
+  try {
+    (0, import_node_fs18.writeFileSync)(tmp, `${JSON.stringify(settings, null, 2)}
+`, { mode: existed ? (0, import_node_fs18.statSync)(settingsPath).mode & 511 : 420 });
+    (0, import_node_fs18.renameSync)(tmp, settingsPath);
+  } finally {
+    (0, import_node_fs18.rmSync)(tmp, { force: true });
+  }
+  io.log(`Settings updated${existed ? " (backup: settings.json.bak)" : ""}.`);
+}
+var ACCESS_HINT = `Hint: RixFlow syncs in the background and cannot ask for passwords. For an ssh URL, load your key into ssh-agent (ssh-add); for an https URL, set up a git credential helper. Then run again: ${hubCommand("init")}`;
+async function withAccessHint(io, work) {
+  try {
+    await work();
+  } catch (e) {
+    io.log(ACCESS_HINT);
+    throw e;
+  }
+}
+async function runCreate(_io, _deps, _env = process.env) {
+  throw new HubError("NOT_READY", "Creating a team arrives in the next update.");
+}
+async function runInit(io, cliPath2, env = process.env, deps = {}) {
+  const configDir2 = configDir(env);
+  io.log("Everything you save to the team hub (notes, session summaries, checkpoints) is visible to the whole team.");
+  if ((await io.ask('Type "yes" to continue: ')).toLowerCase() !== "yes") throw new HubError("ABORTED", "init cancelled");
+  const progress = loadProgress(configDir2);
+  if (!progress && (0, import_node_fs18.existsSync)((0, import_node_path21.join)(configDir2, "config.yml"))) return reinit(io, cliPath2, env);
+  const flow = progress?.flow ?? await choose(io, "Join an existing team, or create a new one?", [
+    { value: "join", label: "Join an existing team" },
+    { value: "create", label: "Create a new team" }
+  ]);
+  const all = { ...deps, cliPath: cliPath2 };
+  return flow === "join" ? runJoin(io, all, env) : runCreate(io, all, env);
+}
+async function reinit(io, cliPath2, env) {
+  const configDir2 = configDir(env);
+  const hubDir2 = hubDir(env);
+  if (!(0, import_node_fs18.existsSync)((0, import_node_path21.join)(hubDir2, ".git"))) {
+    const url = await io.ask("Hub git URL (e.g. git@github.com:org/rixflow-hub.git): ");
+    await withAccessHint(io, () => new Git(homeDir(env), env, { interactive: true }).run(["clone", "-q", "--", url, hubDir2]));
+  } else {
+    await withAccessHint(io, () => new Git(hubDir2, env).run(["pull", "-q", "--rebase"]));
+  }
+  const team = loadTeam(hubDir2);
+  io.log(`Team: ${team.map((m) => `${m.name} (${m.role})`).join(", ")}`);
+  const name = await io.ask("Your name (as listed above): ");
+  const member = team.find((m) => m.name === name);
+  if (!member) throw new HubError("UNKNOWN_MEMBER", `${name} is not in config/team.yml; add them first`);
+  const defaultRoot = (0, import_node_path21.join)(homeDir(env), "projects");
+  const projectsRoot = normalizeDir(await io.ask(`Projects folder [${defaultRoot}]: `) || defaultRoot, env);
+  const token = await io.askHidden("Asana personal access token (input hidden): ");
+  const me = await new AsanaClient(token).getMe();
+  let workspace = me.workspaces[0];
+  if (me.workspaces.length > 1) {
+    me.workspaces.forEach((w, i) => io.log(`${i + 1}. ${w.name}`));
+    workspace = me.workspaces[Number(await io.ask("Workspace number: ")) - 1];
+  }
+  if (!workspace) throw new HubError("NO_WORKSPACE", "no Asana workspace selected");
+  io.log(`Asana token stored in ${setToken(configDir2, token, void 0, name)}.`);
+  saveUserConfig(configDir2, {
+    name,
+    role: member.role,
+    projectsRoot,
+    asanaWorkspace: workspace.gid,
+    siteFolders: {},
+    taskSites: {}
+  });
+  for (const m of installPreCommit(hubDir2, configDir2, cliPath2)) io.log(m);
+  if (mergeHubGitignore(hubDir2)) {
+    const res = await persistHub(hubDir2, name, `chore: ignore editor files in the hub (${name})`, {}, env);
+    io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
+  }
+  await applyClaudeSettings(io, (0, import_node_path21.join)(homeDir(env), ".claude", "settings.json"), hubDir2);
+  io.log(`Done. Hub: ${hubDir2}. Config: ${configDir2}.`);
+}
+
+// src/core/status.ts
+var import_node_fs19 = require("node:fs");
+var import_node_path22 = require("node:path");
+
 // src/core/plate.ts
 var INBOX_STATUSES = /* @__PURE__ */ new Set(["new", "read"]);
-var clean2 = (text2) => text2.trim().split("\n")[0].slice(0, 80).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ");
-var display = (text2) => clean2(scrub(text2));
+var clean3 = (text2) => text2.trim().split("\n")[0].slice(0, 80).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ");
+var display = (text2) => clean3(scrub(text2));
 var byDue = (a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
 function buildPlate(input) {
   const paused = new Set(input.checkpoints.map((c) => c.task));
@@ -13656,9 +14120,9 @@ var line = (re, text2) => {
 var titleOf = (h, fallback) => h && line(/^# (.+)$/m, h.brief) || fallback;
 function readCache(ctx, scope) {
   try {
-    const path = (0, import_node_path19.join)(ctx.configDir, CACHE_FILE);
-    if (!(0, import_node_fs17.existsSync)(path)) return null;
-    const c = JSON.parse((0, import_node_fs17.readFileSync)(path, "utf8"));
+    const path = (0, import_node_path22.join)(ctx.configDir, CACHE_FILE);
+    if (!(0, import_node_fs19.existsSync)(path)) return null;
+    const c = JSON.parse((0, import_node_fs19.readFileSync)(path, "utf8"));
     if (c.user !== ctx.user.name || c.scope !== scope || !Array.isArray(c.items)) return null;
     return Number.isNaN(Date.parse(c.fetchedAt)) ? null : c;
   } catch {
@@ -13666,13 +14130,13 @@ function readCache(ctx, scope) {
   }
 }
 function writeCache(ctx, cache) {
-  const path = (0, import_node_path19.join)(ctx.configDir, CACHE_FILE);
+  const path = (0, import_node_path22.join)(ctx.configDir, CACHE_FILE);
   const tmp = `${path}.tmp-${process.pid}`;
   try {
-    (0, import_node_fs17.writeFileSync)(tmp, JSON.stringify(cache), { mode: 384 });
-    (0, import_node_fs17.renameSync)(tmp, path);
+    (0, import_node_fs19.writeFileSync)(tmp, JSON.stringify(cache), { mode: 384 });
+    (0, import_node_fs19.renameSync)(tmp, path);
   } catch {
-    (0, import_node_fs17.rmSync)(tmp, { force: true });
+    (0, import_node_fs19.rmSync)(tmp, { force: true });
   }
 }
 var toTask = (i) => ({ task: i.ref, title: i.title, sites: i.sites, status: i.status, due: i.due, paused: i.paused });
@@ -13895,7 +14359,7 @@ async function verifyStaged(git, user) {
 }
 
 // src/cli/main.ts
-var cliPath = (0, import_node_path20.resolve)(process.argv[1] ?? "hub.cjs");
+var cliPath = (0, import_node_path23.resolve)(process.argv[1] ?? "hub.cjs");
 var STDIN_TIMEOUT_MS = 3e3;
 function readStdin() {
   if (process.stdin.isTTY) return Promise.resolve("");
