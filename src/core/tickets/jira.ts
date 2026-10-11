@@ -1,12 +1,13 @@
-import { HubError, normalizeTicketId } from '../types';
+import { HubError, JIRA_KEY, normalizeTicketId } from '../types';
 import { adfToText } from './adf';
 import type { Discovery, Ticket, TicketComment, TicketSource } from './types';
 
 export const JIRA_TIMEOUT_MS = 5_000;
 const MAX_PAGES = 50;
 const PAGE_SIZE = 100;
+const SEARCH_FIELDS = '*all,-comment,-worklog,-attachment,-issuelinks,-subtasks';
+const clampLimit = (n: number) => Math.min(100, Math.max(1, Math.floor(Number(n)) || 1));
 const BASE_FIELDS = 'summary,description,updated,duedate,parent,status,priority,components,labels,project,security';
-const JIRA_KEY = /^[A-Z][A-Z0-9_]{0,19}-\d{1,10}$/;
 const PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
 
 export type JiraAuth = { flavor: 'cloud'; email: string; token: string } | { flavor: 'server'; token: string };
@@ -157,7 +158,8 @@ export class JiraClient implements TicketSource, Discovery {
 
   async #search(jql: string, max: number): Promise<JiraIssue[]> {
     const meta = await this.#fieldMeta();
-    const fields = [...new Set([...BASE_FIELDS.split(','), ...(meta.sprint ? [meta.sprint] : []), ...meta.custom])].join(',');
+    // A short fixed list: naming every custom field can push the URL past server limits on large instances.
+    const fields = SEARCH_FIELDS;
     const cloud = this.#auth.flavor === 'cloud';
     const path = `${this.#api}${cloud ? '/search/jql' : '/search'}`;
     const out: JiraIssue[] = [];
@@ -266,7 +268,7 @@ export class JiraClient implements TicketSource, Discovery {
   async comments(id: string, limit = 10): Promise<TicketComment[]> {
     const key = this.normalizeId(id);
     if (limit <= 0) return [];
-    const res = obj(await this.#get(`${this.#api}/issue/${key}/comment`, { orderBy: '-created', maxResults: String(limit) }));
+    const res = obj(await this.#get(`${this.#api}/issue/${key}/comment`, { orderBy: '-created', maxResults: String(clampLimit(limit)) }));
     if (!Array.isArray(res.comments)) throw new HubError('JIRA_HTTP', `Jira returned no comment list for /issue/${key}/comment`);
     return (res.comments as Obj[])
       .map((c) => ({ createdAt: str(c.created) ?? '', author: str(obj(c.author).displayName) ?? 'unknown', text: this.#text(c.body) }))
@@ -298,7 +300,7 @@ export class JiraClient implements TicketSource, Discovery {
   async sample(scope: string[], limit: number): Promise<Ticket[]> {
     // Jira Cloud rejects an unbounded JQL query, so an empty scope means no request.
     if (scope.length === 0) return [];
-    const max = Math.min(100, Math.max(1, Math.floor(Number(limit)) || 1));
+    const max = clampLimit(limit);
     const issues = await this.#search(`${this.#scopeJql(scope)} ORDER BY updated DESC`, max);
     const meta = await this.#fieldMeta();
     return issues.map((i) => this.#toTicket(i, meta));

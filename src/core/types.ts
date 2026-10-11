@@ -36,7 +36,7 @@ export class HubError extends Error {
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const GID = /^\d{1,30}$/;
-const JIRA_KEY = /^[A-Z][A-Z0-9_]{0,19}-\d{1,10}$/;
+export const JIRA_KEY = /^[A-Z][A-Z0-9_]{0,19}-\d{1,10}$/;
 const MESSAGE_ID = /^\d{4}-\d{2}-\d{2}-[a-z0-9]{4}$/;
 const SITE = /^[A-Z0-9]{1,10}$/;
 

@@ -66,8 +66,7 @@ describe('JiraClient tickets', () => {
     expect(searches[0].url.searchParams.get('jql')).toBe('assignee = currentUser() AND statusCategory != Done AND project in (WEB, OPS)');
     expect(searches[1].url.searchParams.get('nextPageToken')).toBe('t2');
     expect(searches[1].url.searchParams.get('fields')).toBe(searches[0].url.searchParams.get('fields'));
-    expect(searches[0].url.searchParams.get('fields')).toContain('customfield_10030');
-    expect(searches[0].url.searchParams.get('fields')).not.toContain('*all');
+        expect(searches[0].url.searchParams.get('fields')).toBe('*all,-comment,-worklog,-attachment,-issuelinks,-subtasks');
     expect(tickets.map((t) => t.id)).toEqual(['WEB-1', 'OPS-2']);
     const t = tickets[0];
     expect(t.restricted).toBe(true);
@@ -221,6 +220,21 @@ describe('JiraClient hardening', () => {
     const { fn, calls } = jiraFetch({ '/jira/rest/api/2/myself': { name: 'd' } });
     await new JiraClient('https://jira.example.com/jira//', SERVER, { fetchFn: fn }).whoAmI();
     expect(calls[0].url.pathname).toBe('/jira/rest/api/2/myself');
+  });
+});
+
+describe('JiraClient search field list', () => {
+  it('keeps the URL short with 1000 custom fields and sends the same fields on every page', async () => {
+    const many = [...FIELDS, ...Array.from({ length: 1000 }, (_, i) => ({ id: `customfield_2${String(i).padStart(4, '0')}`, name: `F${i}` }))];
+    const pages = [{ issues: [issue('WEB-1')], nextPageToken: 'p2' }, { issues: [issue('WEB-2')] }];
+    let n = 0;
+    const { fn, calls } = jiraFetch({ '/rest/api/3/field': many, '/rest/api/3/search/jql': () => pages[n++] });
+    const t = await new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).myTickets();
+    const searches = calls.filter((c) => c.url.pathname.endsWith('/search/jql'));
+    expect(searches.length).toBe(2);
+    for (const c of searches) expect(c.url.toString().length).toBeLessThan(8000);
+    expect(searches[0].url.searchParams.get('fields')).toBe(searches[1].url.searchParams.get('fields'));
+    expect(t.every((x) => x.fields.some((f) => f.name === 'Team'))).toBe(true);
   });
 });
 
