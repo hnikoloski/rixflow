@@ -1,0 +1,17 @@
+{
+  "description": "RixFlow: session brief, new-message checks and session summaries",
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hub.cjs", "hook", "session-start"], "timeout": 20 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hub.cjs", "hook", "prompt"], "timeout": 12 }] }
+    ],
+    "PreCompact": [
+      { "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hub.cjs", "hook", "precompact"], "timeout": 10 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hub.cjs", "hook", "session-end"] }] }
+    ]
+  }
+}

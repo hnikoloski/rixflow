@@ -1,0 +1,8 @@
+brief.pdf
+node_modules/
+coverage/
+docs/
+.superpowers/
+.serena/
+*.bundle
+.claude/settings.local.json

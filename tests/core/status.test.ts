@@ -1,0 +1,288 @@
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { AsanaClient } from '../../src/core/asana';
+import { buildStatus, emptyStatus, STATUS_VERSION, type StatusDeps, type StatusOptions } from '../../src/core/status';
+import { sendMessage } from '../../src/core/messages';
+import { writeCheckpoint, writeHandover } from '../../src/core/notes';
+import { HubError, type Ctx } from '../../src/core/types';
+import { fakeAsana, field, task } from '../fixtures/asana';
+import { makeCtx } from '../helpers';
+
+const opts = (o: Partial<StatusOptions> = {}): StatusOptions => ({ cwd: '/nowhere', asana: false, refresh: false, sync: false, ...o });
+const deps = (ctx: Ctx, o: Partial<StatusDeps> = {}): StatusDeps => ({
+  loadCtx: () => ctx,
+  sync: async () => ({ status: 'ok', detail: '', pending: 0, conflicts: [] }),
+  asana: () => null,
+  ...o,
+});
+const as = (ctx: Ctx, name: string): Ctx => ({ ...ctx, user: { ...ctx.user, name } });
+const brief = (title: string, status = 'TODO', due = '2026-10-14') => `# ${title}\n\n- Asana: x\n- Status: ${status}\n- Due: ${due}`;
+const handover = (ctx: Ctx, gid: string, title: string, projectDir?: string) =>
+  writeHandover(ctx, { task: gid, site: 'AC', projectDir, asanaModifiedAt: '', brief: brief(title), related: [] });
+
+describe('buildStatus', () => {
+  it('reports not initialized without throwing', async () => {
+    const s = await buildStatus(opts(), {
+      loadCtx: () => { throw new HubError('NOT_INITIALIZED', 'no config'); },
+      sync: async () => null,
+      asana: () => null,
+    });
+    expect(s).toMatchObject({ v: STATUS_VERSION, initialized: false, user: null, current: null, inbox: [], paused: [], sprint: null });
+    expect(s.problems).toEqual(['setup needed']);
+  });
+
+  it('lists new and read messages newest first with a one-line preview', async () => {
+    const ctx = makeCtx();
+    sendMessage(as(ctx, 'pm'), { to: 'hristijan', type: 'request', body: 'First line\nsecond line', task: '1219374889411287' });
+    const later = { ...as(ctx, 'pm'), now: () => new Date('2026-10-08T11:00:00Z') };
+    sendMessage(later, { to: 'hristijan', type: 'question', body: 'Newer one' });
+    const s = await buildStatus(opts(), deps(ctx));
+    expect(s.inbox.map((m) => m.preview)).toEqual(['Newer one', 'First line']);
+    expect(s.inbox[1]).toMatchObject({ from: 'pm', type: 'request', task: '1219374889411287', status: 'new' });
+    expect(s.inbox[0].task).toBeNull();
+  });
+
+  it('scrubs and cleans previews', async () => {
+    const ctx = makeCtx();
+    sendMessage(as(ctx, 'pm'), { to: 'hristijan', type: 'request', body: 'see https://u:secret@stage.x/ \u001b[31mred' });
+    const s = await buildStatus(opts(), deps(ctx));
+    expect(s.inbox[0].preview).not.toContain('secret');
+    expect(s.inbox[0].preview).toContain('[redacted]');
+    expect(s.inbox[0].preview).not.toMatch(/\u001b/);
+  });
+
+  it('strips C1 controls and bidi overrides from previews', async () => {
+    const ctx = makeCtx();
+    sendMessage(as(ctx, 'pm'), { to: 'hristijan', type: 'request', body: 'a\u202eb\u009bc\u0085d\u200ee\u200ff\u202ag\u2066h\u2069i' });
+    const s = await buildStatus(opts(), deps(ctx));
+    expect(s.inbox[0].preview).not.toMatch(/[\u0080-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/);
+    expect(s.inbox[0].preview).toBe('a b c d e f g h i');
+  });
+
+  it('picks the current task from --task, then cwd, else null', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    handover(ctx, '222', 'Consent mode', '/home/u/projects/globex-web');
+    const bySession = await buildStatus(opts({ task: '222', cwd: '/home/u/projects/acme' }), deps(ctx));
+    expect(bySession.current).toMatchObject({ task: '222', title: 'Consent mode', source: 'session', status: 'TODO', due: '2026-10-14' });
+    const byCwd = await buildStatus(opts({ cwd: '/home/u/projects/acme/src' }), deps(ctx));
+    expect(byCwd.current).toMatchObject({ task: '111', title: 'Banner overlap', source: 'cwd' });
+    expect((await buildStatus(opts(), deps(ctx))).current).toBeNull();
+  });
+
+  it('ignores an invalid --task and falls back to cwd', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    const s = await buildStatus(opts({ task: '../etc', cwd: '/home/u/projects/acme' }), deps(ctx));
+    expect(s.current?.task).toBe('111');
+  });
+
+  it('reports the session task as current even with a checkpoint (resumed), and not as paused', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    writeCheckpoint(ctx, { task: '111', site: 'AC', done: 'd', pending: 'p', blockers: 'none', resume: 'r' });
+    const s = await buildStatus(opts({ task: '111' }), deps(ctx));
+    expect(s.current).toMatchObject({ task: '111', title: 'Banner overlap', source: 'session' });
+    expect(s.paused).toEqual([]);
+  });
+
+  it('reports a checkpointed cwd task as paused, not current', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    writeCheckpoint(ctx, { task: '111', site: 'AC', done: 'd', pending: 'p', blockers: 'none', resume: 'r' });
+    const s = await buildStatus(opts({ cwd: '/home/u/projects/acme' }), deps(ctx));
+    expect(s.current).toBeNull();
+    expect(s.paused).toEqual([expect.objectContaining({ task: '111', title: 'Banner overlap', site: 'AC' })]);
+  });
+
+  it('skips a checkpoint with an invalid task and cleans the others', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    writeCheckpoint(ctx, { task: '111', site: 'AC', done: 'd', pending: 'p', blockers: 'none', resume: 'r' });
+    const dir = join(ctx.hubDir, 'people', 'hristijan', 'checkpoints');
+    writeFileSync(join(dir, 'bad.md'), '---\ntype: checkpoint\ntask: ../etc\n---\n# Checkpoint\n');
+    writeFileSync(join(dir, '333.md'), '---\ntype: checkpoint\ntask: "333"\nsite: "C\\u001bB"\npaused_at: "2026\\u202e-10-08"\n---\n# Checkpoint 333\n');
+    const s = await buildStatus(opts(), deps(ctx));
+    expect(s.problems).toEqual([]);
+    expect(s.paused.map((p) => p.task).sort()).toEqual(['111', '333']);
+    const odd = s.paused.find((p) => p.task === '333')!;
+    expect(odd.site).toBe('C B');
+    expect(odd.pausedAt).toBe('2026 -10-08');
+  });
+
+  it('times out a slow sync and still reports the rest', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    let finish!: () => void;
+    const slow = () => new Promise<null>((r) => (finish = () => r(null)));
+    const s = await buildStatus(opts({ sync: true, cwd: '/home/u/projects/acme' }), deps(ctx, { sync: slow, syncBudgetMs: 20 }));
+    finish();
+    expect(s.sync).toEqual({ status: 'offline', pending: 0, detail: 'sync timed out' });
+    expect(s.current?.task).toBe('111');
+    expect(s.problems).toEqual([]);
+  });
+
+  it('a timed-out sync still reports how many commits wait to be pushed', async () => {
+    const ctx = makeCtx();
+    const sync = () => new Promise<never>(() => {});
+    const s = await buildStatus(opts({ sync: true }), deps(ctx, { sync, syncBudgetMs: 20, pending: async () => 2 }));
+    expect(s.sync).toEqual({ status: 'offline', pending: 2, detail: 'sync timed out' });
+    const broken = await buildStatus(opts({ sync: true }), deps(ctx, { sync, syncBudgetMs: 20, pending: async () => { throw new Error('x'); } }));
+    expect(broken.sync).toEqual({ status: 'offline', pending: 0, detail: 'sync timed out' });
+  }, 2_000);
+
+  it('maps the sync result and skips sync when asked', async () => {
+    const ctx = makeCtx();
+    const off = await buildStatus(opts({ sync: true }), deps(ctx, { sync: async () => ({ status: 'offline', detail: 'no net', pending: 3, conflicts: [] }) }));
+    expect(off.sync).toEqual({ status: 'offline', pending: 3, detail: 'no net' });
+    const skipped = await buildStatus(opts({ sync: false }), deps(ctx));
+    expect(skipped.sync.status).toBe('skipped');
+  });
+
+  it('a failing section does not hide the others', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    const dir = join(ctx.hubDir, 'inbox', 'hristijan');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2026-10-08-zzzz.md'), '---\nnot: valid\n---\n');
+    const s = await buildStatus(opts({ sync: true, cwd: '/home/u/projects/acme' }), deps(ctx, { sync: async () => { throw new Error('boom'); } }));
+    expect(s.current?.task).toBe('111');
+    expect(s.inbox).toEqual([]);
+    expect(s.problems).toEqual(['sync failed']);
+  });
+
+  it('fetches the sprint from Asana, caches it, and serves the cache within 10 minutes', async () => {
+    const ctx = makeCtx();
+    const sprint = { project: { gid: '9', name: 'P' }, section: { gid: '8', name: 'Sprint 41 | 5.10 - 9.10' } };
+    const asana = fakeAsana([task({ gid: '111', name: 'Banner', memberships: [sprint], custom_fields: [field('Website', 'AC'), field('Status', 'TODO')], due_on: '2026-10-09' })]);
+    const first = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    expect(first.sprint).toMatchObject({ name: 'Sprint 41 | 5.10 - 9.10' });
+    expect(first.sprint!.items).toEqual([{ task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: '2026-10-09', paused: false }]);
+    const calls = asana.calls.length;
+    await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    expect(asana.calls.length).toBe(calls);
+    await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => asana }));
+    expect(asana.calls.length).toBeGreaterThan(calls);
+    expect(JSON.parse(readFileSync(join(ctx.configDir, 'status-cache.json'), 'utf8')).user).toBe('hristijan');
+  });
+
+  it('fills the current task status and due from the Asana data', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    const sprint = { project: { gid: '9', name: 'P' }, section: { gid: '8', name: 'Sprint 41 | 5.10 - 9.10' } };
+    const asana = fakeAsana([task({ gid: '111', name: 'Banner overlap', memberships: [sprint], custom_fields: [field('Status', 'TESTING')], due_on: '2026-10-09' })]);
+    const s = await buildStatus(opts({ task: '111', asana: true }), deps(ctx, { asana: () => asana }));
+    expect(s.current).toMatchObject({ status: 'TESTING', due: '2026-10-09' });
+  });
+
+  it('without --asana serves the cached sprint, however old, and never calls Asana', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-01T08:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41',
+      items: [{ task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: null, paused: false }],
+    }));
+    const asana = fakeAsana([]);
+    const s = await buildStatus(opts({ asana: false }), deps(ctx, { asana: () => asana }));
+    expect(s.sprint).toMatchObject({ name: 'Sprint 41', fetchedAt: '2026-10-01T08:00:00.000Z' });
+    expect(asana.calls).toEqual([]);
+    expect(s.problems).toEqual([]);
+  });
+
+  it('keeps the cached sprint when the token goes missing', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-01T08:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41', items: [],
+    }));
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => null }));
+    expect(s.sprint).toMatchObject({ name: 'Sprint 41' });
+    expect(s.problems).toContain('asana token missing');
+  });
+
+  it('counts the time before buildStatus (process start) against the budget', async () => {
+    const ctx = makeCtx();
+    const slow = { ...fakeAsana([]), getMyTasks: () => new Promise<never>(() => {}) };
+    const t0 = Date.now();
+    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => slow, budgetMs: 10_000, startedAt: Date.now() - 10_000 }));
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(s.problems).toContain('asana timed out');
+  }, 2_000);
+
+  it('treats a cache from the future as stale', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2099-01-01T00:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'old', items: [],
+    }));
+    const asana = fakeAsana([]);
+    await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    expect(asana.calls).toContain('getMyTasks');
+  });
+
+  it('ignores a corrupt cache', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), '{"fetchedAt": "2026-10-08T09:59');
+    const asana = fakeAsana([]);
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => asana }));
+    expect(asana.calls).toContain('getMyTasks');
+    expect(s.problems).toEqual([]);
+  });
+
+  it('reports a missing token and an unreachable Asana as problems', async () => {
+    const ctx = makeCtx();
+    const noToken = await buildStatus(opts({ asana: true }), deps(ctx));
+    expect(noToken.problems).toContain('asana token missing');
+    const down = { ...fakeAsana([]), getMyTasks: async () => { throw new Error('ECONNRESET'); } };
+    const unreachable = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => down }));
+    expect(unreachable.problems).toContain('asana unreachable');
+    expect(unreachable.sprint).toBeNull();
+  });
+
+  it('reports a hanging Asana as unreachable once its request times out', async () => {
+    const ctx = makeCtx();
+    const hang = ((_url: URL, init: RequestInit) => new Promise<Response>((_ok, fail) => {
+      init.signal?.addEventListener('abort', () => fail(init.signal?.reason));
+    })) as unknown as typeof fetch;
+    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => new AsanaClient('tok', hang, undefined, 20) }));
+    expect(s.problems).toContain('asana unreachable');
+    expect(s.sprint).toBeNull();
+  }, 2_000);
+
+  it('stops a slow Asana at the overall budget, even when each request answers in time', async () => {
+    const ctx = makeCtx();
+    const slow = { ...fakeAsana([]), getMyTasks: () => new Promise<never>(() => {}) };
+    const t0 = Date.now();
+    const s = await buildStatus(opts({ asana: true, refresh: true }), deps(ctx, { asana: () => slow, budgetMs: 50 }));
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(s.problems).toContain('asana timed out');
+    expect(s.sprint).toBeNull();
+  }, 2_000);
+
+  it('counts the sync against the same budget', async () => {
+    const ctx = makeCtx();
+    const sync = () => new Promise<null>((done) => setTimeout(() => done(null), 60));
+    const slow = { ...fakeAsana([]), getMyTasks: () => new Promise<never>(() => {}) };
+    const t0 = Date.now();
+    const s = await buildStatus(opts({ asana: true, refresh: true, sync: true }), deps(ctx, { sync, asana: () => slow, budgetMs: 80 }));
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(s.problems).toContain('asana timed out');
+  }, 2_000);
+
+  it('keeps showing a stale sprint when the refresh fails, and says so', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-08T08:00:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41',
+      items: [{ task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: null, paused: false }],
+    }));
+    const down = { ...fakeAsana([]), getMyTasks: async () => { throw new HubError('ASANA_NETWORK', 'x'); } };
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { asana: () => down }));
+    expect(s.sprint).toMatchObject({ name: 'Sprint 41', fetchedAt: '2026-10-08T08:00:00.000Z' });
+    expect(s.problems).toContain('asana unreachable');
+  });
+
+  it('emptyStatus has the full shape', () => {
+    expect(emptyStatus(new Date('2026-10-08T10:00:00Z'), ['x'])).toEqual({
+      v: STATUS_VERSION, at: '2026-10-08T10:00:00.000Z', user: null, initialized: false,
+      sync: { status: 'skipped', pending: 0, detail: '' }, current: null, inbox: [], paused: [], sprint: null, problems: ['x'],
+    });
+  });
+});

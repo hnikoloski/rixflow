@@ -1,0 +1,9 @@
+{
+  "name": "rixflow",
+  "description": "RixFlow: async team workflow for Claude Code (core + UI)",
+  "owner": { "name": "Hristijan Nikoloski" },
+  "plugins": [
+    { "name": "rixflow", "source": "./plugin", "description": "Async team workflow through Claude Code: plate, handovers, inbox, shared knowledge" },
+    { "name": "rixflow-ui", "source": "./ui", "description": "RixFlow in your session: current task, inbox, paused work and sprint in a pane, band and status line" }
+  ]
+}

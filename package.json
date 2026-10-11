@@ -1,0 +1,26 @@
+{
+  "name": "rixflow",
+  "version": "0.2.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && npm run build && git diff --exit-code --stat -- plugin/dist",
+    "build": "esbuild src/cli/main.ts --bundle --platform=node --target=node20 --format=cjs --outfile=plugin/dist/hub.cjs && esbuild src/mcp/main.ts --bundle --platform=node --target=node20 --format=cjs --outfile=plugin/dist/mcp.cjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "commander": "14.0.3",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

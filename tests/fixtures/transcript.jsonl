@@ -1,0 +1,5 @@
+{"type":"summary","summary":"ignored"}
+{"type":"user","message":{"role":"user","content":"Fix the pricing CTA copy on acme"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll look at the pricing template."},{"type":"tool_use","name":"Read","input":{"file_path":"/p/acme/pricing.php"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"<?php echo 'very long file' ?>"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Changed the CTA to 'Start free trial'. Kept the DE copy because legal approved it."}]}}
