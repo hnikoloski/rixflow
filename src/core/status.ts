@@ -5,7 +5,7 @@ import type { SyncResult, SyncStatus } from './git';
 import { listInbox, type MessageStatus, type MessageType } from './messages';
 import { findActiveHandover, listCheckpoints, readHandover, type Handover } from './notes';
 import { display, gatherPlate, type PlateItem } from './plate';
-import { HubError, assertGid, type Ctx } from './types';
+import { HubError, assertTicketId, type Ctx } from './types';
 
 export const STATUS_VERSION = 1;
 export const ASANA_CACHE_TTL_MS = 600_000;
@@ -171,7 +171,7 @@ export async function buildStatus(opts: StatusOptions, deps: StatusDeps): Promis
   try {
     for (const c of listCheckpoints(ctx)) {
       try {
-        assertGid(c.task);
+        assertTicketId(c.task);
       } catch {
         continue; // a hand-edited checkpoint with a bad task id: skip it, keep the rest
       }
@@ -193,7 +193,7 @@ export async function buildStatus(opts: StatusOptions, deps: StatusDeps): Promis
     let task: string | undefined;
     if (opts.task) {
       try {
-        assertGid(opts.task);
+        assertTicketId(opts.task);
         task = opts.task;
       } catch {
         task = undefined;

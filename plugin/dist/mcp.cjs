@@ -35895,6 +35895,7 @@ var HubError = class extends Error {
 };
 var NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 var GID = /^\d{1,30}$/;
+var JIRA_KEY = /^[A-Z][A-Z0-9_]{0,19}-\d{1,10}$/;
 var MESSAGE_ID = /^\d{4}-\d{2}-\d{2}-[a-z0-9]{4}$/;
 var SITE = /^[A-Z0-9]{1,10}$/;
 function assertName(v) {
@@ -35902,6 +35903,15 @@ function assertName(v) {
 }
 function assertGid(v) {
   if (typeof v !== "string" || !GID.test(v)) throw new HubError("BAD_GID", `invalid Asana task id: ${String(v)}`);
+}
+function assertTicketId(v) {
+  if (typeof v !== "string" || !(GID.test(v) || JIRA_KEY.test(v))) throw new HubError("BAD_TICKET", `invalid ticket id: ${String(v)}`);
+}
+function normalizeTicketId(v) {
+  const t = typeof v === "string" ? v.trim() : v;
+  const id = typeof t === "string" && JIRA_KEY.test(t.toUpperCase()) ? t.toUpperCase() : t;
+  assertTicketId(id);
+  return id;
 }
 function assertMessageId(v) {
   if (typeof v !== "string" || !MESSAGE_ID.test(v)) throw new HubError("BAD_ID", `invalid message id: ${String(v)}`);
@@ -44747,7 +44757,7 @@ function readMessage(path, owner) {
   if (typeof to !== "string" || to !== owner || !passes(assertName, to)) return bad();
   if (typeof created !== "string" || Number.isNaN(Date.parse(created))) return bad();
   if (!passes(assertMessageId, id) || !passes(assertMessageId, String(thread))) return bad();
-  if (task !== void 0 && !passes(assertGid, task)) return bad();
+  if (task !== void 0 && !passes(assertTicketId, task)) return bad();
   return { id, type, from, to, task, thread: String(thread), status: status2, created, body, path };
 }
 function readAll(files, owner) {
@@ -44781,7 +44791,7 @@ function sendMessage(ctx, input2) {
   assertName(ctx.user.name);
   assertName(input2.to);
   if (!isOneOf(TYPES, input2.type)) throw new HubError("BAD_TYPE", `invalid message type: ${String(input2.type)}`);
-  if (input2.task !== void 0) assertGid(input2.task);
+  if (input2.task !== void 0) assertTicketId(input2.task);
   if (input2.thread !== void 0) assertMessageId(input2.thread);
   if (!loadTeam(ctx.hubDir).some((m) => m.name === input2.to)) {
     throw new HubError("UNKNOWN_RECIPIENT", `${input2.to} is not in config/team.yml`);
@@ -44891,7 +44901,7 @@ function reindex(ctx) {
 }
 var str = (v) => v === void 0 || v === null ? void 0 : String(v);
 function writeSession(ctx, s) {
-  if (s.task) assertGid(s.task);
+  if (s.task) assertTicketId(s.task);
   const dir = (0, import_node_path13.join)(personDir(ctx), "sessions");
   const date5 = isoDate(ctx.now());
   const base = `${date5}-${s.task ?? "misc"}`;
@@ -44936,7 +44946,7 @@ function writeSession(ctx, s) {
   }
 }
 function checkpointPath(ctx, task) {
-  assertGid(task);
+  assertTicketId(task);
   return (0, import_node_path13.join)(personDir(ctx), "checkpoints", `${task}.md`);
 }
 function writeCheckpoint(ctx, cp) {
@@ -45001,7 +45011,7 @@ function clearCheckpoint(ctx, task) {
   return true;
 }
 function handoverPath(ctx, task) {
-  assertGid(task);
+  assertTicketId(task);
   return (0, import_node_path13.join)(personDir(ctx), "handovers", `${task}.md`);
 }
 function writeHandover(ctx, h) {
@@ -45400,7 +45410,7 @@ function isAuthError(err) {
   return err instanceof HubError && err.code === "ASANA_AUTH";
 }
 async function startTask(ctx, asana, input2) {
-  assertGid(input2.task);
+  assertTicketId(input2.task);
   const task = await asana.getTask(input2.task);
   const chain = await parentChain(asana, task);
   const site = resolveSite(chain, loadSites(ctx.hubDir), ctx.user);
@@ -45431,7 +45441,7 @@ async function startTask(ctx, asana, input2) {
   };
 }
 async function resumeTask(ctx, asana, task) {
-  assertGid(task);
+  assertTicketId(task);
   const handover = readHandover(ctx, task);
   const checkpoint = readCheckpoint(ctx, task);
   const local = {
@@ -45570,26 +45580,26 @@ function createServer(deps) {
   server2.registerTool("start_task", {
     description: "Prepare a handover for an Asana task (brief, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.",
     inputSchema: { task: text, cwd: text }
-  }, async ({ task, cwd }) => safe(async () => {
+  }, async ({ task: rawTask, cwd }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     const result = await startTask(ctx, asanaFor(ctx), { task, cwd });
     return { ...result, handoverPath: rel(ctx, result.handoverPath), ...await persisted(ctx, `handover: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("resume_task", {
     description: "Load the handover and checkpoint for a task, and report Asana changes and new comments since the handover was written. Works offline from local files.",
     inputSchema: { task: text }
-  }, async ({ task }) => safe(async () => {
+  }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     return resumeTask(ctx, deps.asana(ctx), task);
   }));
   server2.registerTool("remember_site", {
     description: "Remember which site (code from the hub config/sites.yml, e.g. AC or GL) an Asana task belongs to, when it cannot be resolved automatically.",
     inputSchema: { task: text, site: text }
-  }, async ({ task, site }) => safe(() => {
+  }, async ({ task: rawTask, site }) => safe(() => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     assertSiteCode(site);
     if (!loadSites(ctx.hubDir)[site]) throw new HubError("BAD_SITE", `${site} is not in config/sites.yml`);
     ctx.user.taskSites[task] = site;
@@ -45599,9 +45609,9 @@ function createServer(deps) {
   server2.registerTool("task_details", {
     description: "Read an Asana task and its recent comments (read-only). Credentials in link fields are redacted.",
     inputSchema: { task: text }
-  }, async ({ task }) => safe(async () => {
+  }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     const asana = asanaFor(ctx);
     const details = { task: await asana.getTask(task), comments: await asana.getComments(task, 20) };
     return JSON.stringify(details, null, 2);
@@ -45618,9 +45628,9 @@ function createServer(deps) {
       branch: text.optional(),
       stashRef: text.optional()
     }
-  }, async (args) => safe(async () => {
+  }, async (a) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(args.task);
+    const args = { ...a, task: normalizeTicketId(a.task) };
     optionalSite(args.site);
     let asanaModifiedAt;
     try {
@@ -45645,10 +45655,10 @@ function createServer(deps) {
       task: text.optional(),
       site: text.optional()
     }
-  }, async (args) => safe(async () => {
+  }, async (a) => safe(async () => {
     const ctx = deps.ctx();
+    const args = a.task === void 0 ? a : { ...a, task: normalizeTicketId(a.task) };
     if (!SESSION_ID.test(args.sessionId)) throw new HubError("BAD_INPUT", "sessionId may only contain letters, digits, . _ - (max 100)");
-    if (args.task !== void 0) assertGid(args.task);
     optionalSite(args.site);
     const path = writeSession(ctx, args);
     return { path: rel(ctx, path), ...await persisted(ctx, `session: ${ctx.user.name} ${args.sessionId}`) };
@@ -45656,9 +45666,9 @@ function createServer(deps) {
   server2.registerTool("finish_task", {
     description: "Mark a task finished in the hub (removes its checkpoint) and sync. Does not touch Asana.",
     inputSchema: { task: text }
-  }, async ({ task }) => safe(async () => {
+  }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
     return { checkpointRemoved: removed, ...await persisted(ctx, `finish: ${ctx.user.name} ${task}`) };
   }));
@@ -45702,8 +45712,9 @@ ${(0, import_node_fs13.readFileSync)(real, "utf8")}
       task: text.optional(),
       thread: text.optional()
     }
-  }, async (args) => safe(async () => {
+  }, async (a) => safe(async () => {
     const ctx = deps.ctx();
+    const args = a.task === void 0 ? a : { ...a, task: normalizeTicketId(a.task) };
     const message = sendMessage(ctx, args);
     return { id: message.id, path: rel(ctx, message.path), ...await persisted(ctx, `message: ${ctx.user.name} -> ${args.to} ${message.id}`) };
   }));

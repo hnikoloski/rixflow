@@ -18,7 +18,7 @@ import { search } from '../core/search';
 import { resumeTask, startTask } from '../core/tasks';
 import { loadSites, loadTeam } from '../core/team';
 import { hubCommand } from '../core/command';
-import { HubError, assertGid, assertSiteCode, type Ctx } from '../core/types';
+import { HubError, assertTicketId, normalizeTicketId, assertSiteCode, type Ctx } from '../core/types';
 
 export interface ServerDeps {
   ctx: () => Ctx;
@@ -133,9 +133,9 @@ export function createServer(deps: ServerDeps): McpServer {
   server.registerTool('start_task', {
     description: 'Prepare a handover for an Asana task (brief, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.',
     inputSchema: { task: text, cwd: text },
-  }, async ({ task, cwd }) => safe(async () => {
+  }, async ({ task: rawTask, cwd }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     const result = await startTask(ctx, asanaFor(ctx), { task, cwd });
     return { ...result, handoverPath: rel(ctx, result.handoverPath), ...(await persisted(ctx, `handover: ${ctx.user.name} ${task}`)) };
   }));
@@ -143,18 +143,18 @@ export function createServer(deps: ServerDeps): McpServer {
   server.registerTool('resume_task', {
     description: 'Load the handover and checkpoint for a task, and report Asana changes and new comments since the handover was written. Works offline from local files.',
     inputSchema: { task: text },
-  }, async ({ task }) => safe(async () => {
+  }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     return resumeTask(ctx, deps.asana(ctx), task);
   }));
 
   server.registerTool('remember_site', {
     description: 'Remember which site (code from the hub config/sites.yml, e.g. AC or GL) an Asana task belongs to, when it cannot be resolved automatically.',
     inputSchema: { task: text, site: text },
-  }, async ({ task, site }) => safe(() => {
+  }, async ({ task: rawTask, site }) => safe(() => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     assertSiteCode(site);
     if (!loadSites(ctx.hubDir)[site]) throw new HubError('BAD_SITE', `${site} is not in config/sites.yml`);
     ctx.user.taskSites[task] = site;
@@ -165,9 +165,9 @@ export function createServer(deps: ServerDeps): McpServer {
   server.registerTool('task_details', {
     description: 'Read an Asana task and its recent comments (read-only). Credentials in link fields are redacted.',
     inputSchema: { task: text },
-  }, async ({ task }) => safe(async () => {
+  }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     const asana = asanaFor(ctx);
     const details = { task: await asana.getTask(task), comments: await asana.getComments(task, 20) };
     return JSON.stringify(details, null, 2);
@@ -179,9 +179,9 @@ export function createServer(deps: ServerDeps): McpServer {
       task: text, done: text, pending: text, blockers: text, resume: text,
       site: text.optional(), branch: text.optional(), stashRef: text.optional(),
     },
-  }, async (args) => safe(async () => {
+  }, async (a) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(args.task);
+    const args = { ...a, task: normalizeTicketId(a.task) };
     optionalSite(args.site);
     let asanaModifiedAt: string | undefined;
     try {
@@ -199,10 +199,10 @@ export function createServer(deps: ServerDeps): McpServer {
       sessionId: text, trigger: z.enum(['checkpoint', 'wrapup']), phase, goal: text, done: text,
       decisions: text, deadEnds: text, next: text, task: text.optional(), site: text.optional(),
     },
-  }, async (args) => safe(async () => {
+  }, async (a) => safe(async () => {
     const ctx = deps.ctx();
+    const args = a.task === undefined ? a : { ...a, task: normalizeTicketId(a.task) };
     if (!SESSION_ID.test(args.sessionId)) throw new HubError('BAD_INPUT', 'sessionId may only contain letters, digits, . _ - (max 100)');
-    if (args.task !== undefined) assertGid(args.task);
     optionalSite(args.site);
     const path = writeSession(ctx, args);
     return { path: rel(ctx, path), ...(await persisted(ctx, `session: ${ctx.user.name} ${args.sessionId}`)) };
@@ -211,9 +211,9 @@ export function createServer(deps: ServerDeps): McpServer {
   server.registerTool('finish_task', {
     description: 'Mark a task finished in the hub (removes its checkpoint) and sync. Does not touch Asana.',
     inputSchema: { task: text },
-  }, async ({ task }) => safe(async () => {
+  }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
-    assertGid(task);
+    const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
     return { checkpointRemoved: removed, ...(await persisted(ctx, `finish: ${ctx.user.name} ${task}`)) };
   }));
@@ -251,8 +251,9 @@ export function createServer(deps: ServerDeps): McpServer {
       to: text, type: z.enum(['request', 'question', 'answer']), body: text,
       task: text.optional(), thread: text.optional(),
     },
-  }, async (args) => safe(async () => {
+  }, async (a) => safe(async () => {
     const ctx = deps.ctx();
+    const args = a.task === undefined ? a : { ...a, task: normalizeTicketId(a.task) };
     const message = sendMessage(ctx, args);
     return { id: message.id, path: rel(ctx, message.path), ...(await persisted(ctx, `message: ${ctx.user.name} -> ${args.to} ${message.id}`)) };
   }));

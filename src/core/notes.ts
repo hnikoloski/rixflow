@@ -4,7 +4,7 @@ import { isInsideDir } from './config';
 import { listMd, personDir, readDoc, writeDoc } from './hubfs';
 import { isoDate } from './ids';
 import { rebuildIndex } from './indexes';
-import { assertGid, type Ctx } from './types';
+import { assertTicketId, type Ctx } from './types';
 
 export type Phase = 'research' | 'plan' | 'implement' | 'debug' | 'done';
 export type Trigger = 'checkpoint' | 'wrapup' | 'precompact' | 'session-end';
@@ -100,7 +100,7 @@ function reindex(ctx: Ctx): void {
 const str = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : String(v));
 
 export function writeSession(ctx: Ctx, s: SessionSummary): string {
-  if (s.task) assertGid(s.task);
+  if (s.task) assertTicketId(s.task);
   const dir = join(personDir(ctx), 'sessions');
   const date = isoDate(ctx.now());
   const base = `${date}-${s.task ?? 'misc'}`;
@@ -131,7 +131,7 @@ export function hasSessionSummary(ctx: Ctx, sessionId: string): boolean {
 }
 
 function checkpointPath(ctx: Ctx, task: string): string {
-  assertGid(task);
+  assertTicketId(task);
   return join(personDir(ctx), 'checkpoints', `${task}.md`);
 }
 
@@ -177,7 +177,7 @@ export function clearCheckpoint(ctx: Ctx, task: string): boolean {
 }
 
 function handoverPath(ctx: Ctx, task: string): string {
-  assertGid(task);
+  assertTicketId(task);
   return join(personDir(ctx), 'handovers', `${task}.md`);
 }
 

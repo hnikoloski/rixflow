@@ -56,7 +56,7 @@ describe('checkpoints', () => {
   });
   it('rejects a non-numeric task id', () => {
     const ctx = makeCtx();
-    expect(() => readCheckpoint(ctx, '../x')).toThrowError(expect.objectContaining({ code: 'BAD_GID' }));
+    expect(() => readCheckpoint(ctx, '../x')).toThrowError(expect.objectContaining({ code: 'BAD_TICKET' }));
   });
 });
 

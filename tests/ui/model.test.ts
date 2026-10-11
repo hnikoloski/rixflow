@@ -141,6 +141,8 @@ describe('helpers', () => {
   });
   it('tracks the current task from tool results', () => {
     expect(nextCurrentTask(null, TOOL.start, { task: '111' }, true)).toBe('111');
+    expect(nextCurrentTask(null, TOOL.start, { task: 'WEB-7' }, true)).toBe('WEB-7');
+    expect(nextCurrentTask(null, TOOL.start, { task: 'web-7' }, true)).toBeNull();
     expect(nextCurrentTask('111', TOOL.resume, { task: '222' }, true)).toBe('222');
     expect(nextCurrentTask('111', TOOL.start, { task: '222' }, false)).toBe('111');
     expect(nextCurrentTask('111', TOOL.checkpoint, {}, true)).toBeNull();

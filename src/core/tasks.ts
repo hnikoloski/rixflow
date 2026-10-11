@@ -7,7 +7,7 @@ import { scrub } from './scrub';
 import { search } from './search';
 import { resolveSite } from './sites';
 import { loadSites } from './team';
-import { HubError, assertGid, type Ctx } from './types';
+import { HubError, assertTicketId, type Ctx } from './types';
 
 export interface StartResult {
   task: string;
@@ -79,7 +79,7 @@ function isAuthError(err: unknown): boolean {
 }
 
 export async function startTask(ctx: Ctx, asana: AsanaReader, input: { task: string; cwd: string }): Promise<StartResult> {
-  assertGid(input.task);
+  assertTicketId(input.task);
   const task = await asana.getTask(input.task);
   const chain = await parentChain(asana, task);
   const site = resolveSite(chain, loadSites(ctx.hubDir), ctx.user);
@@ -114,7 +114,7 @@ export async function startTask(ctx: Ctx, asana: AsanaReader, input: { task: str
 }
 
 export async function resumeTask(ctx: Ctx, asana: AsanaReader | null, task: string): Promise<ResumeResult> {
-  assertGid(task);
+  assertTicketId(task);
   const handover = readHandover(ctx, task);
   const checkpoint = readCheckpoint(ctx, task);
   const local = {

@@ -164,7 +164,7 @@ export function fit<T>(items: readonly T[], room: number): { shown: T[]; more: n
 
 export function nextCurrentTask(prev: string | null, tool: string, input: { task?: unknown }, isOk: boolean): string | null {
   if (!isOk) return prev
-  if (tool === TOOL.start || tool === TOOL.resume) return typeof input.task === 'string' && /^\d{1,30}$/.test(input.task) ? input.task : prev
+  if (tool === TOOL.start || tool === TOOL.resume) return typeof input.task === 'string' && /^(\d{1,30}|[A-Z][A-Z0-9_]{0,19}-\d{1,10})$/.test(input.task) ? input.task : prev
   // Pausing or finishing another task leaves this session's task alone.
   if (tool === TOOL.checkpoint) return input.task === undefined || input.task === prev ? null : prev
   if (tool === TOOL.finish) return input.task === prev ? null : prev

@@ -10840,6 +10840,7 @@ var HubError = class extends Error {
 };
 var NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 var GID = /^\d{1,30}$/;
+var JIRA_KEY = /^[A-Z][A-Z0-9_]{0,19}-\d{1,10}$/;
 var MESSAGE_ID = /^\d{4}-\d{2}-\d{2}-[a-z0-9]{4}$/;
 var SITE = /^[A-Z0-9]{1,10}$/;
 function assertName(v) {
@@ -10847,6 +10848,9 @@ function assertName(v) {
 }
 function assertGid(v) {
   if (typeof v !== "string" || !GID.test(v)) throw new HubError("BAD_GID", `invalid Asana task id: ${String(v)}`);
+}
+function assertTicketId(v) {
+  if (typeof v !== "string" || !(GID.test(v) || JIRA_KEY.test(v))) throw new HubError("BAD_TICKET", `invalid ticket id: ${String(v)}`);
 }
 function assertMessageId(v) {
   if (typeof v !== "string" || !MESSAGE_ID.test(v)) throw new HubError("BAD_ID", `invalid message id: ${String(v)}`);
@@ -11339,7 +11343,7 @@ function readMessage(path, owner) {
   if (typeof to !== "string" || to !== owner || !passes(assertName, to)) return bad();
   if (typeof created !== "string" || Number.isNaN(Date.parse(created))) return bad();
   if (!passes(assertMessageId, id) || !passes(assertMessageId, String(thread))) return bad();
-  if (task !== void 0 && !passes(assertGid, task)) return bad();
+  if (task !== void 0 && !passes(assertTicketId, task)) return bad();
   return { id, type, from, to, task, thread: String(thread), status, created, body, path };
 }
 function readAll(files, owner) {
@@ -12013,7 +12017,7 @@ function reindex(ctx) {
 }
 var str = (v) => v === void 0 || v === null ? void 0 : String(v);
 function writeSession(ctx, s) {
-  if (s.task) assertGid(s.task);
+  if (s.task) assertTicketId(s.task);
   const dir = (0, import_node_path13.join)(personDir(ctx), "sessions");
   const date = isoDate(ctx.now());
   const base = `${date}-${s.task ?? "misc"}`;
@@ -12080,7 +12084,7 @@ function listCheckpoints(ctx) {
   return readAll2(listMd((0, import_node_path13.join)(personDir(ctx), "checkpoints")), toCheckpoint);
 }
 function handoverPath(ctx, task) {
-  assertGid(task);
+  assertTicketId(task);
   return (0, import_node_path13.join)(personDir(ctx), "handovers", `${task}.md`);
 }
 function toHandover(path) {
@@ -12937,7 +12941,7 @@ async function buildStatus(opts, deps) {
   try {
     for (const c of listCheckpoints(ctx)) {
       try {
-        assertGid(c.task);
+        assertTicketId(c.task);
       } catch {
         continue;
       }
@@ -12957,7 +12961,7 @@ async function buildStatus(opts, deps) {
     let task;
     if (opts.task) {
       try {
-        assertGid(opts.task);
+        assertTicketId(opts.task);
         task = opts.task;
       } catch {
         task = void 0;

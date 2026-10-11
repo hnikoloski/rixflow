@@ -22,6 +22,7 @@ describe('plugin package', () => {
     const version = JSON.parse(read('package.json')).version;
     expect(JSON.parse(read('plugin/.claude-plugin/plugin.json')).version).toBe(version);
     expect(JSON.parse(read('ui/.claude-plugin/plugin.json')).version).toBe(version);
+    expect(read('src/core/version.ts')).toContain(`'${version}'`);
     expect(read('src/mcp/server.ts')).toContain(`new McpServer({ name: 'hub', version: '${version}' })`);
   });
 

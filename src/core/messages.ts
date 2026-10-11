@@ -3,7 +3,7 @@ import { basename, join } from 'node:path';
 import { listMd, readDoc, writeDoc } from './hubfs';
 import { newMessageId } from './ids';
 import { loadTeam } from './team';
-import { HubError, assertGid, assertMessageId, assertName, type Ctx } from './types';
+import { HubError, assertTicketId, assertMessageId, assertName, type Ctx } from './types';
 
 export type MessageType = 'request' | 'question' | 'answer';
 export type MessageStatus = 'new' | 'read' | 'done';
@@ -58,7 +58,7 @@ function readMessage(path: string, owner: string): Message {
   if (typeof to !== 'string' || to !== owner || !passes(assertName, to)) return bad();
   if (typeof created !== 'string' || Number.isNaN(Date.parse(created))) return bad();
   if (!passes(assertMessageId, id) || !passes(assertMessageId, String(thread))) return bad();
-  if (task !== undefined && !passes(assertGid, task)) return bad();
+  if (task !== undefined && !passes(assertTicketId, task)) return bad();
   return { id, type, from, to, task, thread: String(thread), status, created, body, path };
 }
 
@@ -96,7 +96,7 @@ export function sendMessage(
   assertName(ctx.user.name);
   assertName(input.to);
   if (!isOneOf(TYPES, input.type)) throw new HubError('BAD_TYPE', `invalid message type: ${String(input.type)}`);
-  if (input.task !== undefined) assertGid(input.task);
+  if (input.task !== undefined) assertTicketId(input.task);
   if (input.thread !== undefined) assertMessageId(input.thread);
   if (!loadTeam(ctx.hubDir).some((m) => m.name === input.to)) {
     throw new HubError('UNKNOWN_RECIPIENT', `${input.to} is not in config/team.yml`);

@@ -103,7 +103,7 @@ describe('startTask', () => {
   it('rejects a bad task gid before any Asana call or file write', async () => {
     const ctx = makeCtx();
     const asana = fakeAsana([sub, parent], comments);
-    await expect(startTask(ctx, asana, { task: '../101', cwd: '/' })).rejects.toMatchObject({ code: 'BAD_GID' });
+    await expect(startTask(ctx, asana, { task: '../101', cwd: '/' })).rejects.toMatchObject({ code: 'BAD_TICKET' });
     expect(asana.calls).toEqual([]);
   });
 
@@ -176,7 +176,7 @@ describe('resumeTask', () => {
   it('rejects a bad task gid before any Asana call', async () => {
     const ctx = makeCtx();
     const asana = fakeAsana([sub, parent], comments);
-    await expect(resumeTask(ctx, asana, 'abc')).rejects.toMatchObject({ code: 'BAD_GID' });
+    await expect(resumeTask(ctx, asana, 'abc')).rejects.toMatchObject({ code: 'BAD_TICKET' });
     expect(asana.calls).toEqual([]);
   });
 
