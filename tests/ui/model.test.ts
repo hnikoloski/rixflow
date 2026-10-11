@@ -244,6 +244,13 @@ describe('contextBadge', () => {
     expect(contextBadge({ window: 200_000 })).toBeNull();
     expect(contextBadge(null)).toBeNull();
   });
+  it('never renders negative used tokens', () => {
+    expect(contextBadge({ tokens: -500, window: 200_000, percent: 10 })?.text).toBe('█░░░░░░░░░ 10% · 0/200k');
+  });
+  it('floors fractional percents before coloring', () => {
+    expect(contextBadge({ window: 200_000, percent: 59.9 })?.color).toBe('success');
+    expect(contextBadge({ window: 200_000, percent: 84.9 })?.color).toBe('warning');
+  });
   it('joins the status line when given', () => {
     expect(statusLine(base(), false, 'X')).toMatch(/ │ X$/);
   });

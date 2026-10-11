@@ -275,8 +275,8 @@ export const register: Register = on => {
             <Text color="subtle">  @{s.user ?? '?'}</Text>
           </Box>
           <Box gap={1}>
-            {mod.context && <Text color={mod.context.color}>{mod.context.text}</Text>}
             {badge && <Text color={badge.color} bold>{badge.label}</Text>}
+            {mod.context && <Text color={mod.context.color}>{mod.context.text}</Text>}
           </Box>
         </Box>
 

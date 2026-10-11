@@ -296,6 +296,12 @@ test('a session.measure of the context puts the meter in the status line', async
   await clock.settle()
   await $.session.measure({ context: { window: 200_000, tokens: 84_000, percent: 42 }, rateLimits: [], changed: ['context'] })
   expect(lines.at(-1)).toContain('42% · 84k/200k')
+  const pane = await $.ui.mount({
+    plugin: 'rixflow-ui', surface: 'terminal', component: 'Pane', requestId: 'rixflow',
+    props: { title: 'RixFlow', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+    viewport: { columns: 60, rows: 40 },
+  })
+  expect(await pane.find({ type: 'Text', text: '████░░░░░░ 42% · 84k/200k' })).toBeDefined()
 })
 
 test('a tickets problem shows in the sprint area, not in the general problem list', async ($, on) => {

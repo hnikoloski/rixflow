@@ -89,7 +89,7 @@ export function contextBadge(c: { tokens?: number; window: number; percent?: num
   const filled = Math.min(10, Math.floor(pct / 10))
   const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
   const win = Number.isFinite(c.window) && c.window > 0 ? c.window : 0
-  const used = c.tokens ?? Math.round((pct / 100) * win)
+  const used = Math.max(0, c.tokens ?? Math.round((pct / 100) * win))
   const text = `${bar} ${pct}%${win ? ` · ${units(used)}/${units(win)}` : ''}`
   return { text, color: pct >= 85 ? 'error' : pct >= 60 ? 'warning' : 'success' }
 }
