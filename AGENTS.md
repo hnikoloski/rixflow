@@ -29,7 +29,7 @@ Claude Code plugin for async team workflow (plate, handovers, inbox, shared know
 
 ## Hard rules (load-bearing, enforced in code)
 
-- **Asana is read-only by construction**: `AsanaClient` (`src/core/asana.ts`) hardcodes `method: 'GET'` in a single private code path. Never add write methods.
+- **Ticket clients are read-only by construction**: `AsanaClient` (`src/core/asana.ts`) and `JiraClient` (`src/core/tickets/jira.ts`) each hardcode `method: 'GET'` in a single private request path. Never add write methods or a method that takes a verb.
 - **Every string written to the hub passes through `scrub()`** (`src/core/hubfs.ts` `writeDoc`). Keep it that way; `[redacted]` output must stay a fixed point of `findSecrets` (see comment in `src/core/scrub.ts`).
 - **Hooks must always exit 0 and print nothing on failure.** A `hub hook` invocation is a complete no-op when `RIXFLOW_CHILD=1`.
 - `persistHub` (`src/core/runtime.ts`) never throws — failures come back as `SyncResult` statuses. A `locked` result must not be retried by writing the file again (the write already happened).
