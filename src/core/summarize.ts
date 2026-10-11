@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
-import { findActiveHandover, hasSessionSummary, writeSession, type Phase, type Trigger } from './notes';
+import { hasPrivateBrief } from './private';
+import { findActiveHandover, hasSessionSummary, readHandover, writeSession, type Phase, type Trigger } from './notes';
 import { normalizeDir } from './config';
 import type { SyncResult } from './git';
 import { scrub } from './scrub';
@@ -127,6 +128,38 @@ export function readTranscriptExcerpt(path: string, maxChars = 60_000): string {
   return text.length > maxChars ? text.slice(-maxChars) : text;
 }
 
+const TASK_TOOLS = new Set(['start_task', 'resume_task', 'task_details', 'checkpoint', 'finish_task', 'drop_task']);
+
+// Task ids named in the inputs of RixFlow task tools anywhere in the transcript tail.
+function touchedTasks(path: string): string[] {
+  const ids = new Set<string>();
+  try {
+    for (const line of readTail(path, TAIL_BYTES).split('\n')) {
+      const entry = parseLine(line);
+      const content = entry?.message?.content;
+      if (!entry || entry.type !== 'assistant' || !Array.isArray(content)) continue;
+      for (const raw of content) {
+        const block = raw as Block;
+        if (!block || block.type !== 'tool_use' || typeof block.name !== 'string') continue;
+        if (!TASK_TOOLS.has(block.name.split('__').pop()!) || (block.name.includes('__') && !block.name.includes('rixflow'))) continue;
+        const task = (block.input as { task?: unknown } | null)?.task;
+        if (typeof task === 'string') ids.add(task.trim().toUpperCase());
+      }
+    }
+  } catch {
+    // unreadable transcript is handled by the caller
+  }
+  return [...ids];
+}
+
+function isRestricted(ctx: Ctx, task: string): boolean {
+  try {
+    return readHandover(ctx, task)?.restricted === true || hasPrivateBrief(ctx.configDir, task);
+  } catch {
+    return false; // not a valid ticket id
+  }
+}
+
 const PHASES: Phase[] = ['research', 'plan', 'implement', 'debug', 'done'];
 
 const SUMMARY_KEYS = ['phase', 'goal', 'done', 'decisions', 'deadEnds', 'next'];
@@ -217,8 +250,9 @@ export async function summarizeSession(
     return null;
   }
   const active = findActiveHandover(ctx, normalizeDir(input.cwd));
-  // A summary of a restricted ticket's session could quote its description or comments.
-  if (active?.restricted) {
+  // A summary of a restricted ticket's session could quote its description or comments. The
+  // transcript decides (tasks the session touched, ended or not); the cwd is an extra signal.
+  if (active?.restricted || touchedTasks(input.transcriptPath).some((t) => isRestricted(ctx, t))) {
     log('skip', 'restricted ticket');
     return null;
   }

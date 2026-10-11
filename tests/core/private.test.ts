@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { HubError } from '../../src/core/types';
 import { readPrivateBrief, restrictedBrief, writePrivateBrief } from '../../src/core/private';
 import { readHandover, writeHandover, endHandover } from '../../src/core/notes';
 import { resumeTask, startTask } from '../../src/core/tasks';
@@ -88,5 +89,63 @@ describe('restricted tickets', () => {
     expect(out).toBeNull();
     expect(called).toBe(false);
     expect(readFileSync(join(ctx.configDir, 'summary-errors.log'), 'utf8')).toContain('restricted ticket');
+  });
+});
+
+describe('transcript-based summarizer guard', () => {
+  const home = process.env.HOME!;
+  function run(ctx: ReturnType<typeof makeCtx>, tool: string, task: string, cwd = '/elsewhere') {
+    const t = join(ctx.configDir, 'tr.jsonl');
+    const use = { type: 'assistant', message: { content: [{ type: 'tool_use', name: tool, input: { task } }, { type: 'text', text: 'x'.repeat(900) }] } };
+    writeFileSync(t, JSON.stringify(use) + '\n');
+    let called = false;
+    return summarizeSession(ctx, { sessionId: 's-t', transcriptPath: t, trigger: 'precompact', cwd }, {
+      run: () => { called = true; return '{"phase":"done","goal":"g"}'; }, persist: async () => {},
+    }).then((out) => ({ out, called }));
+  }
+  it('skips with no projectDir, a cwd mismatch', async () => {
+    const ctx = makeCtx();
+    writeHandover(ctx, { task: '201', asanaModifiedAt: '', brief: 'b', related: [], restricted: true });
+    expect(await run(ctx, 'mcp__plugin_rixflow_hub__resume_task', '201', `${home}/other`)).toEqual({ out: null, called: false });
+  });
+  it('skips an ended restricted handover', async () => {
+    const ctx = makeCtx();
+    writeHandover(ctx, { task: '201', projectDir: `${home}/p/acme`, asanaModifiedAt: '', brief: 'b', related: [], restricted: true });
+    endHandover(ctx, '201', 'finished');
+    expect(await run(ctx, 'mcp__plugin_rixflow_hub__finish_task', '201', `${home}/p/acme`)).toEqual({ out: null, called: false });
+  });
+  it('skips a session that only called task_details on a restricted ticket (private file only)', async () => {
+    const ctx = makeCtx();
+    writePrivateBrief(ctx.configDir, 'WEB-7', 'secret');
+    expect(await run(ctx, 'mcp__plugin_rixflow_hub__task_details', 'web-7')).toEqual({ out: null, called: false });
+  });
+  it('still summarizes an unrestricted task', async () => {
+    const ctx = makeCtx();
+    writeHandover(ctx, { task: '202', asanaModifiedAt: '', brief: 'b', related: [] });
+    expect((await run(ctx, 'mcp__plugin_rixflow_hub__task_details', '202')).called).toBe(true);
+  });
+});
+
+describe('private storage safety', () => {
+  it('refuses a symlinked private dir and reads null through a symlinked file', () => {
+    const ctx = makeCtx();
+    const target = join(ctx.configDir, 'real');
+    mkdirSync(target);
+    symlinkSync(target, join(ctx.configDir, 'private'));
+    expect(() => writePrivateBrief(ctx.configDir, '201', 'x')).toThrow(/Could not save the restricted ticket brief/);
+    expect(readPrivateBrief(ctx.configDir, '201')).toBeNull();
+    const ctx2 = makeCtx();
+    mkdirSync(join(ctx2.configDir, 'private'));
+    writeFileSync(join(ctx2.configDir, 'elsewhere.md'), 'leak');
+    symlinkSync(join(ctx2.configDir, 'elsewhere.md'), join(ctx2.configDir, 'private', '201.md'));
+    expect(readPrivateBrief(ctx2.configDir, '201')).toBeNull();
+  });
+  it('an unwritable private dir leaves no hub handover', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.configDir, 'private'), 'a file where the dir should be');
+    const err = await startTask(ctx, make(true), LEGACY_WORKFLOW, { task: '201', cwd: '/' }).catch((e) => e);
+    expect(err).toBeInstanceOf(HubError);
+    expect(err.code).toBe('PRIVATE_WRITE');
+    expect(readHandover(ctx, '201')).toBeNull();
   });
 });

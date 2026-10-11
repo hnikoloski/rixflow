@@ -14,6 +14,7 @@ import { clearCheckpoint, endHandover, writeCheckpoint, writeSession } from '../
 import { gatherPlate, renderPlate } from '../core/plate';
 import { scrub } from '../core/scrub';
 import { search } from '../core/search';
+import { deletePrivateBrief } from '../core/private';
 import { resumeTask, startTask } from '../core/tasks';
 import { loadSites, loadTeam } from '../core/team';
 import { hubCommand } from '../core/command';
@@ -226,6 +227,7 @@ export function createServer(deps: ServerDeps): McpServer {
     const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
     const ended = endHandover(ctx, task, 'finished');
+    deletePrivateBrief(ctx.configDir, task);
     return { checkpointRemoved: removed, handoverEnded: ended, ...(await persisted(ctx, `finish: ${ctx.user.name} ${task}`)) };
   }));
 
@@ -237,6 +239,7 @@ export function createServer(deps: ServerDeps): McpServer {
     const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
     const ended = endHandover(ctx, task, 'dropped');
+    deletePrivateBrief(ctx.configDir, task);
     return { checkpointRemoved: removed, handoverEnded: ended, ...(await persisted(ctx, `drop: ${ctx.user.name} ${task}`)) };
   }));
 

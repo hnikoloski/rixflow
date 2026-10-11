@@ -14,3 +14,4 @@ Pause the current task: $ARGUMENTS
 5. Report the sync status the tools returned.
 
 Never put passwords, tokens or credential URLs in anything written to the hub.
+If the ticket is restricted, never copy its details into hub notes, checkpoints, messages, session summaries or `promote_to_shared`.

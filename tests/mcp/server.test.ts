@@ -10,6 +10,7 @@ import { fakeAsanaSource, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 import { hubCommand } from '../../src/core/command';
 import { readHandover, writeHandover } from '../../src/core/notes';
+import { writePrivateBrief } from '../../src/core/private';
 import { HubError } from '../../src/core/types';
 import type { SyncResult } from '../../src/core/git';
 
@@ -146,6 +147,14 @@ describe('MCP server', () => {
     expect(persisted).toEqual(['checkpoint: hristijan 101', 'session: hristijan sess-1', 'finish: hristijan 101']);
   });
 
+  it('finish_task and drop_task delete the private brief', async () => {
+    const { call, ctx } = await connect();
+    for (const tool of ['finish_task', 'drop_task']) {
+      const file = writePrivateBrief(ctx.configDir, 'WEB-7', 'secret');
+      await call(tool, { task: 'WEB-7' });
+      expect(existsSync(file)).toBe(false);
+    }
+  });
   it('drop_task removes the checkpoint and ends the handover', async () => {
     const { call, ctx, persisted } = await connect();
     writeHandover(ctx, { task: 'WEB-7', projectDir: '/home/u/p/acme', asanaModifiedAt: '', brief: 'b', related: [] });

@@ -46001,6 +46001,10 @@ function search(hubDir2, q) {
   return hits.slice(0, q.limit ?? 10);
 }
 
+// src/core/private.ts
+var import_node_fs14 = require("node:fs");
+var import_node_path17 = require("node:path");
+
 // src/core/brief.ts
 var FIELDS = ["Website", "Status", "Priority", "Type", "Epic", "Page", "Theme", "Components", "Labels"];
 var LINKS = ["Design link", "Draft link", "Content link", "Dev Link", "Stage link", "Live link", "Amplitude dashboard"];
@@ -46028,24 +46032,46 @@ function buildBrief(ticket, chain, comments, label) {
 }
 
 // src/core/private.ts
-var import_node_fs14 = require("node:fs");
-var import_node_path17 = require("node:path");
 function privateFile(configDir2, task) {
   assertTicketId(task);
   return (0, import_node_path17.join)(configDir2, "private", `${task}.md`);
 }
+var isLink = (path) => {
+  try {
+    return (0, import_node_fs14.lstatSync)(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
 function writePrivateBrief(configDir2, task, brief) {
   const file2 = privateFile(configDir2, task);
   const dir = (0, import_node_path17.join)(configDir2, "private");
-  (0, import_node_fs14.mkdirSync)(dir, { recursive: true, mode: 448 });
-  if ((0, import_node_fs14.statSync)(dir).mode & 63) (0, import_node_fs14.chmodSync)(dir, 448);
-  (0, import_node_fs14.rmSync)(file2, { force: true });
-  (0, import_node_fs14.writeFileSync)(file2, scrub(brief), { mode: 384, flag: "wx" });
+  try {
+    if (isLink(dir)) throw new Error("private dir is a symlink");
+    (0, import_node_fs14.mkdirSync)(dir, { recursive: true, mode: 448 });
+    if ((0, import_node_fs14.statSync)(dir).mode & 63) (0, import_node_fs14.chmodSync)(dir, 448);
+    (0, import_node_fs14.rmSync)(file2, { force: true });
+    (0, import_node_fs14.writeFileSync)(file2, scrub(brief), { mode: 384, flag: "wx" });
+  } catch {
+    throw new HubError("PRIVATE_WRITE", `Could not save the restricted ticket brief on this machine (${dir}).`);
+  }
   return file2;
 }
 function readPrivateBrief(configDir2, task) {
   const file2 = privateFile(configDir2, task);
-  return (0, import_node_fs14.existsSync)(file2) ? (0, import_node_fs14.readFileSync)(file2, "utf8") : null;
+  try {
+    if (isLink((0, import_node_path17.join)(configDir2, "private")) || !(0, import_node_fs14.lstatSync)(file2).isFile()) return null;
+    return (0, import_node_fs14.readFileSync)(file2, "utf8");
+  } catch {
+    return null;
+  }
+}
+function deletePrivateBrief(configDir2, task) {
+  try {
+    const file2 = privateFile(configDir2, task);
+    if (!isLink((0, import_node_path17.join)(configDir2, "private"))) (0, import_node_fs14.rmSync)(file2, { force: true });
+  } catch {
+  }
 }
 function restrictedBrief(ticket, label, user) {
   return scrub([
@@ -46363,6 +46389,7 @@ function createServer(deps) {
     const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
     const ended = endHandover(ctx, task, "finished");
+    deletePrivateBrief(ctx.configDir, task);
     return { checkpointRemoved: removed, handoverEnded: ended, ...await persisted(ctx, `finish: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("drop_task", {
@@ -46373,6 +46400,7 @@ function createServer(deps) {
     const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
     const ended = endHandover(ctx, task, "dropped");
+    deletePrivateBrief(ctx.configDir, task);
     return { checkpointRemoved: removed, handoverEnded: ended, ...await persisted(ctx, `drop: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("search", {
@@ -46463,12 +46491,12 @@ ${(0, import_node_fs15.readFileSync)(real, "utf8")}
     if (siteDir) {
       const index = (0, import_node_path18.join)(ctx.hubDir, siteDir, "_index.md");
       assertRealInside(sharedReal, index);
-      let isLink = false;
+      let isLink2 = false;
       try {
-        isLink = (0, import_node_fs15.lstatSync)(index).isSymbolicLink();
+        isLink2 = (0, import_node_fs15.lstatSync)(index).isSymbolicLink();
       } catch {
       }
-      if (isLink) throw new HubError("SYMLINK", `${siteDir}/_index.md is a symlink`);
+      if (isLink2) throw new HubError("SYMLINK", `${siteDir}/_index.md is a symlink`);
     }
     try {
       writeDoc(full, { type: args.type ?? "note", site: args.site, date: isoDate(ctx.now()), author: ctx.user.name }, args.content, { exclusive: true });

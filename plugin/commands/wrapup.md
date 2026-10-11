@@ -13,3 +13,4 @@ Wrap up the current task: $ARGUMENTS
 6. Remind the user to update the task status in Asana themselves; RixFlow never writes to Asana.
 
 Never put passwords, tokens or credential URLs in anything written to the hub.
+If the ticket is restricted, never copy its details into hub notes, checkpoints, messages, session summaries or `promote_to_shared`.
