@@ -46057,6 +46057,22 @@ function writePrivateBrief(configDir2, task, brief) {
   }
   return file2;
 }
+var markerFile = (configDir2, task) => {
+  assertTicketId(task);
+  return (0, import_node_path17.join)(configDir2, "private", `${task}.restricted`);
+};
+function markRestricted(configDir2, task, now) {
+  try {
+    const file2 = markerFile(configDir2, task);
+    const dir = (0, import_node_path17.join)(configDir2, "private");
+    if (isLink(dir)) return;
+    (0, import_node_fs14.mkdirSync)(dir, { recursive: true, mode: 448 });
+    if ((0, import_node_fs14.statSync)(dir).mode & 63) (0, import_node_fs14.chmodSync)(dir, 448);
+    (0, import_node_fs14.rmSync)(file2, { force: true });
+    (0, import_node_fs14.writeFileSync)(file2, now.toISOString(), { mode: 384, flag: "wx" });
+  } catch {
+  }
+}
 function readPrivateBrief(configDir2, task) {
   const file2 = privateFile(configDir2, task);
   try {
@@ -46122,6 +46138,7 @@ async function startTask(ctx, source, wf, input2) {
   const related = search(ctx.hubDir, { text: keywords(chain.map((t) => t.title).join(" ")), site: site.codes[0], limit: 5 }).map((h) => h.path);
   const checkpoint = readCheckpoint(ctx, id);
   const requests = listInbox(ctx).filter((m) => m.task === id).map((m) => oneLine(`- ${m.type} from ${m.from} (${oneLine(scrub(m.created).slice(0, 10))}): ${m.body}`)).join("\n");
+  if (ticket.restricted) markRestricted(ctx.configDir, id, ctx.now());
   const full = buildBrief(ticket, chain, comments, source.label);
   if (ticket.restricted) writePrivateBrief(ctx.configDir, id, full);
   const handoverPath2 = writeHandover(ctx, {
@@ -46175,6 +46192,7 @@ async function resumeTask(ctx, source, task) {
     if (isAuthError2(err)) throw err;
     return unavailable(err instanceof HubError ? `${err.code}: ${err.message}` : err instanceof Error ? err.message : String(err));
   }
+  if (current.restricted) markRestricted(ctx.configDir, id, ctx.now());
   const baseline = newestBaseline(handover, checkpoint);
   const since = baseline?.asanaModifiedAt ?? "";
   const changed = !!since && current.modifiedAt !== since;
@@ -46330,7 +46348,9 @@ function createServer(deps) {
     const task = normalizeTicketId(rawTask);
     const source = sourceFor(ctx, workflowFor(ctx));
     const id = source.normalizeId(task);
-    const details = { task: await source.ticket(id), comments: await source.comments(id, 20) };
+    const ticket = await source.ticket(id);
+    if (ticket.restricted) markRestricted(ctx.configDir, id, ctx.now());
+    const details = { task: ticket, comments: await source.comments(id, 20) };
     return JSON.stringify(details, null, 2);
   }));
   server2.registerTool("checkpoint", {

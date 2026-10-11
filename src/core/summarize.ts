@@ -128,26 +128,50 @@ export function readTranscriptExcerpt(path: string, maxChars = 60_000): string {
   return text.length > maxChars ? text.slice(-maxChars) : text;
 }
 
-const TASK_TOOLS = new Set(['start_task', 'resume_task', 'task_details', 'checkpoint', 'finish_task', 'drop_task']);
+const TASK_TOOLS = ['start_task', 'resume_task', 'task_details', 'checkpoint', 'finish_task', 'drop_task'];
 
-// Task ids named in the inputs of RixFlow task tools anywhere in the transcript tail.
-function touchedTasks(path: string): string[] {
+// The exact tool name, optionally behind a `<prefix>__` or `<prefix>_` (Claude Code
+// `mcp__plugin_rixflow_hub__start_task`, OpenCode `hub_start_task`). Extra matches fail closed.
+const isTaskTool = (name: string): boolean => TASK_TOOLS.some((t) => name === t || name.endsWith(`_${t}`));
+
+// Calls fn for each line of the whole file, reading in chunks.
+function eachLine(path: string, fn: (line: string) => void): void {
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.alloc(1024 * 1024);
+    let rest = '';
+    const decoder = new TextDecoder();
+    for (;;) {
+      const n = readSync(fd, buf, 0, buf.length, null);
+      if (n === 0) break;
+      const parts = (rest + decoder.decode(buf.subarray(0, n), { stream: true })).split('\n');
+      rest = parts.pop() ?? '';
+      for (const line of parts) fn(line);
+    }
+    fn(rest + decoder.decode());
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// Task ids named in RixFlow task tool inputs anywhere in the transcript, or null when it cannot be read.
+export function touchedTasks(path: string): string[] | null {
   const ids = new Set<string>();
   try {
-    for (const line of readTail(path, TAIL_BYTES).split('\n')) {
+    eachLine(path, (line) => {
+      if (!line.includes('"tool_use"')) return;
       const entry = parseLine(line);
       const content = entry?.message?.content;
-      if (!entry || entry.type !== 'assistant' || !Array.isArray(content)) continue;
+      if (!entry || entry.type !== 'assistant' || !Array.isArray(content)) return;
       for (const raw of content) {
         const block = raw as Block;
-        if (!block || block.type !== 'tool_use' || typeof block.name !== 'string') continue;
-        if (!TASK_TOOLS.has(block.name.split('__').pop()!) || (block.name.includes('__') && !block.name.includes('rixflow'))) continue;
+        if (!block || block.type !== 'tool_use' || typeof block.name !== 'string' || !isTaskTool(block.name)) continue;
         const task = (block.input as { task?: unknown } | null)?.task;
         if (typeof task === 'string') ids.add(task.trim().toUpperCase());
       }
-    }
+    });
   } catch {
-    // unreadable transcript is handled by the caller
+    return null;
   }
   return [...ids];
 }
@@ -252,7 +276,12 @@ export async function summarizeSession(
   const active = findActiveHandover(ctx, normalizeDir(input.cwd));
   // A summary of a restricted ticket's session could quote its description or comments. The
   // transcript decides (tasks the session touched, ended or not); the cwd is an extra signal.
-  if (active?.restricted || touchedTasks(input.transcriptPath).some((t) => isRestricted(ctx, t))) {
+  const touched = touchedTasks(input.transcriptPath);
+  if (touched === null) {
+    log('skip', 'transcript unreadable');
+    return null;
+  }
+  if (active?.restricted || touched.some((t) => isRestricted(ctx, t))) {
     log('skip', 'restricted ticket');
     return null;
   }

@@ -14,7 +14,7 @@ import { clearCheckpoint, endHandover, writeCheckpoint, writeSession } from '../
 import { gatherPlate, renderPlate } from '../core/plate';
 import { scrub } from '../core/scrub';
 import { search } from '../core/search';
-import { deletePrivateBrief } from '../core/private';
+import { deletePrivateBrief, markRestricted } from '../core/private';
 import { resumeTask, startTask } from '../core/tasks';
 import { loadSites, loadTeam } from '../core/team';
 import { hubCommand } from '../core/command';
@@ -179,7 +179,9 @@ export function createServer(deps: ServerDeps): McpServer {
     const task = normalizeTicketId(rawTask);
     const source = sourceFor(ctx, workflowFor(ctx));
     const id = source.normalizeId(task);
-    const details = { task: await source.ticket(id), comments: await source.comments(id, 20) };
+    const ticket = await source.ticket(id);
+    if (ticket.restricted) markRestricted(ctx.configDir, id, ctx.now());
+    const details = { task: ticket, comments: await source.comments(id, 20) };
     return JSON.stringify(details, null, 2);
   }));
 

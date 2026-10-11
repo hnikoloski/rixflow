@@ -12585,13 +12585,19 @@ var isLink = (path) => {
     return false;
   }
 };
+var markerFile = (configDir2, task) => {
+  assertTicketId(task);
+  return (0, import_node_path14.join)(configDir2, "private", `${task}.restricted`);
+};
 function hasPrivateBrief(configDir2, task) {
-  const file = privateFile(configDir2, task);
-  try {
-    return (0, import_node_fs12.lstatSync)(file).isFile() && !isLink((0, import_node_path14.join)(configDir2, "private"));
-  } catch {
-    return false;
+  if (isLink((0, import_node_path14.join)(configDir2, "private"))) return false;
+  for (const file of [privateFile(configDir2, task), markerFile(configDir2, task)]) {
+    try {
+      if ((0, import_node_fs12.lstatSync)(file).isFile()) return true;
+    } catch {
+    }
   }
+  return false;
 }
 
 // src/core/notes.ts
@@ -12882,23 +12888,43 @@ function readTranscriptExcerpt(path, maxChars = 6e4) {
   const text2 = parts.join("\n");
   return text2.length > maxChars ? text2.slice(-maxChars) : text2;
 }
-var TASK_TOOLS = /* @__PURE__ */ new Set(["start_task", "resume_task", "task_details", "checkpoint", "finish_task", "drop_task"]);
+var TASK_TOOLS = ["start_task", "resume_task", "task_details", "checkpoint", "finish_task", "drop_task"];
+var isTaskTool = (name) => TASK_TOOLS.some((t) => name === t || name.endsWith(`_${t}`));
+function eachLine(path, fn) {
+  const fd = (0, import_node_fs14.openSync)(path, "r");
+  try {
+    const buf = Buffer.alloc(1024 * 1024);
+    let rest = "";
+    const decoder = new TextDecoder();
+    for (; ; ) {
+      const n = (0, import_node_fs14.readSync)(fd, buf, 0, buf.length, null);
+      if (n === 0) break;
+      const parts = (rest + decoder.decode(buf.subarray(0, n), { stream: true })).split("\n");
+      rest = parts.pop() ?? "";
+      for (const line2 of parts) fn(line2);
+    }
+    fn(rest + decoder.decode());
+  } finally {
+    (0, import_node_fs14.closeSync)(fd);
+  }
+}
 function touchedTasks(path) {
   const ids = /* @__PURE__ */ new Set();
   try {
-    for (const line2 of readTail(path, TAIL_BYTES).split("\n")) {
+    eachLine(path, (line2) => {
+      if (!line2.includes('"tool_use"')) return;
       const entry = parseLine(line2);
       const content = entry?.message?.content;
-      if (!entry || entry.type !== "assistant" || !Array.isArray(content)) continue;
+      if (!entry || entry.type !== "assistant" || !Array.isArray(content)) return;
       for (const raw of content) {
         const block = raw;
-        if (!block || block.type !== "tool_use" || typeof block.name !== "string") continue;
-        if (!TASK_TOOLS.has(block.name.split("__").pop()) || block.name.includes("__") && !block.name.includes("rixflow")) continue;
+        if (!block || block.type !== "tool_use" || typeof block.name !== "string" || !isTaskTool(block.name)) continue;
         const task = block.input?.task;
         if (typeof task === "string") ids.add(task.trim().toUpperCase());
       }
-    }
+    });
   } catch {
+    return null;
   }
   return [...ids];
 }
@@ -12978,7 +13004,12 @@ async function summarizeSession(ctx, input, deps) {
     return null;
   }
   const active = findActiveHandover(ctx, normalizeDir(input.cwd));
-  if (active?.restricted || touchedTasks(input.transcriptPath).some((t) => isRestricted(ctx, t))) {
+  const touched = touchedTasks(input.transcriptPath);
+  if (touched === null) {
+    log("skip", "transcript unreadable");
+    return null;
+  }
+  if (active?.restricted || touched.some((t) => isRestricted(ctx, t))) {
     log("skip", "restricted ticket");
     return null;
   }

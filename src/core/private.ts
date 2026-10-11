@@ -32,9 +32,33 @@ export function writePrivateBrief(configDir: string, task: string, brief: string
   return file;
 }
 
+// Local markers record that a ticket was seen as restricted, so a session that only looked at it
+// (no handover, no private brief) is still never summarized. They are kept after finish or drop.
+const markerFile = (configDir: string, task: string): string => {
+  assertTicketId(task);
+  return join(configDir, 'private', `${task}.restricted`);
+};
+
+export function markRestricted(configDir: string, task: string, now: Date): void {
+  try {
+    const file = markerFile(configDir, task);
+    const dir = join(configDir, 'private');
+    if (isLink(dir)) return;
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (statSync(dir).mode & 0o077) chmodSync(dir, 0o700);
+    rmSync(file, { force: true });
+    writeFileSync(file, now.toISOString(), { mode: 0o600, flag: 'wx' });
+  } catch {
+    // best effort: a marker failure never fails the tool
+  }
+}
+
 export function hasPrivateBrief(configDir: string, task: string): boolean {
-  const file = privateFile(configDir, task);
-  try { return lstatSync(file).isFile() && !isLink(join(configDir, 'private')); } catch { return false; }
+  if (isLink(join(configDir, 'private'))) return false;
+  for (const file of [privateFile(configDir, task), markerFile(configDir, task)]) {
+    try { if (lstatSync(file).isFile()) return true; } catch { /* absent */ }
+  }
+  return false;
 }
 
 export function readPrivateBrief(configDir: string, task: string): string | null {

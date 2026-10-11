@@ -5,7 +5,7 @@ import { listInbox } from './messages';
 import { readCheckpoint, readHandover, writeHandover, type Checkpoint, type Handover } from './notes';
 import { scrub } from './scrub';
 import { search } from './search';
-import { readPrivateBrief, restrictedBrief, writePrivateBrief } from './private';
+import { markRestricted, readPrivateBrief, restrictedBrief, writePrivateBrief } from './private';
 import { resolveSite } from './sites';
 import { loadSites } from './team';
 import { parentChain, type Ticket, type TicketComment, type TicketSource } from './tickets/types';
@@ -96,6 +96,7 @@ export async function startTask(ctx: Ctx, source: TicketSource, wf: Workflow, in
     .filter((m) => m.task === id)
     .map((m) => oneLine(`- ${m.type} from ${m.from} (${oneLine(scrub(m.created).slice(0, 10))}): ${m.body}`))
     .join('\n');
+  if (ticket.restricted) markRestricted(ctx.configDir, id, ctx.now());
   const full = buildBrief(ticket, chain, comments, source.label);
   if (ticket.restricted) writePrivateBrief(ctx.configDir, id, full);
   const handoverPath = writeHandover(ctx, {
@@ -146,6 +147,7 @@ export async function resumeTask(ctx: Ctx, source: TicketSource | null, task: st
     // Tracker unreachable: the local handover and checkpoint still answer the question.
     return unavailable(err instanceof HubError ? `${err.code}: ${err.message}` : err instanceof Error ? err.message : String(err));
   }
+  if (current.restricted) markRestricted(ctx.configDir, id, ctx.now());
   // The newest local record is the baseline: its ticket timestamp decides `changed`, and its time
   // is the cutoff for comments that count as new.
   const baseline = newestBaseline(handover, checkpoint);

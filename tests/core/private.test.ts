@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HubError } from '../../src/core/types';
-import { readPrivateBrief, restrictedBrief, writePrivateBrief } from '../../src/core/private';
+import { mkdtempSync, appendFileSync } from 'node:fs';
+import { markRestricted, readPrivateBrief, restrictedBrief, writePrivateBrief } from '../../src/core/private';
 import { readHandover, writeHandover, endHandover } from '../../src/core/notes';
 import { resumeTask, startTask } from '../../src/core/tasks';
-import { summarizeSession } from '../../src/core/summarize';
+import { summarizeSession, touchedTasks } from '../../src/core/summarize';
 import { LEGACY_WORKFLOW } from '../../src/core/workflow';
 import { fakeSource, ticket } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
@@ -147,5 +148,47 @@ describe('private storage safety', () => {
     expect(err).toBeInstanceOf(HubError);
     expect(err.code).toBe('PRIVATE_WRITE');
     expect(readHandover(ctx, '201')).toBeNull();
+  });
+});
+
+describe('restricted marker and full scan', () => {
+  const use = (name: string, task: string) =>
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input: { task } }] } });
+  const big = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'x'.repeat(900) }] } });
+  const deps = (st: { called: boolean }) => ({ run: () => { st.called = true; return '{"phase":"done","goal":"g"}'; }, persist: async () => {} });
+
+  it('start and resume write a 0600 marker that outlives finish', async () => {
+    const ctx = makeCtx();
+    await startTask(ctx, make(true), LEGACY_WORKFLOW, { task: '201', cwd: '/' });
+    const marker = join(ctx.configDir, 'private', '201.restricted');
+    expect(statSync(marker).mode & 0o777).toBe(0o600);
+    const ctx2 = makeCtx();
+    writeHandover(ctx2, { task: '201', asanaModifiedAt: '', brief: 'b', related: [] });
+    await resumeTask(ctx2, make(true), '201');
+    expect(existsSync(join(ctx2.configDir, 'private', '201.restricted'))).toBe(true);
+  });
+  it('skips a session that only looked at a restricted ticket via a marker', async () => {
+    const ctx = makeCtx();
+    markRestricted(ctx.configDir, '201', ctx.now());
+    const t = join(ctx.configDir, 'tr.jsonl');
+    writeFileSync(t, `${use('hub_task_details', '201')}\n${big}\n`);
+    const st = { called: false };
+    expect(await summarizeSession(ctx, { sessionId: 's', transcriptPath: t, trigger: 'precompact', cwd: '/' }, deps(st))).toBeNull();
+    expect(st.called).toBe(false);
+  });
+  it('finds an early tool call past the tail window, next to a malformed line', async () => {
+    const ctx = makeCtx();
+    markRestricted(ctx.configDir, '201', ctx.now());
+    const t = join(ctx.configDir, 'tr.jsonl');
+    writeFileSync(t, `{"type":"assistant","tool_use" broken\n${use('mcp__plugin_rixflow_hub__resume_task', '201')}\n`);
+    const filler = (big + '\n').repeat(2000);
+    for (let i = 0; i < 6; i++) appendFileSync(t, filler.repeat(Math.ceil(1.5 * 1024 * 1024 / filler.length)));
+    expect(statSync(t).size).toBeGreaterThan(8 * 1024 * 1024);
+    const st = { called: false };
+    expect(await summarizeSession(ctx, { sessionId: 's', transcriptPath: t, trigger: 'precompact', cwd: '/' }, deps(st))).toBeNull();
+    expect(st.called).toBe(false);
+  });
+  it('touchedTasks returns null for an unreadable transcript', () => {
+    expect(touchedTasks(join(makeCtx().configDir, 'missing.jsonl'))).toBeNull();
   });
 });

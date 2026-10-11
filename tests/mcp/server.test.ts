@@ -6,6 +6,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../../src/mcp/server';
 import { LEGACY_WORKFLOW } from '../../src/core/workflow';
 import { loadUserConfig } from '../../src/core/config';
+import { fakeSource, ticket } from '../fixtures/asana';
 import { fakeAsanaSource, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 import { hubCommand } from '../../src/core/command';
@@ -60,6 +61,19 @@ describe('MCP server', () => {
     expect(res.projectDir).toBe('/home/u/projects/globex-web');
   });
 
+  it('task_details on a restricted ticket writes a local marker', async () => {
+    const ctx = makeCtx();
+    const server = createServer({
+      ctx: () => ctx,
+      source: () => fakeSource([ticket({ id: '301', restricted: true })]),
+      persist: async () => ({ ...syncResult }),
+    });
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(a), server.connect(b)]);
+    await client.callTool({ name: 'task_details', arguments: { task: '301' } });
+    expect(existsSync(join(ctx.configDir, 'private', '301.restricted'))).toBe(true);
+  });
   it('task_details never returns credentials', async () => {
     const { call } = await connect();
     const res = await call('task_details', { task: '101' });
