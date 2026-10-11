@@ -20,18 +20,18 @@ function fail(file: string, reason: string): never {
   throw new HubError('BAD_CONFIG', `${file}: ${reason}`);
 }
 
-const isMapping = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+export const isMapping = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-function readYaml(path: string): Record<string, unknown> {
+export function readYaml(path: string, label: string = path): Record<string, unknown> {
   if (!existsSync(path)) return {};
   let parsed: unknown;
   try {
     parsed = YAML.parse(readFileSync(path, 'utf8'));
   } catch (err) {
-    fail(path, `invalid YAML (${(err as Error).message})`);
+    fail(label, `invalid YAML (${(err as Error).message})`);
   }
   if (parsed === null || parsed === undefined) return {};
-  if (!isMapping(parsed)) fail(path, 'top level must be a mapping');
+  if (!isMapping(parsed)) fail(label, 'top level must be a mapping');
   return parsed;
 }
 

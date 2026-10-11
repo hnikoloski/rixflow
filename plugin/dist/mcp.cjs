@@ -44660,16 +44660,16 @@ function fail(file2, reason) {
   throw new HubError("BAD_CONFIG", `${file2}: ${reason}`);
 }
 var isMapping = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-function readYaml(path) {
+function readYaml(path, label = path) {
   if (!(0, import_node_fs9.existsSync)(path)) return {};
   let parsed;
   try {
     parsed = import_yaml4.default.parse((0, import_node_fs9.readFileSync)(path, "utf8"));
   } catch (err) {
-    fail(path, `invalid YAML (${err.message})`);
+    fail(label, `invalid YAML (${err.message})`);
   }
   if (parsed === null || parsed === void 0) return {};
-  if (!isMapping(parsed)) fail(path, "top level must be a mapping");
+  if (!isMapping(parsed)) fail(label, "top level must be a mapping");
   return parsed;
 }
 function loadTeam(hubDir2) {
