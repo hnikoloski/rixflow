@@ -39,7 +39,7 @@ describe('plugin package', () => {
   });
   it('has every command with a description, and no CLAUDE.md', () => {
     const commands = readdirSync('plugin/commands').sort();
-    expect(commands).toEqual(['ask.md', 'checkpoint.md', 'inbox.md', 'plate.md', 'resume.md', 'send.md', 'setup.md', 'start.md', 'wrapup.md']);
+    expect(commands).toEqual(['ask.md', 'checkpoint.md', 'drop.md', 'inbox.md', 'plate.md', 'resume.md', 'send.md', 'setup.md', 'start.md', 'wrapup.md']);
     for (const c of commands) expect(read(`plugin/commands/${c}`)).toMatch(/^---\ndescription: .+/);
     expect(existsSync('plugin/CLAUDE.md')).toBe(false);
   });

@@ -12351,7 +12351,9 @@ function toHandover(path) {
     requestContext: request && request !== "- none" ? request : void 0,
     related: Array.isArray(data.related) ? data.related.map(String) : [],
     previousCheckpoint: str(data.previous_checkpoint),
-    created: str(data.created)
+    created: str(data.created),
+    ended: str(data.ended),
+    outcome: data.outcome === "finished" || data.outcome === "dropped" ? data.outcome : void 0
   };
 }
 function readHandover(ctx, task) {
@@ -12364,7 +12366,7 @@ function findActiveHandover(ctx, cwd) {
   const matches = readAll2(
     (0, import_node_fs12.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path14.join)(dir, f)),
     toHandover
-  ).filter((h) => h.projectDir && isInsideDir(cwd, h.projectDir));
+  ).filter((h) => !h.ended && h.projectDir && isInsideDir(cwd, h.projectDir));
   matches.sort((a, b) => String(b.created).localeCompare(String(a.created)));
   return matches[0] ?? null;
 }

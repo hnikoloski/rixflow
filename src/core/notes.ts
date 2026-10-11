@@ -45,6 +45,8 @@ export interface Handover {
   related: string[];
   previousCheckpoint?: string;
   created?: string;
+  ended?: string;
+  outcome?: 'finished' | 'dropped';
 }
 
 const SECTION_TITLES = new Set([
@@ -207,6 +209,7 @@ function toHandover(path: string): Handover {
     requestContext: request && request !== '- none' ? request : undefined,
     related: Array.isArray(data.related) ? data.related.map(String) : [],
     previousCheckpoint: str(data.previous_checkpoint), created: str(data.created),
+    ended: str(data.ended), outcome: data.outcome === 'finished' || data.outcome === 'dropped' ? data.outcome : undefined,
   };
 }
 
@@ -215,13 +218,24 @@ export function readHandover(ctx: Ctx, task: string): Handover | null {
   return existsSync(path) ? toHandover(path) : null;
 }
 
+// Marks a handover ended (finished or dropped) so it no longer counts as the folder's current
+// task. Everything else, including `created`, stays; resume still reads it as history.
+export function endHandover(ctx: Ctx, task: string, outcome: 'finished' | 'dropped'): boolean {
+  const path = handoverPath(ctx, task);
+  if (!existsSync(path)) return false;
+  const { data, body } = readDoc(path);
+  writeDoc(path, { ...data, ended: ctx.now().toISOString(), outcome }, body);
+  reindex(ctx);
+  return true;
+}
+
 export function findActiveHandover(ctx: Ctx, cwd: string): Handover | null {
   const dir = join(personDir(ctx), 'handovers');
   if (!existsSync(dir)) return null;
   const matches = readAll(
     readdirSync(dir).filter((f) => f.endsWith('.md') && f !== '_index.md').map((f) => join(dir, f)),
     toHandover,
-  ).filter((h) => h.projectDir && isInsideDir(cwd, h.projectDir));
+  ).filter((h) => !h.ended && h.projectDir && isInsideDir(cwd, h.projectDir));
   matches.sort((a, b) => String(b.created).localeCompare(String(a.created)));
   return matches[0] ?? null;
 }

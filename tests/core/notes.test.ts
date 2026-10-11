@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSites, loadTeam } from '../../src/core/team';
 import {
-  clearCheckpoint, findActiveHandover, hasSessionSummary, listCheckpoints, readCheckpoint,
+  clearCheckpoint, endHandover, findActiveHandover, hasSessionSummary, listCheckpoints, readCheckpoint,
   readHandover, writeCheckpoint, writeHandover, writeSession,
 } from '../../src/core/notes';
 import { makeCtx } from '../helpers';
@@ -166,5 +166,37 @@ describe('note parsing hardening', () => {
     const hDir = join(ctx.hubDir, 'people', 'hristijan', 'handovers');
     writeFileSync(join(hDir, '77.md'), '---\nkey: [unclosed\n---\nbody\n');
     expect(findActiveHandover(ctx, '/home/u/p/web')?.task).toBe('42');
+  });
+});
+
+describe('endHandover', () => {
+  const base = { projectDir: '/home/u/p/ac', asanaModifiedAt: '', related: ['shared/decisions/ab-200.md'] };
+  it('marks ended, keeps created, brief and related', () => {
+    const ctx = makeCtx();
+    writeHandover(ctx, { ...base, task: '42', brief: 'Do it' });
+    const later = { ...ctx, now: () => new Date('2026-10-09T10:00:00Z') };
+    expect(endHandover(later, '42', 'dropped')).toBe(true);
+    const h = readHandover(ctx, '42');
+    expect(h).toMatchObject({ outcome: 'dropped', ended: '2026-10-09T10:00:00.000Z', brief: 'Do it', related: base.related, created: ctx.now().toISOString() });
+  });
+  it('returns false without a handover', () => {
+    expect(endHandover(makeCtx(), '42', 'finished')).toBe(false);
+  });
+  it('findActiveHandover skips ended ones and returns the next newest', () => {
+    const ctx = makeCtx();
+    writeHandover({ ...ctx, now: () => new Date('2026-10-08T09:00:00Z') }, { ...base, task: '41', brief: 'old' });
+    writeHandover({ ...ctx, now: () => new Date('2026-10-08T10:00:00Z') }, { ...base, task: '42', brief: 'new' });
+    endHandover(ctx, '42', 'dropped');
+    expect(findActiveHandover(ctx, '/home/u/p/ac')?.task).toBe('41');
+    endHandover(ctx, '41', 'finished');
+    expect(findActiveHandover(ctx, '/home/u/p/ac')).toBeNull();
+  });
+  it('writeHandover after endHandover re-activates', () => {
+    const ctx = makeCtx();
+    writeHandover(ctx, { ...base, task: '42', brief: 'x' });
+    endHandover(ctx, '42', 'dropped');
+    writeHandover(ctx, { ...base, task: '42', brief: 'x' });
+    expect(readHandover(ctx, '42')?.ended).toBeUndefined();
+    expect(findActiveHandover(ctx, '/home/u/p/ac')?.task).toBe('42');
   });
 });

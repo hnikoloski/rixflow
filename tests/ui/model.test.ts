@@ -150,6 +150,8 @@ describe('helpers', () => {
     expect(nextCurrentTask('111', TOOL.checkpoint, { task: '222' }, true)).toBe('111');
     expect(nextCurrentTask('111', TOOL.finish, { task: '111' }, true)).toBeNull();
     expect(nextCurrentTask('111', TOOL.finish, { task: '222' }, true)).toBe('111');
+    expect(nextCurrentTask('WEB-7', TOOL.drop, { task: 'WEB-7' }, true)).toBeNull();
+    expect(nextCurrentTask('WEB-7', TOOL.drop, { task: 'WEB-8' }, true)).toBe('WEB-7');
     expect(nextCurrentTask('111', 'mcp__plugin_rixflow_hub__inbox', {}, true)).toBe('111');
     expect(nextCurrentTask(null, TOOL.start, { task: 42 }, true)).toBeNull();
   });

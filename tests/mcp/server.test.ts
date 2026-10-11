@@ -8,6 +8,7 @@ import { loadUserConfig } from '../../src/core/config';
 import { fakeAsanaSource, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 import { hubCommand } from '../../src/core/command';
+import { readHandover, writeHandover } from '../../src/core/notes';
 import { HubError } from '../../src/core/types';
 import type { SyncResult } from '../../src/core/git';
 
@@ -36,7 +37,7 @@ describe('MCP server', () => {
     const { client } = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
-      'checkpoint', 'finish_task', 'inbox', 'plate', 'promote_to_shared', 'read_note', 'remember_site', 'resume_task',
+      'checkpoint', 'drop_task', 'finish_task', 'inbox', 'plate', 'promote_to_shared', 'read_note', 'remember_site', 'resume_task',
       'search', 'send_message', 'set_message_status', 'setup_info', 'start_task', 'sync', 'task_details', 'team_info', 'write_session',
     ]);
   });
@@ -142,6 +143,28 @@ describe('MCP server', () => {
     await call('finish_task', { task: '101' });
     expect(existsSync(join(ctx.hubDir, 'people/hristijan/checkpoints/101.md'))).toBe(false);
     expect(persisted).toEqual(['checkpoint: hristijan 101', 'session: hristijan sess-1', 'finish: hristijan 101']);
+  });
+
+  it('drop_task removes the checkpoint and ends the handover', async () => {
+    const { call, ctx, persisted } = await connect();
+    writeHandover(ctx, { task: 'WEB-7', projectDir: '/home/u/p/acme', asanaModifiedAt: '', brief: 'b', related: [] });
+    await call('checkpoint', { task: 'WEB-7', done: '- a', pending: '- b', blockers: '- none', resume: 'go' });
+    const r = await call('drop_task', { task: 'web-7' });
+    expect(r.isError).toBe(false);
+    expect(JSON.parse(r.text)).toMatchObject({ checkpointRemoved: true, handoverEnded: true });
+    expect(existsSync(join(ctx.hubDir, 'people/hristijan/checkpoints/WEB-7.md'))).toBe(false);
+    expect(readHandover(ctx, 'WEB-7')?.outcome).toBe('dropped');
+    expect(persisted).toContain('drop: hristijan WEB-7');
+    const none = await call('drop_task', { task: '999' });
+    expect(JSON.parse(none.text)).toMatchObject({ checkpointRemoved: false, handoverEnded: false });
+  });
+
+  it('finish_task ends the handover as finished', async () => {
+    const { call, ctx } = await connect();
+    writeHandover(ctx, { task: '101', projectDir: '/home/u/p/acme', asanaModifiedAt: '', brief: 'b', related: [] });
+    const r = await call('finish_task', { task: '101' });
+    expect(JSON.parse(r.text).handoverEnded).toBe(true);
+    expect(readHandover(ctx, '101')?.outcome).toBe('finished');
   });
 
   it('reports a clear error without a ticket source', async () => {

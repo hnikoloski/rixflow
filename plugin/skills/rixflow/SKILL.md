@@ -38,4 +38,4 @@ At session start RixFlow adds `[rixflow] session <id>` to the context. Pass that
 - Never put passwords, tokens or URLs with credentials in messages or notes.
 - Never read or edit hub files directly (with file tools or shell commands); use the RixFlow tools (`read_note`, `search`, `team_info` and the write tools).
 - If a RixFlow tool fails with `NOT_INITIALIZED`, `NO_TICKETS` or `ASANA_AUTH`, follow /rixflow:setup: show the user the command it gives; never run it yourself.
-- Never start, switch or finish a task unless the user asked.
+- Never start, switch, finish or drop a task unless the user asked.

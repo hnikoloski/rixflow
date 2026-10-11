@@ -45296,12 +45296,22 @@ function toHandover(path) {
     requestContext: request && request !== "- none" ? request : void 0,
     related: Array.isArray(data.related) ? data.related.map(String) : [],
     previousCheckpoint: str(data.previous_checkpoint),
-    created: str(data.created)
+    created: str(data.created),
+    ended: str(data.ended),
+    outcome: data.outcome === "finished" || data.outcome === "dropped" ? data.outcome : void 0
   };
 }
 function readHandover(ctx, task) {
   const path = handoverPath(ctx, task);
   return (0, import_node_fs12.existsSync)(path) ? toHandover(path) : null;
+}
+function endHandover(ctx, task, outcome) {
+  const path = handoverPath(ctx, task);
+  if (!(0, import_node_fs12.existsSync)(path)) return false;
+  const { data, body } = readDoc(path);
+  writeDoc(path, { ...data, ended: ctx.now().toISOString(), outcome }, body);
+  reindex(ctx);
+  return true;
 }
 
 // src/core/sites.ts
@@ -45971,13 +45981,24 @@ function createServer(deps) {
     return { path: rel(ctx, path), ...await persisted(ctx, `session: ${ctx.user.name} ${args.sessionId}`) };
   }));
   server2.registerTool("finish_task", {
-    description: "Mark a task finished in the hub (removes its checkpoint) and sync. Does not touch Asana.",
+    description: "Mark a task finished in the hub (removes its checkpoint, ends its handover) and sync. Does not touch the ticket tracker.",
     inputSchema: { task: text }
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
-    return { checkpointRemoved: removed, ...await persisted(ctx, `finish: ${ctx.user.name} ${task}`) };
+    const ended = endHandover(ctx, task, "finished");
+    return { checkpointRemoved: removed, handoverEnded: ended, ...await persisted(ctx, `finish: ${ctx.user.name} ${task}`) };
+  }));
+  server2.registerTool("drop_task", {
+    description: "Put a picked-up task back: clears it from Now and deletes its checkpoint. Writes nothing to the ticket tracker.",
+    inputSchema: { task: text }
+  }, async ({ task: rawTask }) => safe(async () => {
+    const ctx = deps.ctx();
+    const task = normalizeTicketId(rawTask);
+    const removed = clearCheckpoint(ctx, task);
+    const ended = endHandover(ctx, task, "dropped");
+    return { checkpointRemoved: removed, handoverEnded: ended, ...await persisted(ctx, `drop: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("search", {
     description: "Search the team hub (shared knowledge and everyone's notes and session summaries). Filter by person, site code, note type (decision, session, checkpoint, handover, note) and date (YYYY-MM-DD). " + UNTRUSTED,

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AsanaClient } from '../../src/core/asana';
 import { buildStatus, emptyStatus, STATUS_VERSION, type StatusDeps, type StatusOptions } from '../../src/core/status';
 import { sendMessage } from '../../src/core/messages';
-import { writeCheckpoint, writeHandover } from '../../src/core/notes';
+import { endHandover, writeCheckpoint, writeHandover } from '../../src/core/notes';
 import { HubError, type Ctx } from '../../src/core/types';
 import { LEGACY_WORKFLOW } from '../../src/core/workflow';
 import { asSource, fakeAsanaSource, fakeSource, field, task } from '../fixtures/asana';
@@ -70,6 +70,14 @@ describe('buildStatus', () => {
     const byCwd = await buildStatus(opts({ cwd: '/home/u/projects/acme/src' }), deps(ctx));
     expect(byCwd.current).toMatchObject({ task: '111', title: 'Banner overlap', source: 'cwd' });
     expect((await buildStatus(opts(), deps(ctx))).current).toBeNull();
+  });
+
+  it('shows no current task after the handover is ended', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    expect((await buildStatus(opts({ cwd: '/home/u/projects/acme' }), deps(ctx))).current?.task).toBe('111');
+    endHandover(ctx, '111', 'dropped');
+    expect((await buildStatus(opts({ cwd: '/home/u/projects/acme' }), deps(ctx))).current).toBeNull();
   });
 
   it('ignores an invalid --task and falls back to cwd', async () => {

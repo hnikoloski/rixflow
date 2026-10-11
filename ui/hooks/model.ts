@@ -7,6 +7,7 @@ export const TOOL = {
   resume: 'mcp__plugin_rixflow_hub__resume_task',
   checkpoint: 'mcp__plugin_rixflow_hub__checkpoint',
   finish: 'mcp__plugin_rixflow_hub__finish_task',
+  drop: 'mcp__plugin_rixflow_hub__drop_task',
 } as const
 
 export const RIXFLOW_TOOL = /^mcp__plugin_rixflow_hub__/
@@ -183,7 +184,7 @@ export function nextCurrentTask(prev: string | null, tool: string, input: { task
   if (tool === TOOL.start || tool === TOOL.resume) return typeof input.task === 'string' && /^(\d{1,30}|[A-Z][A-Z0-9_]{0,19}-\d{1,10})$/.test(input.task) ? input.task : prev
   // Pausing or finishing another task leaves this session's task alone.
   if (tool === TOOL.checkpoint) return input.task === undefined || input.task === prev ? null : prev
-  if (tool === TOOL.finish) return input.task === prev ? null : prev
+  if (tool === TOOL.finish || tool === TOOL.drop) return input.task === prev ? null : prev
   return prev
 }
 

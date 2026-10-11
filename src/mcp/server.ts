@@ -10,7 +10,7 @@ import { insideHub, writeDoc } from '../core/hubfs';
 import { isoDate } from '../core/ids';
 import { rebuildIndex } from '../core/indexes';
 import { listInbox, sendMessage, setMessageStatus } from '../core/messages';
-import { clearCheckpoint, writeCheckpoint, writeSession } from '../core/notes';
+import { clearCheckpoint, endHandover, writeCheckpoint, writeSession } from '../core/notes';
 import { gatherPlate, renderPlate } from '../core/plate';
 import { scrub } from '../core/scrub';
 import { search } from '../core/search';
@@ -219,13 +219,25 @@ export function createServer(deps: ServerDeps): McpServer {
   }));
 
   server.registerTool('finish_task', {
-    description: 'Mark a task finished in the hub (removes its checkpoint) and sync. Does not touch Asana.',
+    description: 'Mark a task finished in the hub (removes its checkpoint, ends its handover) and sync. Does not touch the ticket tracker.',
     inputSchema: { task: text },
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
     const removed = clearCheckpoint(ctx, task);
-    return { checkpointRemoved: removed, ...(await persisted(ctx, `finish: ${ctx.user.name} ${task}`)) };
+    const ended = endHandover(ctx, task, 'finished');
+    return { checkpointRemoved: removed, handoverEnded: ended, ...(await persisted(ctx, `finish: ${ctx.user.name} ${task}`)) };
+  }));
+
+  server.registerTool('drop_task', {
+    description: 'Put a picked-up task back: clears it from Now and deletes its checkpoint. Writes nothing to the ticket tracker.',
+    inputSchema: { task: text },
+  }, async ({ task: rawTask }) => safe(async () => {
+    const ctx = deps.ctx();
+    const task = normalizeTicketId(rawTask);
+    const removed = clearCheckpoint(ctx, task);
+    const ended = endHandover(ctx, task, 'dropped');
+    return { checkpointRemoved: removed, handoverEnded: ended, ...(await persisted(ctx, `drop: ${ctx.user.name} ${task}`)) };
   }));
 
   server.registerTool('search', {
