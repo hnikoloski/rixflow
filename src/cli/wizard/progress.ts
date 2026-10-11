@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findSecrets } from '../../core/scrub';
 import { HubError } from '../../core/types';
@@ -49,9 +49,7 @@ export function saveProgress(configDir: string, p: Progress): void {
   const target = file(configDir);
   mkdirSync(configDir, { recursive: true, mode: 0o700 });
   for (const f of [target, `${target}.tmp`]) {
-    if (existsSync(f) || lstatOrNull(f)) {
-      if (lstatSync(f).isSymbolicLink()) throw new HubError('BAD_PROGRESS', `${f} is a symlink; refusing to write it.`);
-    }
+    if (lstatOrNull(f)?.isSymbolicLink()) throw new HubError('BAD_PROGRESS', `${f} is a symlink; refusing to write it.`);
   }
   const tmp = `${target}.tmp`;
   rmSync(tmp, { force: true });

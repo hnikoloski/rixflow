@@ -93,28 +93,51 @@ export interface InitIo {
   closed?: boolean;
 }
 
+// One shared readline interface (created lazily) feeds a line queue, so answers buffered from piped
+// input are never lost between prompts. `closed` flips only when a prompt had to return '' because
+// stdin ended (EOF, Ctrl+D or Ctrl+C), never while buffered lines remain.
 export function terminalIo(): InitIo {
-  const self: InitIo = {
-    closed: false,
-    async ask(q) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      let answered = false;
-      const eof = new Promise<string>((res) => rl.once('close', () => { if (!answered) self.closed = true; res(''); }));
-      const a = await Promise.race([rl.question(q).then((x) => { answered = true; return x; }), eof]);
-      rl.close();
-      return a.trim();
-    },
-    async askHidden(q) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-      process.stdout.write(q);
-      (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = () => {};
-      const a = await rl.question('');
-      rl.close();
-      process.stdout.write('\n');
-      return a.trim();
-    },
-    log: (t) => console.log(t),
-  };
+  const lines: string[] = [];
+  const waiters: Array<(line: string) => void> = [];
+  let rl: ReturnType<typeof createInterface> | undefined;
+  let eof = false;
+  let muted = false;
+  const self: InitIo = { closed: false, ask: (q) => read(q, false), askHidden: (q) => read(q, true), log: (t) => console.log(t) };
+
+  function start(): ReturnType<typeof createInterface> {
+    if (rl) return rl;
+    const r = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
+    const hook = r as unknown as { _writeToOutput?: (s: string) => void };
+    const write = hook._writeToOutput?.bind(r);
+    if (write) hook._writeToOutput = (str) => { if (!muted) write(str); };
+    r.on('line', (l) => { const w = waiters.shift(); if (w) w(l); else lines.push(l); });
+    const end = () => { eof = true; for (const w of waiters.splice(0)) w(''); };
+    r.on('close', end);
+    r.on('SIGINT', () => { r.close(); });
+    rl = r;
+    return r;
+  }
+
+  async function read(q: string, hidden: boolean): Promise<string> {
+    const queued = lines.shift();
+    if (queued !== undefined) { process.stdout.write(q); if (hidden && process.stdin.isTTY) process.stdout.write('\n'); return queued.trim(); }
+    if (self.closed || eof || process.stdin.readableEnded || process.stdin.destroyed) { self.closed = true; return ''; }
+    const r = start();
+    r.resume();
+    r.setPrompt(q);
+    r.prompt();
+    muted = hidden;
+    let line: string;
+    try {
+      line = await new Promise<string>((res) => { waiters.push(res); });
+    } finally {
+      muted = false;
+    }
+    if (hidden && process.stdin.isTTY) process.stdout.write('\n');
+    if (eof && line === '') self.closed = true;
+    else r.pause();
+    return line.trim();
+  }
   return self;
 }
 

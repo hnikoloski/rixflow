@@ -13260,34 +13260,65 @@ function installPreCommit(hubDir2, configDir2, cliPath2) {
   return messages;
 }
 function terminalIo() {
-  const self = {
-    closed: false,
-    async ask(q) {
-      const rl = (0, import_promises.createInterface)({ input: process.stdin, output: process.stdout });
-      let answered = false;
-      const eof = new Promise((res) => rl.once("close", () => {
-        if (!answered) self.closed = true;
-        res("");
-      }));
-      const a = await Promise.race([rl.question(q).then((x) => {
-        answered = true;
-        return x;
-      }), eof]);
-      rl.close();
-      return a.trim();
-    },
-    async askHidden(q) {
-      const rl = (0, import_promises.createInterface)({ input: process.stdin, output: process.stdout, terminal: true });
+  const lines = [];
+  const waiters = [];
+  let rl;
+  let eof = false;
+  let muted = false;
+  const self = { closed: false, ask: (q) => read(q, false), askHidden: (q) => read(q, true), log: (t) => console.log(t) };
+  function start() {
+    if (rl) return rl;
+    const r = (0, import_promises.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
+    const hook = r;
+    const write = hook._writeToOutput?.bind(r);
+    if (write) hook._writeToOutput = (str3) => {
+      if (!muted) write(str3);
+    };
+    r.on("line", (l) => {
+      const w = waiters.shift();
+      if (w) w(l);
+      else lines.push(l);
+    });
+    const end = () => {
+      eof = true;
+      for (const w of waiters.splice(0)) w("");
+    };
+    r.on("close", end);
+    r.on("SIGINT", () => {
+      r.close();
+    });
+    rl = r;
+    return r;
+  }
+  async function read(q, hidden) {
+    const queued = lines.shift();
+    if (queued !== void 0) {
       process.stdout.write(q);
-      rl._writeToOutput = () => {
-      };
-      const a = await rl.question("");
-      rl.close();
-      process.stdout.write("\n");
-      return a.trim();
-    },
-    log: (t) => console.log(t)
-  };
+      if (hidden && process.stdin.isTTY) process.stdout.write("\n");
+      return queued.trim();
+    }
+    if (self.closed || eof || process.stdin.readableEnded || process.stdin.destroyed) {
+      self.closed = true;
+      return "";
+    }
+    const r = start();
+    r.resume();
+    r.setPrompt(q);
+    r.prompt();
+    muted = hidden;
+    let line2;
+    try {
+      line2 = await new Promise((res) => {
+        waiters.push(res);
+      });
+    } finally {
+      muted = false;
+    }
+    if (hidden && process.stdin.isTTY) process.stdout.write("\n");
+    if (eof && line2 === "") self.closed = true;
+    else r.pause();
+    return line2.trim();
+  }
   return self;
 }
 async function applyClaudeSettings(io, linkPath, hubDir2) {

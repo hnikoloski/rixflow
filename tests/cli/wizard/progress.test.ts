@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { askValid } from '../../../src/cli/wizard/prompts';
 import { clearProgress, loadProgress, runSteps, saveProgress, type Progress } from '../../../src/cli/wizard/progress';
 import { scriptedIo } from './io';
 
@@ -100,7 +101,7 @@ describe('runSteps', () => {
   });
   it('EOF mid-step keeps earlier progress', async () => {
     const d = dir(); const log: string[] = [];
-    const ask = (id: string) => ({ id, run: async (_a: Record<string, unknown>) => { const { askValid } = await import('../../../src/cli/wizard/prompts'); return { [id]: await askValid(io, `${id}?`, () => null) }; } });
+    const ask = (id: string) => ({ id, run: async (_a: Record<string, unknown>) => { return { [id]: await askValid(io, `${id}?`, () => null) }; } });
     const io = scriptedIo(['one']);
     await expect(runSteps(io, d, 'join', [ask('s1'), ask('s2'), step('s3', log)])).rejects.toMatchObject({ code: 'ABORTED' });
     const p = loadProgress(d)!;
@@ -108,7 +109,7 @@ describe('runSteps', () => {
     expect(p.answers).toEqual({ s1: 'one' });
     expect(readFileSync(join(d, 'setup-progress.json'), 'utf8')).not.toMatch(/token|password|secret/i);
     const io2 = scriptedIo(['y', 'two']);
-    const out = await runSteps({ ...io2, ask: (q) => io2.ask(q) } as typeof io2, d, 'join', [
+    const out = await runSteps(io2, d, 'join', [
       { id: 's1', run: async () => { throw new Error('should be skipped'); } },
       { id: 's2', run: async () => ({ s2: await io2.ask('s2?') }) },
       step('s3', log),
