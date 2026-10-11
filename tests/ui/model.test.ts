@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bandParts, canFill, cell, rule, staleAge, syncBadge, titleHasSite, cliPath, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, shouldFetchAsana,
+  bandParts, canFill, cell, contextBadge, rule, staleAge, syncBadge, titleHasSite, cliPath, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, shouldFetchAsana,
   refreshGate, statusArgv, statusLine, STATUS_VERSION, syncPart, TOOL, unseen,
 } from '../../ui/hooks/model';
 import type { Status } from '../../ui/types/status';
@@ -219,5 +219,32 @@ describe('poller helpers', () => {
     expect(cliPath(undefined, '/home/u')).toBe('/home/u/.config/rixflow/hub.cjs');
     expect(cliPath('/cfg', '/home/u')).toBe('/cfg/hub.cjs');
     expect(cliPath('', '/home/u')).toBe('/home/u/.config/rixflow/hub.cjs');
+  });
+});
+
+describe('contextBadge', () => {
+  it('draws the bar, percent and used/window', () => {
+    expect(contextBadge({ tokens: 84_000, window: 200_000, percent: 42 })).toEqual({ text: '████░░░░░░ 42% · 84k/200k', color: 'success' });
+    expect(contextBadge({ tokens: 100_000, window: 1_000_000, percent: 10 })?.text).toBe('█░░░░░░░░░ 10% · 100k/1m');
+  });
+  it('derives used from percent, formats millions and omits a missing window', () => {
+    expect(contextBadge({ window: 1_200_000, percent: 50 })?.text).toBe('█████░░░░░ 50% · 600k/1.2m');
+    expect(contextBadge({ window: 0, percent: 30 })?.text).toBe('███░░░░░░░ 30%');
+    expect(contextBadge({ tokens: 900, window: 2000, percent: 45.9 })?.text).toBe('████░░░░░░ 45% · 900/2k');
+  });
+  it('clamps the percent', () => {
+    expect(contextBadge({ window: 100, percent: 130 })?.text).toBe('██████████ 100% · 100/100');
+    expect(contextBadge({ window: 100, percent: -5 })?.text).toBe('░░░░░░░░░░ 0% · 0/100');
+  });
+  it('colors by fill and is null without a percent', () => {
+    expect(contextBadge({ window: 200_000, percent: 59 })?.color).toBe('success');
+    expect(contextBadge({ window: 200_000, percent: 60 })?.color).toBe('warning');
+    expect(contextBadge({ window: 200_000, percent: 84 })?.color).toBe('warning');
+    expect(contextBadge({ window: 200_000, percent: 85 })?.color).toBe('error');
+    expect(contextBadge({ window: 200_000 })).toBeNull();
+    expect(contextBadge(null)).toBeNull();
+  });
+  it('joins the status line when given', () => {
+    expect(statusLine(base(), false, 'X')).toMatch(/ │ X$/);
   });
 });

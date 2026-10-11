@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { InboxItem, Status, View } from '../types'
 import {
-  ACCENT, bandParts, canFill, cell, cliPath, staleAge, titleHasSite, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, RIXFLOW_TOOL,
+  ACCENT, bandParts, canFill, cell, contextBadge, cliPath, staleAge, titleHasSite, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, RIXFLOW_TOOL,
   refreshGate, rule, shouldFetchAsana, statusArgv, statusLine, syncBadge, TOOL, unseen, type Action, type Refresh,
 } from './model'
 
@@ -20,7 +20,7 @@ const currentTask = atom({ plugin: 'rixflow-ui', key: 'currentTask' } as const, 
 // `$` is only ever handed to the top-level functions below (`claude plugin validate` requires that).
 // `active` is set only for an interactive terminal session that is not a RixFlow child; every
 // other hook is a no-op until then.
-const mod = { active: false, cwd: '.', lastAsanaAt: 0, lastPromptAt: 0, seen: [] as string[] }
+const mod = { active: false, cwd: '.', lastAsanaAt: 0, lastPromptAt: 0, context: null as ReturnType<typeof contextBadge>, seen: [] as string[] }
 
 // At most one `status` process at a time. A timer tick that finds one running is skipped; an
 // event (a rixflow tool call, ↻, `/rixflow-ui refresh`) is queued and runs once after it.
@@ -55,8 +55,20 @@ async function poll($: EngineInterface, r: Refresh): Promise<boolean> {
   }
   const now = await $.clock.now()
   const v = await update($, view, old => next ? { status: next, error: null, updatedAt: now } : { ...old, error })
-  $.ui.status(v.error === 'version' ? '⚠ update rixflow / rixflow-ui' : statusLine(v.status, false))
+  $.ui.status(v.error === 'version' ? '⚠ update rixflow / rixflow-ui' : statusLine(v.status, false, mod.context?.text ?? null))
   return next !== null
+}
+
+// The context meter: never a model call, never breaks the session.
+async function setContext($: EngineInterface, c: Parameters<typeof contextBadge>[0]): Promise<void> {
+  try {
+    mod.context = contextBadge(c)
+    const v = await read($, view)
+    if (v.status && !v.error) $.ui.status(statusLine(v.status, false, mod.context?.text ?? null))
+    $.ui.invalidate('ui.render')
+  } catch {
+    // ignore
+  }
 }
 
 // Resolves true only when a run covering this call finished with a good status.
@@ -137,11 +149,18 @@ export const register: Register = on => {
       void refresh($, { asana: false, refresh: false })
       void refresh($, { asana: true, refresh: false }, true)
       startPolling($)
+      void $.session.usage().then(u => setContext($, u.context)).catch(() => undefined)
     } catch {
       // The UI must never break the session.
     }
     return ran
   })
+
+  on('session.measure', async ($, e, next) => {
+    const ran = await next(e)
+    if (mod.active && e.changed.includes('context')) await setContext($, e.context)
+    return ran
+  }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
     if (!mod.active) return next(e)
@@ -255,7 +274,10 @@ export const register: Register = on => {
             <Text color={ACCENT.brand} bold>◆ RIXFLOW</Text>
             <Text color="subtle">  @{s.user ?? '?'}</Text>
           </Box>
-          {badge && <Text color={badge.color} bold>{badge.label}</Text>}
+          <Box gap={1}>
+            {mod.context && <Text color={mod.context.color}>{mod.context.text}</Text>}
+            {badge && <Text color={badge.color} bold>{badge.label}</Text>}
+          </Box>
         </Box>
 
         {s.current ? (

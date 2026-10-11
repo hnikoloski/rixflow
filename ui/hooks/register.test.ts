@@ -284,3 +284,33 @@ test('the pane marks a sprint cached long ago as stale', async ($, on) => {
   })
   expect(await pane.find({ type: 'Text', text: '⚠ 8h old · 0' })).toBeDefined()
 })
+
+test('a session.measure of the context puts the meter in the status line', async ($, on) => {
+  const clock = world(on)
+  const lines: Array<string | undefined> = []
+  on('process.run', async () => ran(status()))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async (_$, e) => { lines.push(e.text); return { value: undefined } })
+  on('session.measure', async (_$, e) => ({ changed: e.changed }))
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure({ context: { window: 200_000, tokens: 84_000, percent: 42 }, rateLimits: [], changed: ['context'] })
+  expect(lines.at(-1)).toContain('42% · 84k/200k')
+})
+
+test('a tickets problem shows in the sprint area, not in the general problem list', async ($, on) => {
+  const clock = world(on)
+  on('process.run', async () => ran(status({ problems: ['tickets unreachable'] })))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async () => ({ value: undefined }))
+  await $.session.start(START)
+  await clock.settle()
+  const pane = await $.ui.mount({
+    plugin: 'rixflow-ui', surface: 'terminal', component: 'Pane', requestId: 'rixflow',
+    props: { title: 'RixFlow', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+    viewport: { columns: 60, rows: 40 },
+  })
+  expect(await pane.find({ type: 'Text', text: 'tickets unreachable' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: ' tickets unreachable' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: ' ! ' })).toBeUndefined()
+})

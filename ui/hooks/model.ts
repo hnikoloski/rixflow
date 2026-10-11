@@ -44,7 +44,7 @@ export function syncPart(s: Status): string | null {
   }
 }
 
-export function statusLine(s: Status | null, setupMissing: boolean): string {
+export function statusLine(s: Status | null, setupMissing: boolean, context: string | null = null): string {
   // The engine prefixes a plugin's status line with its name ("rixflow-ui:"), so none is added here.
   if (setupMissing || (s && !s.initialized)) return 'setup needed'
   if (!s) return '…'
@@ -57,6 +57,7 @@ export function statusLine(s: Status | null, setupMissing: boolean): string {
   if (fresh) parts.push(`✉ ${fresh} new`)
   const sync = syncPart(s)
   if (sync) parts.push(sync)
+  if (context) parts.push(context)
   return parts.join(' │ ') || 'idle'
 }
 
@@ -76,6 +77,21 @@ export function syncBadge(s: Status): { label: string; color: 'success' | 'warni
     default:
       return { label: '● BLOCKED', color: 'error' }
   }
+}
+
+const units = (n: number): string => n >= 1_000_000 ? `${+(n / 1e6).toFixed(1)}m` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`
+
+// The context-window meter, as in the terminal status line: `████░░░░░░ 42% · 84k/200k`.
+// null until the session has a reading with a percent.
+export function contextBadge(c: { tokens?: number; window: number; percent?: number } | null): { text: string; color: 'success' | 'warning' | 'error' } | null {
+  if (!c || typeof c.percent !== 'number' || !Number.isFinite(c.percent)) return null
+  const pct = Math.min(100, Math.max(0, Math.floor(c.percent)))
+  const filled = Math.min(10, Math.floor(pct / 10))
+  const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
+  const win = Number.isFinite(c.window) && c.window > 0 ? c.window : 0
+  const used = c.tokens ?? Math.round((pct / 100) * win)
+  const text = `${bar} ${pct}%${win ? ` · ${units(used)}/${units(win)}` : ''}`
+  return { text, color: pct >= 85 ? 'error' : pct >= 60 ? 'warning' : 'success' }
 }
 
 // A horizontal rule filling what is left of `width` after `used` columns (never negative).
