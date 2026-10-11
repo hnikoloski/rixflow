@@ -13171,7 +13171,7 @@ function detachedSync(cliPath2, env = process.env, spawnFn = import_node_child_p
 var import_node_child_process5 = require("node:child_process");
 var import_node_fs16 = require("node:fs");
 var import_node_path18 = require("node:path");
-var import_promises = require("node:readline/promises");
+var import_node_readline = require("node:readline");
 
 // src/core/hookcopy.ts
 var import_node_crypto2 = require("node:crypto");
@@ -13268,12 +13268,17 @@ function terminalIo() {
   const self = { closed: false, ask: (q) => read(q, false), askHidden: (q) => read(q, true), log: (t) => console.log(t) };
   function start() {
     if (rl) return rl;
-    const r = (0, import_promises.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
+    const r = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
     const hook = r;
-    const write = hook._writeToOutput?.bind(r);
+    const write = typeof hook._writeToOutput === "function" ? hook._writeToOutput.bind(r) : void 0;
     if (write) hook._writeToOutput = (str3) => {
       if (!muted) write(str3);
     };
+    else {
+      const out = process.stdout;
+      const orig = out.write.bind(out);
+      out.write = (...a) => muted ? true : orig(...a);
+    }
     r.on("line", (l) => {
       const w = waiters.shift();
       if (w) w(l);

@@ -3,7 +3,7 @@ import {
   chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { createInterface } from 'node:readline/promises';
+import { createInterface } from 'node:readline';
 import { AsanaClient } from '../core/asana';
 import { configDir as getConfigDir, homeDir, hubDir as getHubDir, normalizeDir, saveUserConfig } from '../core/config';
 import { hubCommand } from '../core/command';
@@ -108,8 +108,14 @@ export function terminalIo(): InitIo {
     if (rl) return rl;
     const r = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
     const hook = r as unknown as { _writeToOutput?: (s: string) => void };
-    const write = hook._writeToOutput?.bind(r);
+    const write = typeof hook._writeToOutput === 'function' ? hook._writeToOutput.bind(r) : undefined;
     if (write) hook._writeToOutput = (str) => { if (!muted) write(str); };
+    else {
+      // Fallback: mute the output stream itself, only while a hidden prompt is active.
+      const out = process.stdout;
+      const orig = out.write.bind(out) as (...a: unknown[]) => boolean;
+      (out as unknown as { write: (...a: unknown[]) => boolean }).write = (...a) => (muted ? true : orig(...a));
+    }
     r.on('line', (l) => { const w = waiters.shift(); if (w) w(l); else lines.push(l); });
     const end = () => { eof = true; for (const w of waiters.splice(0)) w(''); };
     r.on('close', end);

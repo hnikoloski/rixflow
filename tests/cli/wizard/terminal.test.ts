@@ -1,13 +1,17 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, openSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSync } from 'esbuild';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 let bundle = '';
+let hidden = '';
+let tmp = '';
+afterAll(() => { if (tmp) rmSync(tmp, { recursive: true, force: true }); });
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), 'tio-'));
+  tmp = dir;
   const entry = join(dir, 'entry.ts');
   writeFileSync(entry, `import { terminalIo } from ${JSON.stringify(join(process.cwd(), 'src/cli/init.ts'))};
 (async () => {
@@ -19,6 +23,16 @@ beforeAll(() => {
 })();`);
   bundle = join(dir, 'out.cjs');
   buildSync({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', outfile: bundle, logLevel: 'silent' });
+  const entry2 = join(dir, 'hidden.ts');
+  writeFileSync(entry2, `import { terminalIo } from ${JSON.stringify(join(process.cwd(), 'src/cli/init.ts'))};
+(async () => {
+  const io = terminalIo();
+  const s = await io.askHidden('SECRET> ');
+  const h = await io.ask('PLAIN> ');
+  process.stdout.write('RESULT ' + JSON.stringify({ ok: s === 'SECRETPW', h, closed: io.closed }) + '\\n');
+})();`);
+  hidden = join(dir, 'hidden.cjs');
+  buildSync({ entryPoints: [entry2], bundle: true, platform: 'node', format: 'cjs', outfile: hidden, logLevel: 'silent' });
 });
 
 const run = (input: string | null) => spawnSync('node', [bundle], { input: input ?? '', encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -40,35 +54,57 @@ describe('terminalIo with a real process', () => {
     const r = run('only\n');
     expect(result(r.stderr)).toEqual({ a: 'only', b: '', c: '', closed: true });
   });
-  it.skipIf(spawnSync('python3', ['-c', 'import pty']).status !== 0)('Ctrl+C in a pty ends cleanly', async () => {
-    const py = `import pty,os,sys,time,select
+  const hasPty = spawnSync('python3', ['-c', 'import pty']).status === 0;
+  // steps: [waitForText, keysToSend]; keys are sent only after the text shows up in the pty output.
+  const pty = (script: string, steps: Array<[string, string]>) => new Promise<{ code: number | null; text: string }>((resolve) => {
+    const py = `import pty,os,sys,time,select,json
+script=sys.argv[1]; steps=json.loads(sys.argv[2])
 pid,fd=pty.fork()
 if pid==0:
-    os.execvp('node',['node',sys.argv[1]])
-time.sleep(1.0)
-os.write(fd,b'\\x03')
-out=b''
-end=time.time()+4
-while time.time()<end:
-    r,_,_=select.select([fd],[],[],0.2)
-    if r:
-        try:
-            d=os.read(fd,4096)
-        except OSError:
-            break
-        if not d: break
-        out+=d
+    os.execvp('node',['node',script])
+out=b''; eof=False
+def pump(until,limit):
+    global out,eof
+    end=time.time()+limit
+    while time.time()<end and not eof and (until is None or until.encode() not in out):
+        r,_,_=select.select([fd],[],[],0.1)
+        if r:
+            try: d=os.read(fd,4096)
+            except OSError: eof=True; break
+            if not d: eof=True; break
+            out+=d
+for wait,keys in steps:
+    pump(wait,5)
+    if eof: break
+    time.sleep(0.1)
+    os.write(fd,keys.encode())
+    out+=b'\\n<<SENT>>\\n'
+pump(None,1.5)
 _,st=os.waitpid(pid,0)
 sys.stdout.write(out.decode('utf8','replace'))
 sys.exit(0 if os.WIFEXITED(st) else 1)`;
-    const out = await new Promise<{ code: number | null; text: string }>((resolve) => {
-      const c = spawn('python3', ['-I', '-c', py, bundle]);
-      let text = '';
-      c.stdout.on('data', (d) => { text += d; });
-      c.on('close', (code) => resolve({ code, text }));
-    });
+    const c = spawn('python3', ['-I', '-c', py, script, JSON.stringify(steps)]);
+    let text = '';
+    c.stdout.on('data', (d) => { text += d; });
+    c.on('close', (code) => resolve({ code, text }));
+  });
+
+  it.skipIf(!hasPty)('hidden input is not echoed and echo returns afterwards', async () => {
+    const out = await pty(hidden, [['SECRET> ', 'SECRETPW\r'], ['PLAIN> ', 'hello\r']]);
+    expect(out.code).toBe(0);
+    expect(out.text).not.toContain('SECRETPW');
+    expect(out.text).toContain('hello');
+    expect(out.text).toContain('"ok":true');
+  }, 15000);
+  it.skipIf(!hasPty)('Ctrl+C at a hidden prompt ends cleanly', async () => {
+    const out = await pty(hidden, [['SECRET> ', '\x03']]);
+    expect(out.code).toBe(0);
+    expect(out.text).not.toMatch(/AbortError|\n\s+at /);
+  }, 15000);
+  it.skipIf(!hasPty)('Ctrl+C at a normal prompt ends cleanly', async () => {
+    const out = await pty(bundle, [['A? ', '\x03']]);
     expect(out.code).toBe(0);
     expect(out.text).not.toMatch(/AbortError|\n\s+at /);
     expect(out.text).toContain('"closed":true');
-  }, 10000);
+  }, 15000);
 });
