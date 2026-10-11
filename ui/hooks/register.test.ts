@@ -37,7 +37,7 @@ test('session start draws the status line from hub status', async ($, on) => {
   await $.session.start(START)
   await clock.settle() // the startup polls run unawaited
   expect(argvs[0]).toContain('status')
-  expect(lines.at(-1)).toBe('✉ 1 new │ ✓ synced')
+  expect(lines.at(-1)).toBe('✦ 1 new │ ✓ synced')
 })
 
 test('a missing CLI shows setup needed and runs nothing', async ($, on) => {
@@ -62,7 +62,7 @@ test('invalid output keeps the last good view', async ($, on) => {
   on('ui.status', async (_$, e) => { lines.push(e.text); return { value: undefined } })
   await $.session.start(START)
   await $.command.run({ command: 'rixflow-ui', args: 'refresh', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
-  expect(lines.at(-1)).toBe('✉ 1 new │ ✓ synced')
+  expect(lines.at(-1)).toBe('✦ 1 new │ ✓ synced')
 })
 
 test('a button never fills over a draft', async ($, on) => {
@@ -159,7 +159,7 @@ test('the pane draws every section and its buttons fill an empty box', async ($,
     viewport: { columns: 60, rows: 40 },
   })
   expect(await pane.find({ type: 'Text', text: /Fix banner overlap/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: ' ✉ INBOX ' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: ' ✦ INBOX ' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: '1 NEW / 1' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: '● SYNCED' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /hub: 1 file not synced/ })).toBeDefined()
@@ -207,7 +207,7 @@ test('session start does not wait for the first status run', async ($, on) => {
   expect(lines).toEqual([])
   release()
   await clock.settle()
-  expect(lines.at(-1)).toBe('✉ 1 new │ ✓ synced')
+  expect(lines.at(-1)).toBe('✦ 1 new │ ✓ synced')
 })
 
 test('an old core without status (exit 1, no output) asks for an update', async ($, on) => {
@@ -218,7 +218,7 @@ test('an old core without status (exit 1, no output) asks for an update', async 
   on('ui.status', async (_$, e) => { lines.push(e.text); return { value: undefined } })
   await $.session.start(START)
   await clock.settle()
-  expect(lines.at(-1)).toBe('⚠ update rixflow / rixflow-ui')
+  expect(lines.at(-1)).toBe('▲ update rixflow / rixflow-ui')
 })
 
 test('/rixflow-ui refresh reports a failed status fetch', async ($, on) => {
@@ -264,7 +264,7 @@ test('the band shows a new message with Open and Later', async ($, on) => {
     props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 100, scroll: { offset: 0, bodyRows: 3 }, view: {} },
     viewport: { columns: 100, rows: 40 },
   })
-  expect(await band.find({ type: 'Text', text: ' ✉ NEW ' })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: ' ✦ NEW ' })).toBeDefined()
   expect(await band.find({ type: 'Text', text: / request · Consent v2 by Wed/ })).toBeDefined()
   await band.press({ key: 'band-open' })
   expect(fills).toEqual(['/rixflow:inbox 2026-10-10-8qsc'])
@@ -282,7 +282,7 @@ test('the pane marks a sprint cached long ago as stale', async ($, on) => {
     props: { title: 'RixFlow', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
     viewport: { columns: 60, rows: 40 },
   })
-  expect(await pane.find({ type: 'Text', text: '⚠ 8h old · 0' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '▲ 8h old · 0' })).toBeDefined()
 })
 
 test('a session.measure of the context puts the meter in the status line', async ($, on) => {
@@ -319,4 +319,61 @@ test('a tickets problem shows in the sprint area, not in the general problem lis
   expect(await pane.find({ type: 'Text', text: 'tickets unreachable' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: ' tickets unreachable' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: ' ! ' })).toBeUndefined()
+})
+
+// The kit hands back the tree a surface is given, not a painted screen, so it cannot measure a
+// rendered line. This asserts what decides the width: the root's padding, and that the text of every
+// plain row (Buttons excluded, they sit beside it) fits the width left after that padding. The NOW
+// title is cut by the engine (wrap="truncate" in the padded box), so a row whose Text carries that is skipped.
+type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+const textOf = (n: unknown): string => typeof n === 'string' ? n : n && typeof n === 'object' && (n as Node).type !== 'Button' ? ((n as Node).children ?? []).map(textOf).join('') : ''
+const rowWidths = (n: unknown, out: number[] = []): number[] => {
+  const node = n as Node
+  if (!node || typeof node !== 'object') return out
+  const kids = node.children ?? []
+  const engineCut = kids.some(k => (k as Node)?.props?.wrap === 'truncate' && !/…/.test(textOf(k)))
+  if (node.type === 'Box' && node.props?.flexDirection !== 'column' && !node.props?.borderStyle && !engineCut) out.push([...textOf(node)].length)
+  kids.forEach(k => rowWidths(k, out))
+  return out
+}
+
+test('at a narrow width the pane is padded and long rows are truncated inside it', async ($, on) => {
+  const clock = world(on)
+  const long = 'An extremely long ticket title that keeps going well past any narrow pane edge'
+  on('process.run', async () => ran(status({
+    current: { task: '1', title: long, sites: ['AC'], status: 'TODO', due: null, startedAt: '2026-10-10T17:00:00.000Z', source: 'session' },
+    paused: [{ task: '2', title: long, site: 'GL', pausedAt: '2026-10-09T17:00:00.000Z' }],
+    sprint: { name: 'SPRINT 1', fetchedAt: '2026-10-10T17:59:00.000Z', items: [{ task: '3', title: long, sites: ['AC'], status: null, due: null, paused: false }] },
+  })))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async () => ({ value: undefined }))
+  await $.session.start(START)
+  await clock.settle()
+  const pane = await $.ui.mount({
+    plugin: 'rixflow-ui', surface: 'terminal', component: 'Pane', requestId: 'rixflow',
+    props: { title: 'RixFlow', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+    viewport: { columns: 40, rows: 40 },
+  })
+  const root = await pane.drawn()
+  expect((root as Node).props).toMatchObject({ paddingX: 2, paddingY: 1 })
+  const inner = 40 - 2 * 2
+  for (const w of rowWidths(root)) expect(w).toBeLessThanOrEqual(inner)
+  const paused = await pane.findAll({ type: 'Text', text: /…/ })
+  expect(paused.length).toBeGreaterThanOrEqual(2)
+  for (const t of paused) expect([...t.text].length).toBeLessThanOrEqual(inner)
+})
+
+test('the band has a column of padding either side', async ($, on) => {
+  const clock = world(on)
+  on('process.run', async () => ran(status()))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async () => ({ value: undefined }))
+  await $.session.start(START)
+  await clock.settle()
+  const band = await $.ui.mount({
+    plugin: 'rixflow-ui', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 40, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+    viewport: { columns: 40, rows: 40 },
+  })
+  expect(((await band.drawn()) as Node).props).toMatchObject({ paddingX: 1 })
 })

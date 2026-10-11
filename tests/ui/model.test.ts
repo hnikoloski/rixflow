@@ -29,16 +29,16 @@ describe('parseStatus', () => {
 describe('statusLine', () => {
   it('shows task, new count and sync', () => {
     expect(statusLine(base({ current, inbox: [msg('a'), msg('b'), msg('c', 'pm', 'read')] }), false))
-      .toBe('▶ AC Fix banner overlap │ ✉ 2 new │ ✓ synced');
+      .toBe('▸ AC Fix banner overlap │ ✦ 2 new │ ✓ synced');
   });
   it('does not repeat a site the title already starts with', () => {
-    expect(statusLine(base({ current: { ...current, title: 'AC: Fix banner' } }), false)).toBe('▶ AC: Fix banner │ ✓ synced');
-    expect(statusLine(base({ current: { ...current, title: 'ACME import' } }), false)).toBe('▶ AC ACME import │ ✓ synced');
+    expect(statusLine(base({ current: { ...current, title: 'AC: Fix banner' } }), false)).toBe('▸ AC: Fix banner │ ✓ synced');
+    expect(statusLine(base({ current: { ...current, title: 'ACME import' } }), false)).toBe('▸ AC ACME import │ ✓ synced');
   });
   it('drops empty parts and reports problems', () => {
     expect(statusLine(base(), false)).toBe('✓ synced');
-    expect(statusLine(base({ sync: { status: 'offline', pending: 3, detail: '' } }), false)).toBe('⚠ offline (3 unsynced)');
-    expect(statusLine(base({ sync: { status: 'blocked', pending: 0, detail: 'x' } }), false)).toBe('⚠ sync blocked');
+    expect(statusLine(base({ sync: { status: 'offline', pending: 3, detail: '' } }), false)).toBe('▲ offline (3 unsynced)');
+    expect(statusLine(base({ sync: { status: 'blocked', pending: 0, detail: 'x' } }), false)).toBe('▲ sync blocked');
     expect(statusLine(base({ sync: { status: 'skipped', pending: 0, detail: '' } }), false)).toBe('idle');
     expect(statusLine(base({ sync: { status: 'locked', pending: 0, detail: '' } }), false)).toBe('idle');
     expect(statusLine(null, true)).toBe('setup needed');
@@ -50,8 +50,8 @@ describe('statusLine', () => {
 describe('syncPart', () => {
   it('words the sync state, nothing for skipped or locked', () => {
     expect(syncPart(base())).toBe('✓ synced');
-    expect(syncPart(base({ sync: { status: 'offline', pending: 2, detail: '' } }))).toBe('⚠ offline (2 unsynced)');
-    expect(syncPart(base({ sync: { status: 'rejected', pending: 1, detail: '' } }))).toBe('⚠ sync blocked');
+    expect(syncPart(base({ sync: { status: 'offline', pending: 2, detail: '' } }))).toBe('▲ offline (2 unsynced)');
+    expect(syncPart(base({ sync: { status: 'rejected', pending: 1, detail: '' } }))).toBe('▲ sync blocked');
     expect(syncPart(base({ sync: { status: 'locked', pending: 0, detail: '' } }))).toBeNull();
     expect(syncPart(base({ sync: { status: 'skipped', pending: 0, detail: '' } }))).toBeNull();
   });
@@ -70,7 +70,7 @@ describe('pane styling', () => {
     expect(rule(3, 9)).toBe('');
     expect(cell('pm', 5)).toBe('pm   ');
     expect(cell('request', 5)).toBe('req… ');
-    expect(cell('✉✉', 3)).toBe('✉✉ ');
+    expect(cell('✦✦', 3)).toBe('✦✦ ');
     // Exactly as long as the column, or cut: still one space before the next column.
     expect(cell('hristijan', 9)).toBe('hristij… ');
     expect(cell('hristijan', 10)).toBe('hristijan ');
@@ -97,8 +97,8 @@ describe('band', () => {
     expect(unseen(null, [])).toEqual([]);
   });
   it('words one or several messages', () => {
-    expect(bandParts([msg('a')])).toEqual({ chip: '✉ NEW', who: 'pm', what: 'request · msg a' });
-    expect(bandParts([msg('a'), msg('b', 'ana'), msg('c')])).toEqual({ chip: '✉ 3 NEW', who: 'pm, ana', what: 'waiting in your inbox' });
+    expect(bandParts([msg('a')])).toEqual({ chip: '✦ NEW', who: 'pm', what: 'request · msg a' });
+    expect(bandParts([msg('a'), msg('b', 'ana'), msg('c')])).toEqual({ chip: '✦ 3 NEW', who: 'pm, ana', what: 'waiting in your inbox' });
   });
   it('remembers ids, newest last, capped', () => {
     expect(remember(['a', 'b'], ['b', 'c'], 3)).toEqual(['a', 'b', 'c']);

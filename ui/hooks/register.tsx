@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { InboxItem, Status, View } from '../types'
 import {
   ACCENT, bandParts, canFill, cell, contextBadge, cliPath, staleAge, titleHasSite, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, RIXFLOW_TOOL,
-  refreshGate, rule, shouldFetchAsana, statusArgv, statusLine, syncBadge, TOOL, unseen, type Action, type Refresh,
+  PANE_PAD_X, refreshGate, rule, shouldFetchAsana, statusArgv, statusLine, syncBadge, TOOL, unseen, type Action, type Refresh,
 } from './model'
 
 const PANE = 'rixflow'
@@ -55,7 +55,7 @@ async function poll($: EngineInterface, r: Refresh): Promise<boolean> {
   }
   const now = await $.clock.now()
   const v = await update($, view, old => next ? { status: next, error: null, updatedAt: now } : { ...old, error })
-  $.ui.status(v.error === 'version' ? '⚠ update rixflow / rixflow-ui' : statusLine(v.status, false, mod.context?.text ?? null))
+  $.ui.status(v.error === 'version' ? '▲ update rixflow / rixflow-ui' : statusLine(v.status, false, mod.context?.text ?? null))
   return next !== null
 }
 
@@ -209,7 +209,7 @@ export const register: Register = on => {
     const open: Action = items.length === 1 && one ? { kind: 'inbox', id: one.id } : { kind: 'inbox' }
     const band = bandParts(items)
     return (
-      <Box>
+      <Box paddingX={1}>
         <Text backgroundColor={ACCENT.inbox} color="inverseText" bold> {band.chip} </Text>
         <Text color={ACCENT.inbox} bold> {band.who}</Text>
         <Box flexShrink={1}>
@@ -228,7 +228,8 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const { status: s, error, updatedAt } = await read($, view)
     const now = await $.clock.now()
-    const width = Math.max(32, e.props.bodyColumns ?? e.viewport?.columns ?? 60)
+    // The columns inside the pane's own horizontal padding: every row and rule is sized to this.
+    const width = Math.max(32, e.props.bodyColumns ?? e.viewport?.columns ?? 60) - 2 * PANE_PAD_X
     if (error === 'setup' || (s && !s.initialized)) {
       return (
         <Box flexDirection="column" borderStyle="round" borderColor="warning" paddingX={1}>
@@ -240,7 +241,7 @@ export const register: Register = on => {
         </Box>
       )
     }
-    if (error === 'version') return <Text color="warning">⚠ update rixflow / rixflow-ui</Text>
+    if (error === 'version') return <Text color="warning">▲ update rixflow / rixflow-ui</Text>
     if (!s) return <Text color="subtle">◆ RIXFLOW · loading…</Text>
     const rows = Math.max(8, (e.viewport?.rows ?? 30) - 14)
     const per = Math.max(2, Math.floor(rows / 3))
@@ -268,7 +269,7 @@ export const register: Register = on => {
     const empty = (label: string, color: string) => <Box>{gutter(color)}<Text color="inactive" italic>{label}</Text></Box>
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" paddingX={PANE_PAD_X} paddingY={1}>
         <Box justifyContent="space-between">
           <Box>
             <Text color={ACCENT.brand} bold>◆ RIXFLOW</Text>
@@ -283,8 +284,8 @@ export const register: Register = on => {
         {s.current ? (
           <Box flexDirection="column" borderStyle="round" borderColor={ACCENT.now} paddingX={1} marginTop={1}>
             <Box justifyContent="space-between">
-              <Text backgroundColor={ACCENT.now} color="inverseText" bold> ▶ NOW </Text>
-              {s.current.startedAt && <Text color={ACCENT.now}>⏱ {relTime(s.current.startedAt, now)}</Text>}
+              <Text backgroundColor={ACCENT.now} color="inverseText" bold> ▸ NOW </Text>
+              {s.current.startedAt && <Text color={ACCENT.now}>◷ {relTime(s.current.startedAt, now)}</Text>}
             </Box>
             <Box>
               {s.current.sites.length > 0 && !titleHasSite(s.current.title, s.current.sites) && <Text color={ACCENT.now} bold>{s.current.sites.join(' ')}  </Text>}
@@ -301,12 +302,12 @@ export const register: Register = on => {
           </Box>
         ) : (
           <Box borderStyle="round" borderColor="inactive" paddingX={1} marginTop={1}>
-            <Text color="inactive" bold>▶ NOW  </Text>
+            <Text color="inactive" bold>▸ NOW  </Text>
             <Text color="inactive" italic>no task in this session</Text>
           </Box>
         )}
 
-        {head('✉', 'INBOX', ACCENT.inbox, fresh ? `${fresh} NEW / ${s.inbox.length}` : `${s.inbox.length}`)}
+        {head('✦', 'INBOX', ACCENT.inbox, fresh ? `${fresh} NEW / ${s.inbox.length}` : `${s.inbox.length}`)}
         {inbox.shown.length === 0 && empty('no messages', ACCENT.inbox)}
         {inbox.shown.map(m => (
           <Box key={`m-${m.id}`}>
@@ -322,7 +323,7 @@ export const register: Register = on => {
         ))}
         {more(inbox.more, ACCENT.inbox)}
 
-        {head('⏸', 'PAUSED', ACCENT.paused, `${s.paused.length}`)}
+        {head('‖', 'PAUSED', ACCENT.paused, `${s.paused.length}`)}
         {paused.shown.length === 0 && empty('nothing paused', ACCENT.paused)}
         {paused.shown.map(p => (
           <Box key={`p-${p.task}`}>
@@ -337,7 +338,7 @@ export const register: Register = on => {
         ))}
         {more(paused.more, ACCENT.paused)}
 
-        {head('▦', (s.sprint?.name ?? 'SPRINT').toUpperCase(), stale ? 'warning' : ACCENT.sprint, s.sprint ? `${stale ? `⚠ ${stale} old · ` : ''}${sprint.shown.length + sprint.more}` : '')}
+        {head('▦', (s.sprint?.name ?? 'SPRINT').toUpperCase(), stale ? 'warning' : ACCENT.sprint, s.sprint ? `${stale ? `▲ ${stale} old · ` : ''}${sprint.shown.length + sprint.more}` : '')}
         {!s.sprint && empty(s.problems.find(p => p.startsWith('tickets')) ?? 'loading tickets…', ACCENT.sprint)}
         {s.sprint && sprint.shown.length === 0 && empty('nothing open', ACCENT.sprint)}
         {sprint.shown.map(t => (
@@ -362,7 +363,7 @@ export const register: Register = on => {
 
         <Text color="inactive">{rule(width, 0)}</Text>
         <Box justifyContent="space-between">
-          <Text color={failed ? 'warning' : 'subtle'}>{failed ? `⚠ refresh failed · updated ${age} ago` : `updated ${age}`}</Text>
+          <Text color={failed ? 'warning' : 'subtle'}>{failed ? `▲ refresh failed · updated ${age} ago` : `updated ${age}`}</Text>
           <Button key="refresh" plain hotkey="r" label="↻ refresh" onPress={() => refresh($, { asana: true, refresh: true }, true)} />
         </Box>
       </Box>

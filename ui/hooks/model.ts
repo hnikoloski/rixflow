@@ -36,12 +36,12 @@ export function syncPart(s: Status): string | null {
     case 'ok':
       return '✓ synced'
     case 'offline':
-      return `⚠ offline (${s.sync.pending} unsynced)`
+      return `▲ offline (${s.sync.pending} unsynced)`
     case 'skipped':
     case 'locked':
       return null
     default:
-      return '⚠ sync blocked'
+      return '▲ sync blocked'
   }
 }
 
@@ -52,10 +52,10 @@ export function statusLine(s: Status | null, setupMissing: boolean, context: str
   const parts: string[] = []
   if (s.current) {
     const { sites, title } = s.current
-    parts.push(`▶ ${sites.length && !titleHasSite(title, sites) ? `${sites.join(',')} ` : ''}${title}`)
+    parts.push(`▸ ${sites.length && !titleHasSite(title, sites) ? `${sites.join(',')} ` : ''}${title}`)
   }
   const fresh = s.inbox.filter(m => m.status === 'new').length
-  if (fresh) parts.push(`✉ ${fresh} new`)
+  if (fresh) parts.push(`✦ ${fresh} new`)
   const sync = syncPart(s)
   if (sync) parts.push(sync)
   if (context) parts.push(context)
@@ -95,6 +95,9 @@ export function contextBadge(c: { tokens?: number; window: number; percent?: num
   return { text, color: pct >= 85 ? 'error' : pct >= 60 ? 'warning' : 'success' }
 }
 
+// Columns of padding either side of the pane's content; the pane's width math subtracts twice this.
+export const PANE_PAD_X = 2
+
 // A horizontal rule filling what is left of `width` after `used` columns (never negative).
 export const rule = (width: number, used: number): string => '─'.repeat(Math.max(0, Math.floor(width) - used))
 
@@ -129,9 +132,9 @@ export type BandParts = { chip: string; who: string; what: string }
 
 export function bandParts(items: InboxItem[]): BandParts {
   const [one] = items
-  if (items.length === 1 && one) return { chip: '✉ NEW', who: one.from, what: `${one.type} · ${one.preview}` }
+  if (items.length === 1 && one) return { chip: '✦ NEW', who: one.from, what: `${one.type} · ${one.preview}` }
   const senders = [...new Set(items.map(m => m.from))]
-  return { chip: `✉ ${items.length} NEW`, who: senders.join(', '), what: 'waiting in your inbox' }
+  return { chip: `✦ ${items.length} NEW`, who: senders.join(', '), what: 'waiting in your inbox' }
 }
 
 export function remember(seen: readonly string[], ids: readonly string[], cap = 200): string[] {
