@@ -106,7 +106,14 @@ sys.exit(0 if os.WIFEXITED(st) else 1)`;
     expect(out.text).toContain('hello');
     expect(out.text).toContain('"ok":true');
   }, 15000);
-  const answer = (t: string) => Buffer.from((/ANSWER (\S+)/.exec(t) ?? [])[1] ?? '', 'base64').toString();
+  it.skipIf(!hasPty)('a hidden answer never comes back through prompt history (Up at a later prompt)', async () => {
+    const out = await pty(hidden, [['SECRET> ', 'SECRETPW\r'], ['PLAIN> ', '\x1b[A\r']]);
+    expect(out.code).toBe(0);
+    expect(out.text).not.toContain('SECRETPW');
+    expect(out.text).toContain('"ok":true');
+    expect(out.text).toContain('"h":""');
+  }, 15000);
+  const answer = (t: string) =>Buffer.from((/ANSWER (\S+)/.exec(t) ?? [])[1] ?? '', 'base64').toString();
   it.skipIf(!hasPty)('hidden input shows one * per character, never the characters', async () => {
     const out = await pty(echo, [['TOKEN> ', 'abc\r']]);
     expect(out.text).toContain('***');

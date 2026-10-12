@@ -106,7 +106,8 @@ export function terminalIo(): InitIo {
 
   function start(): ReturnType<typeof createInterface> {
     if (rl) return rl;
-    const r = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
+    // historySize 0: a masked answer (a token) must never come back unmasked through Up at a later prompt.
+    const r = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true, historySize: 0 });
     const hook = r as unknown as { _writeToOutput?: (s: string) => void };
     const write = typeof hook._writeToOutput === 'function' ? hook._writeToOutput.bind(r) : undefined;
     // While a hidden prompt is active, raw text is never written: redraw the prompt plus one * per

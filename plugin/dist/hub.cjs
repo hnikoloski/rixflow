@@ -14673,7 +14673,7 @@ function terminalIo() {
   const self = { closed: false, ask: (q) => read(q, false), askHidden: (q) => read(q, true), log: (t) => console.log(t) };
   function start() {
     if (rl) return rl;
-    const r = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
+    const r = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true, historySize: 0 });
     const hook = r;
     const write = typeof hook._writeToOutput === "function" ? hook._writeToOutput.bind(r) : void 0;
     const mask = (str3) => /^[\r\n]+$/.test(str3) ? str3 : `\r\x1B[2K${r.getPrompt()}${"*".repeat(r.line.length)}`;
