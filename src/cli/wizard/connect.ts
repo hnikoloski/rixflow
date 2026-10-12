@@ -83,15 +83,15 @@ export async function connect(io: InitIo, deps: WizardDeps, wf: Workflow, user: 
       if (t.type === 'jira') {
         if (t.flavor === 'cloud') email = await askValid(io, 'Your Jira login email:', validEmail, email);
         token = await askToken(io, t.flavor === 'cloud'
-          ? 'Jira API token (input hidden; create one at https://id.atlassian.com/manage-profile/security/api-tokens): '
-          : 'Jira personal access token (input hidden; create one in Jira under Profile > Personal Access Tokens): ');
+          ? 'Jira API token (input masked; create one at https://id.atlassian.com/manage-profile/security/api-tokens): '
+          : 'Jira personal access token (input masked; create one in Jira under Profile > Personal Access Tokens): ');
         if (!token) { io.log('No token entered.'); continue; }
         const auth: JiraAuth = t.flavor === 'cloud' ? { flavor: 'cloud', email: email as string, token } : { flavor: 'server', token };
         const source = makeJira(deps, t.url, auth, t.projects);
         await source.whoAmI();
         conn = t.flavor === 'cloud' ? { source, jiraEmail: email } : { source };
       } else {
-        token = await askToken(io, 'Asana personal access token (input hidden): ');
+        token = await askToken(io, 'Asana personal access token (input masked): ');
         if (!token) { io.log('No token entered.'); continue; }
         const client = makeAsana(deps, token);
         const me = await client.getMe();

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 let bundle = '';
 let hidden = '';
+let echo = '';
 let tmp = '';
 afterAll(() => { if (tmp) rmSync(tmp, { recursive: true, force: true }); });
 beforeAll(() => {
@@ -31,6 +32,15 @@ beforeAll(() => {
   const h = await io.ask('PLAIN> ');
   process.stdout.write('RESULT ' + JSON.stringify({ ok: s === 'SECRETPW', h, closed: io.closed }) + '\\n');
 })();`);
+  const entry3 = join(dir, 'echo.ts');
+  writeFileSync(entry3, `import { terminalIo } from ${JSON.stringify(join(process.cwd(), 'src/cli/init.ts'))};
+(async () => {
+  const io = terminalIo();
+  const s = await io.askHidden('TOKEN> ');
+  process.stdout.write('ANSWER ' + Buffer.from(s).toString('base64') + '\\n');
+})();`);
+  echo = join(dir, 'echo.cjs');
+  buildSync({ entryPoints: [entry3], bundle: true, platform: 'node', format: 'cjs', outfile: echo, logLevel: 'silent' });
   hidden = join(dir, 'hidden.cjs');
   buildSync({ entryPoints: [entry2], bundle: true, platform: 'node', format: 'cjs', outfile: hidden, logLevel: 'silent' });
 });
@@ -96,6 +106,36 @@ sys.exit(0 if os.WIFEXITED(st) else 1)`;
     expect(out.text).toContain('hello');
     expect(out.text).toContain('"ok":true');
   }, 15000);
+  const answer = (t: string) => Buffer.from((/ANSWER (\S+)/.exec(t) ?? [])[1] ?? '', 'base64').toString();
+  it.skipIf(!hasPty)('hidden input shows one * per character, never the characters', async () => {
+    const out = await pty(echo, [['TOKEN> ', 'abc\r']]);
+    expect(out.text).toContain('***');
+    expect(out.text).not.toContain('abc');
+    expect(answer(out.text)).toBe('abc');
+  }, 15000);
+  it.skipIf(!hasPty)('backspace removes one star', async () => {
+    const out = await pty(echo, [['TOKEN> ', 'abcd\x7f\r']]);
+    expect(answer(out.text)).toBe('abc');
+    expect(out.text).not.toContain('abcd');
+    const drawn = (out.text.split('\n<<SENT>>\n')[1] ?? '').split('ANSWER')[0];
+    const redraws = drawn.split('\x1b[2K').map((x) => x.replace(/\x1b\[[0-9;]*[A-Za-z]|[\r\n]+$/g, '')).filter(Boolean);
+    expect(redraws.pop()).toBe('TOKEN> ***'); // the final rendered line
+  }, 15000);
+  it.skipIf(!hasPty)('a pasted token shows 40 stars and is never written', async () => {
+    const token = 'tok'.repeat(13) + 'Z'; // 40 chars
+    const out = await pty(echo, [['TOKEN> ', token + '\r']]);
+    expect(out.text).not.toContain(token);
+    expect(out.text).not.toContain('tokt');
+    expect(out.text).toContain('*'.repeat(40));
+    expect(out.text).not.toContain('*'.repeat(41));
+    expect(answer(out.text)).toBe(token);
+  }, 15000);
+  it('piped hidden input is read without stars or echo', () => {
+    const r = spawnSync('node', [echo], { input: 'abc\n', encoding: 'utf8', timeout: 5000 });
+    expect(answer(r.stdout)).toBe('abc');
+    expect(r.stdout).not.toContain('*');
+    expect(r.stdout).not.toContain('abc');
+  });
   it.skipIf(!hasPty)('Ctrl+C at a hidden prompt ends cleanly', async () => {
     const out = await pty(hidden, [['SECRET> ', '\x03']]);
     expect(out.code).toBe(0);

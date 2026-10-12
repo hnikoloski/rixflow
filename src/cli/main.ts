@@ -176,7 +176,7 @@ program.command('token').command('set').description("store the token for the hub
   } catch {
     // Before init (no user): the legacy keychain account. An unreadable workflow keeps Asana.
   }
-  const token = await terminalIo().askHidden(`${kind === 'jira' ? 'Jira' : 'Asana'} token (input hidden): `);
+  const token = await terminalIo().askHidden(`${kind === 'jira' ? 'Jira' : 'Asana'} token (input masked): `);
   console.log(`stored in ${setToken(configDir(), token, undefined, user, kind)}`);
 });
 

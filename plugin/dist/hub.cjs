@@ -13553,7 +13553,7 @@ async function connect(io, deps, wf, user) {
     try {
       if (t.type === "jira") {
         if (t.flavor === "cloud") email = await askValid(io, "Your Jira login email:", validEmail, email);
-        token = await askToken(io, t.flavor === "cloud" ? "Jira API token (input hidden; create one at https://id.atlassian.com/manage-profile/security/api-tokens): " : "Jira personal access token (input hidden; create one in Jira under Profile > Personal Access Tokens): ");
+        token = await askToken(io, t.flavor === "cloud" ? "Jira API token (input masked; create one at https://id.atlassian.com/manage-profile/security/api-tokens): " : "Jira personal access token (input masked; create one in Jira under Profile > Personal Access Tokens): ");
         if (!token) {
           io.log("No token entered.");
           continue;
@@ -13563,7 +13563,7 @@ async function connect(io, deps, wf, user) {
         await source.whoAmI();
         conn = t.flavor === "cloud" ? { source, jiraEmail: email } : { source };
       } else {
-        token = await askToken(io, "Asana personal access token (input hidden): ");
+        token = await askToken(io, "Asana personal access token (input masked): ");
         if (!token) {
           io.log("No token entered.");
           continue;
@@ -14399,13 +14399,14 @@ function terminalIo() {
     const r = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
     const hook = r;
     const write = typeof hook._writeToOutput === "function" ? hook._writeToOutput.bind(r) : void 0;
+    const mask = (str3) => /^[\r\n]+$/.test(str3) ? str3 : `\r\x1B[2K${r.getPrompt()}${"*".repeat(r.line.length)}`;
     if (write) hook._writeToOutput = (str3) => {
-      if (!muted) write(str3);
+      write(muted ? mask(str3) : str3);
     };
     else {
       const out = process.stdout;
       const orig = out.write.bind(out);
-      out.write = (...a) => muted ? true : orig(...a);
+      out.write = (...a) => muted && typeof a[0] === "string" ? orig(mask(a[0]), ...a.slice(1)) : muted ? true : orig(...a);
     }
     r.on("line", (l) => {
       const w = waiters.shift();
@@ -14447,7 +14448,6 @@ function terminalIo() {
     } finally {
       muted = false;
     }
-    if (hidden && process.stdin.isTTY) process.stdout.write("\n");
     if (eof && line2 === "") self.closed = true;
     else r.pause();
     return line2.trim();
@@ -14527,7 +14527,7 @@ async function reinit(io, cliPath2, env) {
   if (!member) throw new HubError("UNKNOWN_MEMBER", `${name} is not in config/team.yml; add them first`);
   const defaultRoot = (0, import_node_path22.join)(homeDir(env), "projects");
   const projectsRoot = normalizeDir(await io.ask(`Projects folder [${defaultRoot}]: `) || defaultRoot, env);
-  const token = await io.askHidden("Asana personal access token (input hidden): ");
+  const token = await io.askHidden("Asana personal access token (input masked): ");
   const me = await new AsanaClient(token).getMe();
   let workspace = me.workspaces[0];
   if (me.workspaces.length > 1) {
@@ -15060,7 +15060,7 @@ program2.command("token").command("set").description("store the token for the hu
     kind = loadWorkflow(ctx.hubDir).tracker.type;
   } catch {
   }
-  const token = await terminalIo().askHidden(`${kind === "jira" ? "Jira" : "Asana"} token (input hidden): `);
+  const token = await terminalIo().askHidden(`${kind === "jira" ? "Jira" : "Asana"} token (input masked): `);
   console.log(`stored in ${setToken(configDir(), token, void 0, user, kind)}`);
 });
 function parseMembers(list) {

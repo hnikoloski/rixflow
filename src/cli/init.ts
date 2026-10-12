@@ -114,12 +114,15 @@ export function terminalIo(): InitIo {
     const r = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY === true });
     const hook = r as unknown as { _writeToOutput?: (s: string) => void };
     const write = typeof hook._writeToOutput === 'function' ? hook._writeToOutput.bind(r) : undefined;
-    if (write) hook._writeToOutput = (str) => { if (!muted) write(str); };
+    // While a hidden prompt is active, raw text is never written: redraw the prompt plus one * per
+    // character instead. Newlines (Enter) pass through. This covers typing, backspace, paste and refreshes.
+    const mask = (str: string): string => (/^[\r\n]+$/.test(str) ? str : `\r\x1b[2K${r.getPrompt()}${'*'.repeat(r.line.length)}`);
+    if (write) hook._writeToOutput = (str) => { write(muted ? mask(str) : str); };
     else {
       // Fallback: mute the output stream itself, only while a hidden prompt is active.
       const out = process.stdout;
       const orig = out.write.bind(out) as (...a: unknown[]) => boolean;
-      (out as unknown as { write: (...a: unknown[]) => boolean }).write = (...a) => (muted ? true : orig(...a));
+      (out as unknown as { write: (...a: unknown[]) => boolean }).write = (...a) => (muted && typeof a[0] === 'string' ? orig(mask(a[0]), ...a.slice(1)) : muted ? true : orig(...a));
     }
     r.on('line', (l) => { const w = waiters.shift(); if (w) w(l); else lines.push(l); });
     const end = () => { eof = true; for (const w of waiters.splice(0)) w(''); };
@@ -144,7 +147,6 @@ export function terminalIo(): InitIo {
     } finally {
       muted = false;
     }
-    if (hidden && process.stdin.isTTY) process.stdout.write('\n');
     if (eof && line === '') self.closed = true;
     else r.pause();
     return line.trim();
@@ -244,7 +246,7 @@ async function reinit(io: InitIo, cliPath: string, env: NodeJS.ProcessEnv): Prom
   const defaultRoot = join(homeDir(env), 'projects');
   const projectsRoot = normalizeDir((await io.ask(`Projects folder [${defaultRoot}]: `)) || defaultRoot, env);
 
-  const token = await io.askHidden('Asana personal access token (input hidden): ');
+  const token = await io.askHidden('Asana personal access token (input masked): ');
   const me = await new AsanaClient(token).getMe();
   let workspace = me.workspaces[0];
   if (me.workspaces.length > 1) {
