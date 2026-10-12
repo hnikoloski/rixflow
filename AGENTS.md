@@ -47,6 +47,8 @@ Claude Code plugin for async team workflow (plate, handovers, inbox, shared know
 - `RIXFLOW_DIR` — hub repo location (default `~/.rixflow`, a git repo, never inside a project folder).
 - `RIXFLOW_CONFIG_DIR` — per-machine config (default `~/.config/rixflow`; holds `config.yml`, the Asana or Jira token, pre-commit copy of `hub.cjs`).
 - `RIXFLOW_CHILD=1` — set on hook-spawned child processes; `CLAUDE_PLUGIN_ROOT` — set by Claude Code at runtime.
+- `RIXFLOW_ALLOW_PUBLIC_HUB=1` — lets setup continue with a hub repo anyone can read (with a warning). Without it the wizard refuses a public hub; the session brief warns while the hub is public either way.
+- `config.yml` `jiraUrl` — the Jira base address this machine connected to. `makeSource` and the wizard send the Jira token only when the hub's `workflow.yml` names the same address (normalized by `jiraBaseUrl`).
 
 ## Conventions
 

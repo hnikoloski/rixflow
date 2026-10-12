@@ -92,13 +92,19 @@ It prints the exact `init` command for your machine. Run that command **in your 
 
 ### Join an existing team
 
-Choose "join". The wizard clones the team's hub, asks for your name and projects folder, reads your personal access token for the team's ticket system (Asana, or Jira Cloud or self-hosted) as hidden input, stores it (system keychain, or a `0600` file) and installs the hub's pre-commit check. A team whose setup needs a newer RixFlow tells you to update first.
+Choose "join". The wizard clones the team's hub, asks for your name and projects folder, then connects your own ticket account: a personal access token for Asana, your login email plus an API token for Jira Cloud, or a personal access token for self-hosted Jira. Tokens are read as hidden input and stored in the system keychain, or a `0600` file. The wizard then installs the hub's pre-commit check. A team whose setup needs a newer RixFlow tells you to update first.
+
+This machine remembers the Jira address it connected to and sends your Jira token only there. If the hub's `workflow.yml` later names another address, RixFlow stops using the token and the session brief says so. Run setup and choose "Reconnect my ticket account" if the change is expected.
 
 ### Create a team
 
-Choose "create". The wizard connects your ticket system (Asana, or Jira Cloud or self-hosted), asks for the team's projects and teammates, and maps your tickets to those projects, statuses, sprints and urgency. It then creates the hub and prints what to share with teammates. Push the hub to a private git remote when asked.
+Choose "create". The wizard connects your ticket system (Asana, or Jira Cloud or self-hosted), asks for the team's projects and teammates, and maps your tickets to those projects, statuses, sprints and urgency. It then creates the hub, pushes it to the private git repository you give it (or one it creates with the GitHub CLI), and prints what to share with teammates.
 
 With Asana, the wizard samples projects from the tasks assigned to you. A team project you are not assigned to will not appear as a mapping value until someone redoes the mapping (change menu, "Redo the ticket mapping").
+
+The hub must be private. Setup refuses a hub repository anyone can read, and the session brief warns while the hub is public. Set `RIXFLOW_ALLOW_PUBLIC_HUB=1` to continue anyway, with a warning.
+
+Restricted tickets (Jira tickets with a security level) stay off the hub: the handover keeps only the ID, title and your own notes. Their description and comments go to a private file on your machine.
 
 ### Change the setup
 
