@@ -15032,7 +15032,8 @@ function readCache(ctx, scope2) {
     const path = (0, import_node_path24.join)(ctx.configDir, CACHE_FILE);
     if (!(0, import_node_fs21.existsSync)(path)) return null;
     const c = JSON.parse((0, import_node_fs21.readFileSync)(path, "utf8"));
-    if (c.user !== ctx.user.name || c.scope !== scope2 || !Array.isArray(c.items)) return null;
+    const cachedScope = c.scope ?? (typeof c.workspace === "string" ? `asana:${c.workspace}` : void 0);
+    if (c.user !== ctx.user.name || cachedScope !== scope2 || !Array.isArray(c.items)) return null;
     return Number.isNaN(Date.parse(c.fetchedAt)) ? null : c;
   } catch {
     return null;

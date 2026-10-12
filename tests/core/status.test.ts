@@ -296,11 +296,29 @@ describe('buildStatus', () => {
     expect(s.problems).toContain('tickets unreachable');
   });
 
-  it('ties the cache to the tracker scope and ignores a v1 cache', async () => {
+  it('serves a 0.2.0 cache (workspace instead of scope) for the same Asana workspace only', async () => {
     const ctx = makeCtx();
     const item = { task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: null, paused: false };
     writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
-      fetchedAt: '2026-10-08T09:59:00.000Z', user: 'hristijan', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41', items: [item],
+      fetchedAt: '2026-10-08T09:59:00.000Z', user: ctx.user.name, workspace: ctx.user.asanaWorkspace, name: 'Sprint 41', items: [item],
+    }));
+    expect((await buildStatus(opts(), deps(ctx))).sprint).toMatchObject({ name: 'Sprint 41', items: [item] });
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-08T09:59:00.000Z', user: ctx.user.name, workspace: '999', name: 'Sprint 41', items: [item],
+    }));
+    expect((await buildStatus(opts(), deps(ctx))).sprint).toBeNull();
+    const jira = { ...LEGACY_WORKFLOW, legacy: false, tracker: { type: 'jira' as const, url: 'https://jira.example.com', flavor: 'cloud' as const, projects: ['WEB'] } };
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-08T09:59:00.000Z', user: ctx.user.name, workspace: ctx.user.asanaWorkspace, name: 'Sprint 41', items: [item],
+    }));
+    expect((await buildStatus(opts(), deps(ctx, { workflow: () => jira }))).sprint).toBeNull();
+  });
+
+  it('ties the cache to the tracker scope and user', async () => {
+    const ctx = makeCtx();
+    const item = { task: '111', title: 'Banner', sites: ['AC'], status: 'TODO', due: null, paused: false };
+    writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({
+      fetchedAt: '2026-10-08T09:59:00.000Z', user: 'ana', workspace: ctx.user.asanaWorkspace, name: 'Sprint 41', items: [item],
     }));
     expect((await buildStatus(opts(), deps(ctx))).sprint).toBeNull();
     writeFileSync(join(ctx.configDir, 'status-cache.json'), JSON.stringify({

@@ -74,8 +74,10 @@ function readCache(ctx: Ctx, scope: string): TicketCache | null {
   try {
     const path = join(ctx.configDir, CACHE_FILE);
     if (!existsSync(path)) return null;
-    const c = JSON.parse(readFileSync(path, 'utf8')) as TicketCache;
-    if (c.user !== ctx.user.name || c.scope !== scope || !Array.isArray(c.items)) return null;
+    const c = JSON.parse(readFileSync(path, 'utf8')) as TicketCache & { workspace?: unknown };
+    // A 0.2.0 cache has the Asana workspace gid instead of a scope.
+    const cachedScope = c.scope ?? (typeof c.workspace === 'string' ? `asana:${c.workspace}` : undefined);
+    if (c.user !== ctx.user.name || cachedScope !== scope || !Array.isArray(c.items)) return null;
     return Number.isNaN(Date.parse(c.fetchedAt)) ? null : c;
   } catch {
     return null;
