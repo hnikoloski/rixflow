@@ -4,18 +4,13 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { AsanaClient } from '../core/asana';
-import { configDir as getConfigDir, homeDir, hubDir as getHubDir, normalizeDir, saveUserConfig } from '../core/config';
+import { configDir as getConfigDir, loadCtx } from '../core/config';
 import { hubCommand } from '../core/command';
-import { Git } from '../core/git';
-import { describeSync, persistHub } from '../core/runtime';
-import { mergeHubGitignore } from '../core/template';
-import { loadTeam } from '../core/team';
-import { setToken } from '../core/token';
 import { HubError } from '../core/types';
 import type { WizardDeps } from './wizard/connect';
 import { runCreate } from './wizard/create';
 import { runJoin } from './wizard/join';
+import { runMenu } from './wizard/menu';
 import { loadProgress } from './wizard/progress';
 import { choose } from './wizard/prompts';
 
@@ -205,7 +200,7 @@ export async function withAccessHint(io: InitIo, work: () => Promise<unknown>): 
 }
 
 // Consent first. A machine that is not set up yet (no config.yml, or an unfinished wizard) gets
-// "join or create"; an already set-up machine keeps the original init.
+// "join or create"; an already set-up machine gets the menu (change team setup, reconnect, start over).
 export async function runInit(
   io: InitIo, cliPath: string, env: NodeJS.ProcessEnv = process.env, deps: Omit<WizardDeps, 'cliPath'> = {},
 ): Promise<void> {
@@ -214,58 +209,12 @@ export async function runInit(
   io.log('Everything you save to the team hub (notes, session summaries, checkpoints) is visible to the whole team.');
   if ((await io.ask('Type "yes" to continue: ')).toLowerCase() !== 'yes') throw new HubError('ABORTED', 'init cancelled');
 
+  const all: WizardDeps = { ...deps, cliPath };
   const progress = loadProgress(configDir);
-  if (!progress && existsSync(join(configDir, 'config.yml'))) return reinit(io, cliPath, env);
+  if (!progress && existsSync(join(configDir, 'config.yml'))) return runMenu(io, all, loadCtx(env), env);
   const flow = progress?.flow ?? await choose(io, 'Join an existing team, or create a new one?', [
     { value: 'join', label: 'Join an existing team' },
     { value: 'create', label: 'Create a new team' },
   ]);
-  const all: WizardDeps = { ...deps, cliPath };
   return flow === 'join' ? runJoin(io, all, env) : runCreate(io, all, env);
-}
-
-// The original init, for a machine that is already set up. Task 12 puts a menu in front of it.
-async function reinit(io: InitIo, cliPath: string, env: NodeJS.ProcessEnv): Promise<void> {
-  const configDir = getConfigDir(env);
-  const hubDir = getHubDir(env);
-
-  if (!existsSync(join(hubDir, '.git'))) {
-    const url = await io.ask('Hub git URL (e.g. git@github.com:org/rixflow-hub.git): ');
-    // The only git call allowed to prompt: init runs in a terminal the user is watching.
-    await withAccessHint(io, () => new Git(homeDir(env), env, { interactive: true }).run(['clone', '-q', '--', url, hubDir]));
-  } else {
-    await withAccessHint(io, () => new Git(hubDir, env).run(['pull', '-q', '--rebase']));
-  }
-
-  const team = loadTeam(hubDir);
-  io.log(`Team: ${team.map((m) => `${m.name} (${m.role})`).join(', ')}`);
-  const name = await io.ask('Your name (as listed above): ');
-  const member = team.find((m) => m.name === name);
-  if (!member) throw new HubError('UNKNOWN_MEMBER', `${name} is not in config/team.yml; add them first`);
-
-  const defaultRoot = join(homeDir(env), 'projects');
-  const projectsRoot = normalizeDir((await io.ask(`Projects folder [${defaultRoot}]: `)) || defaultRoot, env);
-
-  const token = await io.askHidden('Asana personal access token (input masked): ');
-  const me = await new AsanaClient(token).getMe();
-  let workspace = me.workspaces[0];
-  if (me.workspaces.length > 1) {
-    me.workspaces.forEach((w, i) => io.log(`${i + 1}. ${w.name}`));
-    workspace = me.workspaces[Number(await io.ask('Workspace number: ')) - 1];
-  }
-  if (!workspace) throw new HubError('NO_WORKSPACE', 'no Asana workspace selected');
-  io.log(`Asana token stored in ${setToken(configDir, token, undefined, name)}.`);
-
-  saveUserConfig(configDir, {
-    name, role: member.role, projectsRoot, asanaWorkspace: workspace.gid, siteFolders: {}, taskSites: {},
-  });
-
-  for (const m of installPreCommit(hubDir, configDir, cliPath)) io.log(m);
-  // Hubs bootstrapped before the .gitignore existed get it now, committed as this user.
-  if (mergeHubGitignore(hubDir)) {
-    const res = await persistHub(hubDir, name, `chore: ignore editor files in the hub (${name})`, {}, env);
-    io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
-  }
-  await applyClaudeSettings(io, join(homeDir(env), '.claude', 'settings.json'), hubDir);
-  io.log(`Done. Hub: ${hubDir}. Config: ${configDir}.`);
 }

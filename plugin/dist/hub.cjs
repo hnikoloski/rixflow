@@ -10786,7 +10786,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli/main.ts
-var import_node_path24 = require("node:path");
+var import_node_path25 = require("node:path");
 
 // node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
@@ -10953,11 +10953,11 @@ function parseDoc(text2) {
   return { data, body: text2.slice(match[0].length) };
 }
 function stringifyDoc(data, body) {
-  const clean5 = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== void 0));
+  const clean6 = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== void 0));
   const text2 = body.endsWith("\n") ? body : `${body}
 `;
   return `---
-${import_yaml2.default.stringify(clean5).trimEnd()}
+${import_yaml2.default.stringify(clean6).trimEnd()}
 ---
 ${text2}`;
 }
@@ -11032,8 +11032,8 @@ function writeGuarded(path, content, opts = {}) {
   }
 }
 function writeDoc(path, data, body, opts = {}) {
-  const clean5 = scrubDeep(data);
-  writeGuarded(path, stringifyDoc(clean5, scrub(body)), opts);
+  const clean6 = scrubDeep(data);
+  writeGuarded(path, stringifyDoc(clean6, scrub(body)), opts);
 }
 function readDoc(path) {
   return parseDoc((0, import_node_fs2.readFileSync)(path, "utf8"));
@@ -11144,6 +11144,9 @@ async function commitAll(git, message, paths) {
   if (!staged.trim()) return false;
   await git.run(["commit", "-q", "-m", message, "--", ...changed]);
   return true;
+}
+async function commitConfig(git, message) {
+  return commitAll(git, message, ["config"]);
 }
 var SYNC_STATUSES = ["ok", "offline", "rejected", "blocked", "locked"];
 var NO_REMOTE_DETAIL = "no remote configured";
@@ -11305,16 +11308,27 @@ function loadSites(hubDir2) {
       fail(file2, `invalid site code: ${code}`);
     }
     if (!isMapping(def)) fail(file2, `site ${code} must be a mapping`);
-    const { folder, aliases } = def;
+    const { name, folder, aliases } = def;
+    if (name !== void 0 && name !== null && typeof name !== "string") fail(file2, `site ${code}: name must be a string`);
     if (typeof folder !== "string" || !FOLDER.test(folder) || folder.includes("..")) {
       fail(file2, `site ${code}: invalid folder`);
     }
     if (aliases !== void 0 && (!Array.isArray(aliases) || !aliases.every((a) => typeof a === "string"))) {
       fail(file2, `site ${code}: aliases must be a list of strings`);
     }
-    out[code] = aliases === void 0 ? { folder } : { folder, aliases };
+    out[code] = {
+      ...typeof name === "string" && name.trim() ? { name: name.trim() } : {},
+      folder,
+      ...aliases === void 0 ? {} : { aliases }
+    };
   }
   return out;
+}
+function saveTeam(hubDir2, members) {
+  writeGuarded((0, import_node_path5.join)(hubDir2, "config", "team.yml"), scrub(import_yaml3.default.stringify({ members })));
+}
+function saveSites(hubDir2, sites) {
+  writeGuarded((0, import_node_path5.join)(hubDir2, "config", "sites.yml"), scrub(import_yaml3.default.stringify({ sites })));
 }
 
 // src/core/messages.ts
@@ -12200,8 +12214,8 @@ var JiraClient = class {
       throw new HubError("JIRA_HTTP", `Jira returned an unreadable response for ${path}`);
     }
   }
-  #scopeJql(scope) {
-    return scope.length ? `project in (${scope.map((k) => this.#projectKey(k)).join(", ")})` : "";
+  #scopeJql(scope2) {
+    return scope2.length ? `project in (${scope2.map((k) => this.#projectKey(k)).join(", ")})` : "";
   }
   normalizeId(raw) {
     let id;
@@ -12333,8 +12347,8 @@ var JiraClient = class {
     });
   }
   async myTickets() {
-    const scope = this.#scopeJql(this.#projects);
-    const jql = "assignee = currentUser() AND statusCategory != Done" + (scope ? ` AND ${scope}` : "");
+    const scope2 = this.#scopeJql(this.#projects);
+    const jql = "assignee = currentUser() AND statusCategory != Done" + (scope2 ? ` AND ${scope2}` : "");
     const issues = await this.#search(jql, 1e3);
     const meta = await this.#fieldMeta();
     return issues.map((i) => this.#toTicket(i, meta));
@@ -12374,16 +12388,16 @@ var JiraClient = class {
       return key ? [{ id: key, name: str(o.name) ?? key }] : [];
     });
   }
-  async sample(scope, limit) {
-    if (scope.length === 0) return [];
+  async sample(scope2, limit) {
+    if (scope2.length === 0) return [];
     const max = clampLimit(limit);
-    const issues = await this.#search(`${this.#scopeJql(scope)} ORDER BY updated DESC`, max);
+    const issues = await this.#search(`${this.#scopeJql(scope2)} ORDER BY updated DESC`, max);
     const meta = await this.#fieldMeta();
     return issues.map((i) => this.#toTicket(i, meta));
   }
-  async statuses(scope) {
+  async statuses(scope2) {
     const out = /* @__PURE__ */ new Set();
-    for (const key of scope) {
+    for (const key of scope2) {
       const res = await this.#get(`${this.#api}/project/${this.#projectKey(key)}/statuses`);
       for (const type of Array.isArray(res) ? res : []) {
         const list = obj2(type).statuses;
@@ -12399,9 +12413,9 @@ var JiraClient = class {
     const res = await this.#get(`${this.#api}/priority`);
     return (Array.isArray(res) ? res : []).map(named).filter((n) => !!n);
   }
-  async boards(scope) {
+  async boards(scope2) {
     const out = [];
-    for (const key of scope) {
+    for (const key of scope2) {
       const res = obj2(await this.#get("/rest/agile/1.0/board", { projectKeyOrId: this.#projectKey(key) }));
       for (const b of Array.isArray(res.values) ? res.values : []) {
         if (typeof b.id === "number" && str(b.name) && !out.some((o) => o.id === b.id)) out.push({ id: b.id, name: b.name });
@@ -12468,6 +12482,16 @@ function setToken(configDir2, token, exec = defaultExec, user, kind = "asana") {
   (0, import_node_fs10.writeFileSync)(file2, token, { mode: 384, flag: "wx" });
   return "file";
 }
+function deleteToken(configDir2, exec = defaultExec, user, kind = "asana") {
+  const account = accountFor(kind, user);
+  try {
+    if (process.platform === "darwin") exec("security", ["delete-generic-password", "-s", "rixflow", "-a", account]);
+    else exec("secret-tool", ["clear", "service", "rixflow", "account", account]);
+  } catch {
+  }
+  (0, import_node_fs10.rmSync)(tokenFile(configDir2, kind), { force: true });
+}
+var tokenEnvVar = (kind) => ENV_VAR[kind];
 
 // src/core/runtime.ts
 function makeSource(ctx, env = process.env, wf = loadWorkflow(ctx.hubDir)) {
@@ -12497,6 +12521,15 @@ function errorDetail(e) {
   return detailLine(e instanceof Error ? e.message : String(e));
 }
 async function persistHub(hubDir2, user, message, opts = {}, env = process.env) {
+  return commitAndSync(hubDir2, user, opts, env, async (git) => {
+    mergeHubGitignore(hubDir2);
+    await commitAll(git, message, ownedPaths(user));
+  });
+}
+async function persistConfig(ctx, message, opts = {}, env = process.env) {
+  return commitAndSync(ctx.hubDir, ctx.user.name, opts, env, (git) => commitConfig(git, message));
+}
+async function commitAndSync(hubDir2, user, opts, env, commit) {
   if (!(0, import_node_fs11.existsSync)((0, import_node_path12.join)(hubDir2, ".git"))) return { status: "blocked", detail: "hub is not a git repo", pending: 0, conflicts: [] };
   let release;
   try {
@@ -12507,8 +12540,7 @@ async function persistHub(hubDir2, user, message, opts = {}, env = process.env) 
   if (!release) return { ...LOCKED };
   const git = new Git(hubDir2, env);
   try {
-    mergeHubGitignore(hubDir2);
-    await commitAll(git, message, ownedPaths(user));
+    await commit(git);
     return await sync(git, user, { sleep: opts.sleep, holdsLock: true });
   } catch (e) {
     const pending = await pendingCount(git).catch(() => 0);
@@ -13178,8 +13210,8 @@ function detachedSync(cliPath2, env = process.env, spawnFn = import_node_child_p
 
 // src/cli/init.ts
 var import_node_child_process6 = require("node:child_process");
-var import_node_fs19 = require("node:fs");
-var import_node_path22 = require("node:path");
+var import_node_fs20 = require("node:fs");
+var import_node_path23 = require("node:path");
 var import_node_readline = require("node:readline");
 
 // src/cli/wizard/create.ts
@@ -13524,7 +13556,7 @@ var makeJira = (deps, url, auth, projects) => (deps.makeJira ?? ((u, a, p) => ne
 function asanaFrom(client, wf, workspace) {
   return asanaSource(client, { workspace, statusField: wf.status.field ?? void 0, priorityField: wf.urgent.field ?? void 0 });
 }
-var BAD_URL = `The team's Jira address is not a valid https:// address. Ask a teammate to fix it: they run setup and choose "change team setup".`;
+var BAD_URL = `The team's Jira address is not a valid https:// address. Ask whoever set up the team to correct the address (tracker url) in the hub's config/workflow.yml.`;
 var isCode = (e, suffix) => e instanceof HubError && e.code.endsWith(suffix);
 function explain(e, wf) {
   const jira = wf.tracker.type === "jira" ? wf.tracker : null;
@@ -13611,8 +13643,8 @@ function scopeLabel(wf) {
   return "your Asana workspace";
 }
 async function previewTickets(io, source, wf, now, opts) {
-  const scope = wf.tracker.type === "jira" ? wf.tracker.projects : [];
-  const all = opts.mine ? await source.myTickets() : await source.sample(scope, PREVIEW_COUNT);
+  const scope2 = wf.tracker.type === "jira" ? wf.tracker.projects : [];
+  const all = opts.mine ? await source.myTickets() : await source.sample(scope2, PREVIEW_COUNT);
   const tickets = all.slice(0, PREVIEW_COUNT);
   if (tickets.length === 0) {
     io.log(`Your account can't see any open tickets in ${scopeLabel(wf)}. Check that you have access to those projects in ${source.label}, then run setup again.`);
@@ -13698,6 +13730,19 @@ async function runSteps(io, configDir2, flow, steps) {
     else if (await confirm(io, `Continue where you stopped (${last})?`, true)) state = prev;
     else clearProgress(configDir2);
   }
+  const answers = await walk(steps, state, (s) => {
+    state = { ...state, ...s, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+    saveProgress(configDir2, state);
+  });
+  clearProgress(configDir2);
+  return answers;
+}
+async function runStepsFrom(steps, answers) {
+  return walk(steps, { done: [], answers }, () => {
+  });
+}
+async function walk(steps, start, save) {
+  let state = { done: start.done, answers: start.answers };
   let i = 0;
   while (i < steps.length) {
     const step = steps[i];
@@ -13713,20 +13758,19 @@ async function runSteps(io, configDir2, flow, steps) {
       state = { ...state, done: state.done.filter((d) => !drop.has(d)) };
       i = t;
     } else {
-      state = { ...state, done: [...state.done, step.id], answers: { ...state.answers, ...out }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      state = { done: [...state.done, step.id], answers: { ...state.answers, ...out } };
       i++;
     }
-    saveProgress(configDir2, state);
+    save(state);
   }
-  clearProgress(configDir2);
   return state.answers;
 }
 
 // src/cli/wizard/join.ts
-var NOT_ON_TEAM = `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "change team setup"), then run setup again.`;
+var NOT_ON_TEAM = `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "Add a teammate"), then run setup again.`;
 var PUBLIC_HUB = "This hub repository is public: anyone on the internet can read it. Make the repository private, or use a private one, then run setup again.";
 var PUBLIC_OVERRIDE = "WARNING: this hub repository is public, so anyone can read what your team saves. Continuing only because RIXFLOW_ALLOW_PUBLIC_HUB=1 is set.";
-var MAPPING_HINT = 'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "change team setup".';
+var MAPPING_HINT = 'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "Redo the ticket mapping".';
 var NOT_LISTED = "-";
 function withoutLogin(url) {
   try {
@@ -13894,6 +13938,7 @@ var SITE2 = /^[A-Z0-9]{1,10}$/;
 var MAPPING_STEPS = ["project-source", "project-values", "statuses", "sprints", "urgent"];
 var clean3 = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
 var pairs = (v) => Array.isArray(v) ? v : [];
+var scope = (a) => a.projects ?? [];
 var isJira = (a) => a.tracker?.type === "jira";
 function trackerOf(a) {
   const t = a.tracker;
@@ -13949,6 +13994,165 @@ function previewTable(rows) {
   const widths = cells[0].map((_, i) => Math.max(...cells.map((c) => c[i].length)));
   return cells.map((c) => `  ${c.map((x, i) => x.padEnd(widths[i])).join("  ").trimEnd()}`).join("\n");
 }
+function mappingSteps(io, h) {
+  return [
+    {
+      id: "project-source",
+      async run(a) {
+        const options = projectOptions(await h.samples(a), isJira(a) ? "jira" : "asana");
+        if (options.length === 0) {
+          throw new HubError(
+            "NO_PROJECT_VALUES",
+            "None of the tickets RixFlow looked at names a project (in a field, component, label or project). Add one to your tickets, then run setup again."
+          );
+        }
+        const current = options.findIndex((o) => o.from === a.projectFrom && o.field === (a.projectField ?? null));
+        const i = await choose(
+          io,
+          "How does a ticket say which project it belongs to?",
+          options.map((o, n) => ({ value: String(n), label: `${o.label} (e.g. ${o.examples.map(clean3).join(", ")})` })),
+          current >= 0 ? String(current) : void 0
+        );
+        const picked = options[Number(i)];
+        return { projectFrom: picked.from, projectField: picked.field };
+      }
+    },
+    {
+      id: "project-values",
+      async run(a) {
+        const values = distinctValues(await h.samples(a), a.projectFrom, a.projectField ?? null);
+        const before = new Map(pairs(a.projectValues));
+        io.log("Each project gets a short code (capital letters and digits, e.g. AC). Press Enter to keep the suggestion, or type - to leave a value out.");
+        const taken = /* @__PURE__ */ new Set();
+        const out = [];
+        for (const v of values) {
+          const suggestion = before.get(v) ?? suggestCode(v, taken);
+          const code = (await askValid(
+            io,
+            `Project code for "${clean3(v)}":`,
+            (s) => s === "-" || SITE2.test(s.toUpperCase()) ? null : "Please use 1 to 10 capital letters or digits (or - to leave it out).",
+            suggestion
+          )).toUpperCase();
+          if (code === "-") continue;
+          taken.add(code);
+          out.push([v, code]);
+        }
+        if (out.length === 0) io.log('No value has a code, so every ticket will show as "no project" until the mapping is redone.');
+        return { projectValues: out };
+      }
+    },
+    {
+      id: "statuses",
+      async run(a) {
+        const src = await h.source(a);
+        const seen = /* @__PURE__ */ new Set();
+        const names = [];
+        for (const s of [...await src.statuses(scope(a)), ...(await h.samples(a)).map((t) => t.status)]) {
+          if (s && !seen.has(s.toLowerCase())) {
+            seen.add(s.toLowerCase());
+            names.push(s);
+          }
+        }
+        if (names.length === 0) {
+          io.log(isJira(a) ? "RixFlow found no statuses in these projects, so tickets will show without a status." : 'No ticket has a "Status" field value, so tickets will show without a status.');
+          return { statusBuckets: [] };
+        }
+        const before = new Map(pairs(a.statusBuckets).map(([n, b]) => [n.toLowerCase(), b]));
+        io.log("Place each status in one of RixFlow's buckets. Press Enter to keep the suggestion.");
+        const out = [];
+        for (const s of names) {
+          const fallback = before.get(s.toLowerCase()) ?? guessBucket(s) ?? void 0;
+          out.push([s, await choose(io, `Status "${clean3(s)}" means:`, BUCKETS3.map((b) => ({ value: b, label: BUCKET_LABEL[b] })), fallback)]);
+        }
+        return { statusBuckets: out };
+      }
+    },
+    {
+      id: "sprints",
+      async run(a) {
+        const src = await h.source(a);
+        if (isJira(a)) {
+          const boards = await src.boards(scope(a));
+          if (boards.length === 0) {
+            io.log("No Jira board was found for these projects, so sprints are off.");
+            return { sprints: { mode: "none" } };
+          }
+          const prev = a.sprints;
+          const pick = await choose(io, "Does the team work in sprints?", [
+            { value: "none", label: "No sprints" },
+            ...boards.map((b) => ({ value: String(b.id), label: `Sprints of board "${clean3(b.name)}" (board ${b.id})` }))
+          ], prev ? prev.mode === "jira-sprints" ? String(prev.board) : "none" : void 0);
+          return { sprints: pick === "none" ? { mode: "none" } : { mode: "jira-sprints", board: Number(pick) } };
+        }
+        const today = h.now();
+        const sections2 = [...new Set((await h.samples(a)).flatMap((t) => t.sections))];
+        const sprintish = sections2.filter((n) => parseSprintSection(n, today.getUTCFullYear()) !== null);
+        if (sprintish.length === 0) {
+          io.log('No section name looks like a sprint (RixFlow reads names like "Sprint 41 | 5.10 - 9.10"), so sprints are off.');
+          return { sprints: { mode: "none" } };
+        }
+        const current = sprintish.find((n) => isCurrentSprint(n, today));
+        io.log(`Sections that look like sprints: ${sprintish.map(clean3).join(", ")}.
+Current sprint today: ${current ? clean3(current) : "none of them"}.`);
+        const use = await confirm(io, "Use these sections as sprints?", true);
+        return { sprints: use ? { mode: "asana-sections" } : { mode: "none" } };
+      }
+    },
+    {
+      id: "urgent",
+      async run(a) {
+        const src = await h.source(a);
+        const prios = [.../* @__PURE__ */ new Set([...await src.priorities(), ...(await h.samples(a)).flatMap((t) => t.priority ? [t.priority] : [])])];
+        if (prios.length === 0) {
+          io.log("No priority values were found, so no ticket will be marked urgent.");
+          return { urgentValues: [] };
+        }
+        const prev = a.urgentValues?.map((v) => v.toLowerCase());
+        const picks = await chooseMany(
+          io,
+          "Which priorities count as urgent?",
+          prios.map((p) => ({ value: p, label: clean3(p) })),
+          prios.filter((p) => prev ? prev.includes(p.toLowerCase()) : URGENT_GUESS.test(p))
+        );
+        return { urgentValues: picks };
+      }
+    },
+    {
+      id: "preview",
+      async run(a) {
+        const rows = previewRows((await h.samples(a)).slice(0, PREVIEW_COUNT2), workflowOf2(a), h.now());
+        io.log(`Some tickets as RixFlow will see them:
+${previewTable(rows)}`);
+        const labels = {
+          "project-source": "Go back: how a ticket names its project",
+          "project-values": "Go back: project codes",
+          statuses: "Go back: statuses",
+          sprints: "Go back: sprints",
+          urgent: "Go back: urgent priorities"
+        };
+        const pick = await choose(io, "Is this right?", [
+          { value: "accept", label: "Yes, keep this mapping" },
+          ...MAPPING_STEPS.map((id) => ({ value: id, label: labels[id] }))
+        ]);
+        return pick === "accept" ? {} : { goto: pick };
+      }
+    }
+  ];
+}
+function mappingAnswers(wf) {
+  const t = wf.tracker;
+  const statusBuckets = [];
+  for (const b of BUCKETS3) for (const name of wf.status[b]) statusBuckets.push([name, b]);
+  return {
+    ...t.type === "jira" ? { tracker: { type: "jira", url: t.url, flavor: t.flavor }, projects: t.projects } : { tracker: { type: "asana" }, workspace: t.workspace },
+    projectFrom: wf.project.from,
+    projectField: wf.project.field,
+    projectValues: wf.project.values === "codes" ? [] : Object.entries(wf.project.values),
+    statusBuckets,
+    sprints: wf.sprints,
+    urgentValues: wf.urgent.values
+  };
+}
 var REPO_HINT = "For an ssh URL, load your key into ssh-agent (ssh-add); for an https URL, set up a git credential helper.";
 async function runCreate(io, deps, env = process.env) {
   const configDir2 = configDir(env);
@@ -13991,7 +14195,6 @@ async function runCreate(io, deps, env = process.env) {
     io.log("Your ticket login was not found on this machine; please sign in again.");
     return (await doConnect(a)).source;
   };
-  const scope = (a) => a.projects ?? [];
   const samples = async (a) => {
     if (cached) return cached;
     const got = await (await source(a)).sample(scope(a), SAMPLE_COUNT);
@@ -14053,145 +14256,7 @@ async function runCreate(io, deps, env = process.env) {
         return { projects };
       }
     },
-    {
-      id: "project-source",
-      async run(a) {
-        const options = projectOptions(await samples(a), isJira(a) ? "jira" : "asana");
-        if (options.length === 0) {
-          throw new HubError(
-            "NO_PROJECT_VALUES",
-            "None of the tickets RixFlow looked at names a project (in a field, component, label or project). Add one to your tickets, then run setup again."
-          );
-        }
-        const i = await choose(
-          io,
-          "How does a ticket say which project it belongs to?",
-          options.map((o, n) => ({ value: String(n), label: `${o.label} (e.g. ${o.examples.map(clean3).join(", ")})` }))
-        );
-        const picked = options[Number(i)];
-        return { projectFrom: picked.from, projectField: picked.field };
-      }
-    },
-    {
-      id: "project-values",
-      async run(a) {
-        const values = distinctValues(await samples(a), a.projectFrom, a.projectField ?? null);
-        const before = new Map(pairs(a.projectValues));
-        io.log("Each project gets a short code (capital letters and digits, e.g. AC). Press Enter to keep the suggestion, or type - to leave a value out.");
-        const taken = /* @__PURE__ */ new Set();
-        const out = [];
-        for (const v of values) {
-          const suggestion = before.get(v) ?? suggestCode(v, taken);
-          const code = (await askValid(
-            io,
-            `Project code for "${clean3(v)}":`,
-            (s) => s === "-" || SITE2.test(s.toUpperCase()) ? null : "Please use 1 to 10 capital letters or digits (or - to leave it out).",
-            suggestion
-          )).toUpperCase();
-          if (code === "-") continue;
-          taken.add(code);
-          out.push([v, code]);
-        }
-        if (out.length === 0) io.log('No value has a code, so every ticket will show as "no project" until the mapping is redone.');
-        return { projectValues: out };
-      }
-    },
-    {
-      id: "statuses",
-      async run(a) {
-        const src = await source(a);
-        const seen = /* @__PURE__ */ new Set();
-        const names = [];
-        for (const s of [...await src.statuses(scope(a)), ...(await samples(a)).map((t) => t.status)]) {
-          if (s && !seen.has(s.toLowerCase())) {
-            seen.add(s.toLowerCase());
-            names.push(s);
-          }
-        }
-        if (names.length === 0) {
-          io.log(isJira(a) ? "RixFlow found no statuses in these projects, so tickets will show without a status." : 'No ticket has a "Status" field value, so tickets will show without a status.');
-          return { statusBuckets: [] };
-        }
-        const before = new Map(pairs(a.statusBuckets));
-        io.log("Place each status in one of RixFlow's buckets. Press Enter to keep the suggestion.");
-        const out = [];
-        for (const s of names) {
-          const fallback = before.get(s) ?? guessBucket(s) ?? void 0;
-          out.push([s, await choose(io, `Status "${clean3(s)}" means:`, BUCKETS3.map((b) => ({ value: b, label: BUCKET_LABEL[b] })), fallback)]);
-        }
-        return { statusBuckets: out };
-      }
-    },
-    {
-      id: "sprints",
-      async run(a) {
-        const src = await source(a);
-        if (isJira(a)) {
-          const boards = await src.boards(scope(a));
-          if (boards.length === 0) {
-            io.log("No Jira board was found for these projects, so sprints are off.");
-            return { sprints: { mode: "none" } };
-          }
-          const prev = a.sprints;
-          const pick = await choose(io, "Does the team work in sprints?", [
-            { value: "none", label: "No sprints" },
-            ...boards.map((b) => ({ value: String(b.id), label: `Sprints of board "${clean3(b.name)}" (board ${b.id})` }))
-          ], prev ? prev.mode === "jira-sprints" ? String(prev.board) : "none" : void 0);
-          return { sprints: pick === "none" ? { mode: "none" } : { mode: "jira-sprints", board: Number(pick) } };
-        }
-        const today = now();
-        const sections2 = [...new Set((await samples(a)).flatMap((t) => t.sections))];
-        const sprintish = sections2.filter((n) => parseSprintSection(n, today.getUTCFullYear()) !== null);
-        if (sprintish.length === 0) {
-          io.log('No section name looks like a sprint (RixFlow reads names like "Sprint 41 | 5.10 - 9.10"), so sprints are off.');
-          return { sprints: { mode: "none" } };
-        }
-        const current = sprintish.find((n) => isCurrentSprint(n, today));
-        io.log(`Sections that look like sprints: ${sprintish.map(clean3).join(", ")}.
-Current sprint today: ${current ? clean3(current) : "none of them"}.`);
-        const use = await confirm(io, "Use these sections as sprints?", true);
-        return { sprints: use ? { mode: "asana-sections" } : { mode: "none" } };
-      }
-    },
-    {
-      id: "urgent",
-      async run(a) {
-        const src = await source(a);
-        const prios = [.../* @__PURE__ */ new Set([...await src.priorities(), ...(await samples(a)).flatMap((t) => t.priority ? [t.priority] : [])])];
-        if (prios.length === 0) {
-          io.log("No priority values were found, so no ticket will be marked urgent.");
-          return { urgentValues: [] };
-        }
-        const prev = a.urgentValues;
-        const picks = await chooseMany(
-          io,
-          "Which priorities count as urgent?",
-          prios.map((p) => ({ value: p, label: clean3(p) })),
-          prev ?? prios.filter((p) => URGENT_GUESS.test(p))
-        );
-        return { urgentValues: picks };
-      }
-    },
-    {
-      id: "preview",
-      async run(a) {
-        const rows = previewRows((await samples(a)).slice(0, PREVIEW_COUNT2), workflowOf2(a), now());
-        io.log(`Some tickets as RixFlow will see them:
-${previewTable(rows)}`);
-        const labels = {
-          "project-source": "Go back: how a ticket names its project",
-          "project-values": "Go back: project codes",
-          statuses: "Go back: statuses",
-          sprints: "Go back: sprints",
-          urgent: "Go back: urgent priorities"
-        };
-        const pick = await choose(io, "Is this right?", [
-          { value: "accept", label: "Yes, keep this mapping" },
-          ...MAPPING_STEPS.map((id) => ({ value: id, label: labels[id] }))
-        ]);
-        return pick === "accept" ? {} : { goto: pick };
-      }
-    },
+    ...mappingSteps(io, { source, samples, now }),
     {
       id: "teammates",
       async run(a) {
@@ -14301,24 +14366,212 @@ ${inviteText(String(a.hubUrl), a.members, String(a.name))}
   io.log(`Done. Hub: ${hubDir2}. Config: ${configDir2}.`);
 }
 
-// src/core/hookcopy.ts
-var import_node_crypto2 = require("node:crypto");
+// src/cli/wizard/menu.ts
 var import_node_fs18 = require("node:fs");
 var import_node_path21 = require("node:path");
+var import_yaml6 = __toESM(require_dist(), 1);
+var ACTIONS = [
+  { value: "add-member", label: "Add a teammate" },
+  { value: "remove-member", label: "Remove a teammate" },
+  { value: "add-project", label: "Add a project" },
+  { value: "change-project", label: "Rename or move a project" },
+  { value: "mapping", label: "Redo the ticket mapping" },
+  { value: "reconnect", label: "Reconnect my ticket account" },
+  { value: "start-over", label: "Start over on this machine" },
+  { value: "exit", label: "Exit" }
+];
+var NO_HUB_ACTIONS = ACTIONS.filter((a) => a.value === "start-over" || a.value === "exit");
+var SITE3 = /^[A-Z0-9]{1,10}$/;
+var SAMPLE_COUNT2 = 50;
+var KINDS = ["asana", "jira"];
+var MACHINE_FILES = ["setup-progress.json", "status-cache.json", "config.yml"];
+var clean4 = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+var validName = (s) => clean4(s).length <= 60 ? null : "Please keep the name under 60 characters.";
+var validFolder = (s) => isSafeFolder(s) ? null : "Please use one folder name: letters, digits, dots, dashes or underscores, no slashes.";
+async function runMenu(io, deps, ctx, env = process.env) {
+  const hub = (0, import_node_fs18.existsSync)((0, import_node_path21.join)(ctx.hubDir, ".git"));
+  io.log(`This machine is set up for ${ctx.user.name}.`);
+  if (!hub) {
+    io.log(`The team hub is not on this machine (${ctx.hubDir}). Choose "Start over on this machine", then run setup again to join the team.`);
+  }
+  const user = ctx.user.name;
+  const refresh = () => persistConfig(ctx, `chore: update team setup (${user})`, {}, env);
+  const save = async (what, done) => {
+    const res = await persistConfig(ctx, `chore: ${what} (${user})`, {}, env);
+    io.log(`${done}: ${describeSync(res)}.`);
+  };
+  const actions = {
+    async "add-member"() {
+      await refresh();
+      const team = loadTeam(ctx.hubDir);
+      const name = await askValid(io, "Teammate's name (lower-case letters, digits and dashes, e.g. sam):", (s) => {
+        try {
+          assertName(s);
+        } catch {
+          return "Please use lower-case letters, digits and dashes, starting with a letter or digit.";
+        }
+        return team.some((m) => m.name === s) ? `${s} is already on the team.` : null;
+      });
+      const role = await choose(io, `${name}'s role:`, [
+        { value: "dev", label: "dev (works on tickets)" },
+        { value: "pm", label: "pm (plans and hands out tickets)" }
+      ]);
+      saveTeam(ctx.hubDir, [...team, { name, role }]);
+      await save(`add teammate ${name}`, `Added ${name} to the team`);
+    },
+    async "remove-member"() {
+      await refresh();
+      const team = loadTeam(ctx.hubDir);
+      const others = team.filter((m) => m.name !== user);
+      if (others.length === 0) {
+        io.log("Nobody else is on the team.");
+        return;
+      }
+      const name = await choose(io, "Who should come off the team list?", others.map((m) => ({ value: m.name, label: `${m.name} (${m.role})` })));
+      if (!await confirm(io, `Take ${name} off the team list? Their notes and messages stay in the hub.`, false)) return;
+      saveTeam(ctx.hubDir, team.filter((m) => m.name !== name));
+      await save(`remove teammate ${name}`, `Took ${name} off the team list`);
+    },
+    async "add-project"() {
+      await refresh();
+      const sites = loadSites(ctx.hubDir);
+      const code = (await askValid(io, "Short code for the project (1 to 10 capital letters or digits, e.g. AC):", (s) => {
+        const c = s.toUpperCase();
+        if (!SITE3.test(c)) return "Please use 1 to 10 capital letters or digits.";
+        return Object.hasOwn(sites, c) ? `${c} is already a project.` : null;
+      })).toUpperCase();
+      const name = clean4(await askValid(io, `Name of project ${code} (optional, e.g. Acme site):`, validName));
+      const folder = await askValid(io, `Folder for project ${code} (inside each person's projects folder):`, validFolder, slug(name) || code.toLowerCase());
+      saveSites(ctx.hubDir, { ...sites, [code]: { ...name ? { name } : {}, folder } });
+      await save(`add project ${code}`, `Added project ${code}`);
+      if (!loadWorkflow(ctx.hubDir).legacy) io.log(`To have tickets show under ${code}, choose "Redo the ticket mapping" and give a ticket value the code ${code}.`);
+    },
+    async "change-project"() {
+      await refresh();
+      const sites = loadSites(ctx.hubDir);
+      const codes = Object.keys(sites);
+      if (codes.length === 0) {
+        io.log('The team has no projects yet. Choose "Add a project" first.');
+        return;
+      }
+      const code = await choose(io, "Which project?", codes.map((c) => ({
+        value: c,
+        label: `${c}${sites[c].name ? ` ${clean4(sites[c].name)}` : ""} (folder ${sites[c].folder})`
+      })));
+      const site = sites[code];
+      io.log(`The short code (${code}) can't change: it's part of saved notes and links.`);
+      const name = clean4(await askValid(io, `Name of project ${code}:`, validName, site.name));
+      const folder = await askValid(io, `Folder for project ${code}:`, validFolder, site.folder);
+      if (name === (site.name ?? "") && folder === site.folder) {
+        io.log("Nothing changed.");
+        return;
+      }
+      const { name: _old, ...rest } = site;
+      saveSites(ctx.hubDir, { ...sites, [code]: { ...name ? { name } : {}, ...rest, folder } });
+      await save(`change project ${code}`, `Saved project ${code}`);
+    },
+    async mapping() {
+      await refresh();
+      if (!(0, import_node_fs18.existsSync)((0, import_node_path21.join)(ctx.hubDir, "config", "workflow.yml"))) {
+        io.log(`Everyone on the team must update to RixFlow ${RIXFLOW_VERSION} first. Older copies will ignore these settings.`);
+        if (!await confirm(io, "Continue?", false)) return;
+      }
+      const current = loadWorkflow(ctx.hubDir);
+      const wf = await redoMapping(io, deps, ctx, current, env);
+      writeWorkflow(ctx.hubDir, wf);
+      await save("redo the ticket mapping", "Saved the ticket mapping");
+    },
+    async reconnect() {
+      const wf = loadWorkflow(ctx.hubDir);
+      const conn = await connect(io, deps, wf, { name: user, configDir: ctx.configDir });
+      updateMachineConfig(ctx.configDir, {
+        ...conn.jiraEmail ? { jiraEmail: conn.jiraEmail } : {},
+        ...conn.asanaWorkspace ? { asanaWorkspace: conn.asanaWorkspace } : {}
+      });
+    }
+  };
+  for (; ; ) {
+    const action = await choose(io, "What would you like to do?", hub ? ACTIONS : NO_HUB_ACTIONS);
+    if (action === "exit") return;
+    if (action === "start-over") {
+      if (await startOver(io, deps, ctx, env)) return;
+      continue;
+    }
+    try {
+      await actions[action]();
+    } catch (e) {
+      if (!(e instanceof HubError) || e.code === "ABORTED") throw e;
+      io.log(e.message);
+    }
+  }
+}
+async function redoMapping(io, deps, ctx, current, env) {
+  const user = { name: ctx.user.name, configDir: ctx.configDir, jiraEmail: ctx.user.jiraEmail, asanaWorkspace: ctx.user.asanaWorkspace };
+  let src;
+  let cached;
+  const source = async () => {
+    if (src) return src;
+    const stored = storedSource(deps, current, user, env);
+    if (stored) src = stored;
+    else {
+      io.log("Your ticket login was not found on this machine; please sign in again.");
+      const conn = await connect(io, deps, current, user);
+      updateMachineConfig(ctx.configDir, {
+        ...conn.jiraEmail ? { jiraEmail: conn.jiraEmail } : {},
+        ...conn.asanaWorkspace ? { asanaWorkspace: conn.asanaWorkspace } : {}
+      });
+      src = conn.source;
+    }
+    return src;
+  };
+  const scope2 = current.tracker.type === "jira" ? current.tracker.projects : [];
+  const samples = async () => {
+    cached ??= await (await source()).sample(scope2, SAMPLE_COUNT2);
+    if (cached.length === 0) {
+      throw new HubError("NO_TICKETS", `RixFlow found no open tickets in ${scopeLabel(current)} to learn from, so the mapping was not changed.`);
+    }
+    return cached;
+  };
+  const now = () => (deps.now ?? (() => /* @__PURE__ */ new Date()))();
+  return workflowOf2(await runStepsFrom(mappingSteps(io, { source, samples, now }), mappingAnswers(current)));
+}
+function updateMachineConfig(configDir2, patch) {
+  if (Object.keys(patch).length === 0) return;
+  const path = (0, import_node_path21.join)(configDir2, "config.yml");
+  const raw = import_yaml6.default.parse((0, import_node_fs18.readFileSync)(path, "utf8"));
+  (0, import_node_fs18.writeFileSync)(path, import_yaml6.default.stringify({ ...isMapping(raw) ? raw : {}, ...patch }));
+}
+async function startOver(io, deps, ctx, env) {
+  io.log("Starting over removes RixFlow's setup from this machine: your settings and your stored ticket logins. The team hub is not changed.");
+  if (!await confirm(io, "Start over on this machine?", false)) return false;
+  for (const kind of KINDS) deleteToken(ctx.configDir, deps.tokenExec, ctx.user.name, kind);
+  for (const f of MACHINE_FILES) (0, import_node_fs18.rmSync)((0, import_node_path21.join)(ctx.configDir, f), { force: true });
+  for (const kind of KINDS) {
+    const v = tokenEnvVar(kind);
+    if (env[v]) io.log(`${v} is set in your environment; RixFlow still uses it until you unset it.`);
+  }
+  io.log("This machine is reset. Run setup again to join or create a team.");
+  return true;
+}
+
+// src/core/hookcopy.ts
+var import_node_crypto2 = require("node:crypto");
+var import_node_fs19 = require("node:fs");
+var import_node_path22 = require("node:path");
 function refreshHookCopy(configDir2, runningCli) {
   try {
     if (!runningCli) return false;
-    const copy = (0, import_node_path21.join)(configDir2, "hub.cjs");
-    if (!(0, import_node_fs18.existsSync)(copy) || (0, import_node_path21.resolve)(copy) === (0, import_node_path21.resolve)(runningCli)) return false;
-    const next = (0, import_node_fs18.readFileSync)(runningCli);
+    const copy = (0, import_node_path22.join)(configDir2, "hub.cjs");
+    if (!(0, import_node_fs19.existsSync)(copy) || (0, import_node_path22.resolve)(copy) === (0, import_node_path22.resolve)(runningCli)) return false;
+    const next = (0, import_node_fs19.readFileSync)(runningCli);
     const digest = (b) => (0, import_node_crypto2.createHash)("sha256").update(b).digest("hex");
-    if (digest(next) === digest((0, import_node_fs18.readFileSync)(copy))) return false;
+    if (digest(next) === digest((0, import_node_fs19.readFileSync)(copy))) return false;
     const tmp = `${copy}.tmp-${process.pid}`;
     try {
-      (0, import_node_fs18.writeFileSync)(tmp, next, { mode: 420 });
-      (0, import_node_fs18.renameSync)(tmp, copy);
+      (0, import_node_fs19.writeFileSync)(tmp, next, { mode: 420 });
+      (0, import_node_fs19.renameSync)(tmp, copy);
     } finally {
-      (0, import_node_fs18.rmSync)(tmp, { force: true });
+      (0, import_node_fs19.rmSync)(tmp, { force: true });
     }
     return true;
   } catch {
@@ -14365,24 +14618,24 @@ exec node ${shellQuote(cliPath2)} verify-commit
 }
 function installPreCommit(hubDir2, configDir2, cliPath2) {
   const messages = [];
-  (0, import_node_fs19.mkdirSync)(configDir2, { recursive: true });
-  const cliCopy = (0, import_node_path22.join)(configDir2, "hub.cjs");
-  (0, import_node_fs19.copyFileSync)(cliPath2, cliCopy);
-  const hooksDir = (0, import_node_path22.join)(hubDir2, ".git", "hooks");
-  (0, import_node_fs19.mkdirSync)(hooksDir, { recursive: true });
-  const hook = (0, import_node_path22.join)(hooksDir, "pre-commit");
-  if ((0, import_node_fs19.existsSync)(hook) && !(0, import_node_fs19.readFileSync)(hook, "utf8").includes(PRE_COMMIT_MARKER)) {
-    (0, import_node_fs19.copyFileSync)(hook, `${hook}.bak`);
+  (0, import_node_fs20.mkdirSync)(configDir2, { recursive: true });
+  const cliCopy = (0, import_node_path23.join)(configDir2, "hub.cjs");
+  (0, import_node_fs20.copyFileSync)(cliPath2, cliCopy);
+  const hooksDir = (0, import_node_path23.join)(hubDir2, ".git", "hooks");
+  (0, import_node_fs20.mkdirSync)(hooksDir, { recursive: true });
+  const hook = (0, import_node_path23.join)(hooksDir, "pre-commit");
+  if ((0, import_node_fs20.existsSync)(hook) && !(0, import_node_fs20.readFileSync)(hook, "utf8").includes(PRE_COMMIT_MARKER)) {
+    (0, import_node_fs20.copyFileSync)(hook, `${hook}.bak`);
     messages.push(`Existing pre-commit hook backed up to ${hook}.bak and replaced.`);
   }
-  (0, import_node_fs19.writeFileSync)(hook, preCommitScript(cliCopy, configDir2));
-  (0, import_node_fs19.chmodSync)(hook, 493);
+  (0, import_node_fs20.writeFileSync)(hook, preCommitScript(cliCopy, configDir2));
+  (0, import_node_fs20.chmodSync)(hook, 493);
   let hooksPath = "";
   try {
     hooksPath = (0, import_node_child_process6.execFileSync)("git", ["-C", hubDir2, "config", "core.hooksPath"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
   }
-  if (hooksPath && hooksPath !== ".git/hooks" && (0, import_node_path22.resolve)(hubDir2, hooksPath) !== (0, import_node_path22.resolve)(hooksDir)) {
+  if (hooksPath && hooksPath !== ".git/hooks" && (0, import_node_path23.resolve)(hubDir2, hooksPath) !== (0, import_node_path23.resolve)(hooksDir)) {
     messages.push(`WARNING: core.hooksPath is set to "${hooksPath}", so the pre-commit ownership gate is INACTIVE for the hub.`);
   }
   return messages;
@@ -14457,10 +14710,10 @@ function terminalIo() {
 async function applyClaudeSettings(io, linkPath, hubDir2) {
   let settingsPath = linkPath;
   let current = {};
-  if ((0, import_node_fs19.existsSync)(settingsPath)) {
+  if ((0, import_node_fs20.existsSync)(settingsPath)) {
     let parsed;
     try {
-      parsed = JSON.parse((0, import_node_fs19.readFileSync)(settingsPath, "utf8"));
+      parsed = JSON.parse((0, import_node_fs20.readFileSync)(settingsPath, "utf8"));
     } catch {
       throw new HubError("BAD_SETTINGS", `${settingsPath} is not valid JSON; fix it by hand and re-run init`);
     }
@@ -14475,17 +14728,17 @@ ${changes.map((c) => `  - ${c}`).join("\n")}`);
     io.log("Skipped. You will get permission prompts for RixFlow tools.");
     return;
   }
-  (0, import_node_fs19.mkdirSync)((0, import_node_path22.dirname)(settingsPath), { recursive: true });
-  const existed = (0, import_node_fs19.existsSync)(settingsPath);
-  if (existed) settingsPath = (0, import_node_fs19.realpathSync)(settingsPath);
-  if (existed) (0, import_node_fs19.copyFileSync)(settingsPath, `${settingsPath}.bak`);
+  (0, import_node_fs20.mkdirSync)((0, import_node_path23.dirname)(settingsPath), { recursive: true });
+  const existed = (0, import_node_fs20.existsSync)(settingsPath);
+  if (existed) settingsPath = (0, import_node_fs20.realpathSync)(settingsPath);
+  if (existed) (0, import_node_fs20.copyFileSync)(settingsPath, `${settingsPath}.bak`);
   const tmp = `${settingsPath}.tmp-${process.pid}`;
   try {
-    (0, import_node_fs19.writeFileSync)(tmp, `${JSON.stringify(settings, null, 2)}
-`, { mode: existed ? (0, import_node_fs19.statSync)(settingsPath).mode & 511 : 420 });
-    (0, import_node_fs19.renameSync)(tmp, settingsPath);
+    (0, import_node_fs20.writeFileSync)(tmp, `${JSON.stringify(settings, null, 2)}
+`, { mode: existed ? (0, import_node_fs20.statSync)(settingsPath).mode & 511 : 420 });
+    (0, import_node_fs20.renameSync)(tmp, settingsPath);
   } finally {
-    (0, import_node_fs19.rmSync)(tmp, { force: true });
+    (0, import_node_fs20.rmSync)(tmp, { force: true });
   }
   io.log(`Settings updated${existed ? " (backup: settings.json.bak)" : ""}.`);
 }
@@ -14502,65 +14755,24 @@ async function runInit(io, cliPath2, env = process.env, deps = {}) {
   const configDir2 = configDir(env);
   io.log("Everything you save to the team hub (notes, session summaries, checkpoints) is visible to the whole team.");
   if ((await io.ask('Type "yes" to continue: ')).toLowerCase() !== "yes") throw new HubError("ABORTED", "init cancelled");
+  const all = { ...deps, cliPath: cliPath2 };
   const progress = loadProgress(configDir2);
-  if (!progress && (0, import_node_fs19.existsSync)((0, import_node_path22.join)(configDir2, "config.yml"))) return reinit(io, cliPath2, env);
+  if (!progress && (0, import_node_fs20.existsSync)((0, import_node_path23.join)(configDir2, "config.yml"))) return runMenu(io, all, loadCtx(env), env);
   const flow = progress?.flow ?? await choose(io, "Join an existing team, or create a new one?", [
     { value: "join", label: "Join an existing team" },
     { value: "create", label: "Create a new team" }
   ]);
-  const all = { ...deps, cliPath: cliPath2 };
   return flow === "join" ? runJoin(io, all, env) : runCreate(io, all, env);
-}
-async function reinit(io, cliPath2, env) {
-  const configDir2 = configDir(env);
-  const hubDir2 = hubDir(env);
-  if (!(0, import_node_fs19.existsSync)((0, import_node_path22.join)(hubDir2, ".git"))) {
-    const url = await io.ask("Hub git URL (e.g. git@github.com:org/rixflow-hub.git): ");
-    await withAccessHint(io, () => new Git(homeDir(env), env, { interactive: true }).run(["clone", "-q", "--", url, hubDir2]));
-  } else {
-    await withAccessHint(io, () => new Git(hubDir2, env).run(["pull", "-q", "--rebase"]));
-  }
-  const team = loadTeam(hubDir2);
-  io.log(`Team: ${team.map((m) => `${m.name} (${m.role})`).join(", ")}`);
-  const name = await io.ask("Your name (as listed above): ");
-  const member = team.find((m) => m.name === name);
-  if (!member) throw new HubError("UNKNOWN_MEMBER", `${name} is not in config/team.yml; add them first`);
-  const defaultRoot = (0, import_node_path22.join)(homeDir(env), "projects");
-  const projectsRoot = normalizeDir(await io.ask(`Projects folder [${defaultRoot}]: `) || defaultRoot, env);
-  const token = await io.askHidden("Asana personal access token (input masked): ");
-  const me = await new AsanaClient(token).getMe();
-  let workspace = me.workspaces[0];
-  if (me.workspaces.length > 1) {
-    me.workspaces.forEach((w, i) => io.log(`${i + 1}. ${w.name}`));
-    workspace = me.workspaces[Number(await io.ask("Workspace number: ")) - 1];
-  }
-  if (!workspace) throw new HubError("NO_WORKSPACE", "no Asana workspace selected");
-  io.log(`Asana token stored in ${setToken(configDir2, token, void 0, name)}.`);
-  saveUserConfig(configDir2, {
-    name,
-    role: member.role,
-    projectsRoot,
-    asanaWorkspace: workspace.gid,
-    siteFolders: {},
-    taskSites: {}
-  });
-  for (const m of installPreCommit(hubDir2, configDir2, cliPath2)) io.log(m);
-  if (mergeHubGitignore(hubDir2)) {
-    const res = await persistHub(hubDir2, name, `chore: ignore editor files in the hub (${name})`, {}, env);
-    io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
-  }
-  await applyClaudeSettings(io, (0, import_node_path22.join)(homeDir(env), ".claude", "settings.json"), hubDir2);
-  io.log(`Done. Hub: ${hubDir2}. Config: ${configDir2}.`);
 }
 
 // src/core/status.ts
-var import_node_fs20 = require("node:fs");
-var import_node_path23 = require("node:path");
+var import_node_fs21 = require("node:fs");
+var import_node_path24 = require("node:path");
 
 // src/core/plate.ts
 var INBOX_STATUSES = /* @__PURE__ */ new Set(["new", "read"]);
-var clean4 = (text2) => text2.trim().split("\n")[0].slice(0, 80).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ");
-var display = (text2) => clean4(scrub(text2));
+var clean5 = (text2) => text2.trim().split("\n")[0].slice(0, 80).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ");
+var display = (text2) => clean5(scrub(text2));
 var byDue = (a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
 function buildPlate(input) {
   const paused = new Set(input.checkpoints.map((c) => c.task));
@@ -14691,25 +14903,25 @@ var line = (re, text2) => {
   return m ? display(m[1]) : null;
 };
 var titleOf = (h, fallback) => h && line(/^# (.+)$/m, h.brief) || fallback;
-function readCache(ctx, scope) {
+function readCache(ctx, scope2) {
   try {
-    const path = (0, import_node_path23.join)(ctx.configDir, CACHE_FILE);
-    if (!(0, import_node_fs20.existsSync)(path)) return null;
-    const c = JSON.parse((0, import_node_fs20.readFileSync)(path, "utf8"));
-    if (c.user !== ctx.user.name || c.scope !== scope || !Array.isArray(c.items)) return null;
+    const path = (0, import_node_path24.join)(ctx.configDir, CACHE_FILE);
+    if (!(0, import_node_fs21.existsSync)(path)) return null;
+    const c = JSON.parse((0, import_node_fs21.readFileSync)(path, "utf8"));
+    if (c.user !== ctx.user.name || c.scope !== scope2 || !Array.isArray(c.items)) return null;
     return Number.isNaN(Date.parse(c.fetchedAt)) ? null : c;
   } catch {
     return null;
   }
 }
 function writeCache(ctx, cache) {
-  const path = (0, import_node_path23.join)(ctx.configDir, CACHE_FILE);
+  const path = (0, import_node_path24.join)(ctx.configDir, CACHE_FILE);
   const tmp = `${path}.tmp-${process.pid}`;
   try {
-    (0, import_node_fs20.writeFileSync)(tmp, JSON.stringify(cache), { mode: 384 });
-    (0, import_node_fs20.renameSync)(tmp, path);
+    (0, import_node_fs21.writeFileSync)(tmp, JSON.stringify(cache), { mode: 384 });
+    (0, import_node_fs21.renameSync)(tmp, path);
   } catch {
-    (0, import_node_fs20.rmSync)(tmp, { force: true });
+    (0, import_node_fs21.rmSync)(tmp, { force: true });
   }
 }
 var toTask = (i) => ({ task: i.ref, title: i.title, sites: i.sites, status: i.status, due: i.due, paused: i.paused });
@@ -14725,8 +14937,8 @@ async function within(work, ms) {
   }
 }
 async function ticketSection(ctx, wf, opts, deps, problems, deadline) {
-  const scope = cacheScope(ctx, wf);
-  const cached = readCache(ctx, scope);
+  const scope2 = cacheScope(ctx, wf);
+  const cached = readCache(ctx, scope2);
   const now = ctx.now().getTime();
   const age = cached ? now - Date.parse(cached.fetchedAt) : NaN;
   if (cached && !opts.refresh && age >= 0 && age < ASANA_CACHE_TTL_MS) return cached;
@@ -14749,7 +14961,7 @@ async function ticketSection(ctx, wf, opts, deps, problems, deadline) {
     const fresh = {
       fetchedAt: ctx.now().toISOString(),
       user: ctx.user.name,
-      scope,
+      scope: scope2,
       name: plate.sprintName,
       items: [...plate.urgent, ...plate.inProgress, ...plate.sprint].map(toTask)
     };
@@ -14932,7 +15144,7 @@ async function verifyStaged(git, user) {
 }
 
 // src/cli/main.ts
-var cliPath = (0, import_node_path24.resolve)(process.argv[1] ?? "hub.cjs");
+var cliPath = (0, import_node_path25.resolve)(process.argv[1] ?? "hub.cjs");
 var STDIN_TIMEOUT_MS = 3e3;
 function readStdin() {
   if (process.stdin.isTTY) return Promise.resolve("");

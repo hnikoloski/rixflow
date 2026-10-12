@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSync } from 'esbuild';
 import YAML from 'yaml';
+import { getToken } from '../../src/core/token';
 
 // End-to-end: bundles the real entry point and runs it with a temp HOME/config/hub only.
 let root: string;
@@ -131,6 +132,46 @@ describe('hub CLI', () => {
       const last = readFileSync(join(env.RIXFLOW_CONFIG_DIR!, 'summary-errors.log'), 'utf8').trim().split('\n').at(-1)!;
       expect(last).toMatch(/\tw-1\tfail\tclaude run failed\t.*model unavailable/);
       expect(last).not.toContain('u:pw@');
+    });
+  });
+
+  // A PATH without secret-tool / security makes the keychain fail, so the token lands in the 0600 file.
+  describe('token set', () => {
+    const noKeychain = () => { throw new Error('no keychain'); };
+    const machine = (name: string, workflow?: string) => {
+      const base = join(root, name);
+      const e = { ...env, HOME: join(base, 'home'), RIXFLOW_CONFIG_DIR: join(base, 'cfg'), RIXFLOW_DIR: join(base, 'hub') };
+      expect(run(['bootstrap', e.RIXFLOW_DIR, '--members', 'me:dev'], '', e).status).toBe(0);
+      if (workflow) writeFileSync(join(e.RIXFLOW_DIR, 'config', 'workflow.yml'), workflow);
+      mkdirSync(e.RIXFLOW_CONFIG_DIR, { recursive: true });
+      writeFileSync(join(e.RIXFLOW_CONFIG_DIR, 'config.yml'), YAML.stringify({ name: 'me', role: 'dev', projectsRoot: join(base, 'p') }));
+      const emptyPath = join(base, 'nobin');
+      mkdirSync(emptyPath);
+      return { ...e, PATH: emptyPath };
+    };
+
+    it("asks with Jira's wording on a Jira hub and stores the token where getToken finds it", () => {
+      const e = machine('tok-jira', YAML.stringify({
+        requires: '0.2.0', tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB'] },
+        project: { from: 'component', values: { 'Acme site': 'AC' } },
+      }));
+      const r = run(['token', 'set'], 'jira-tok-9\n', e);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('Jira token (input masked): ');
+      expect(r.stdout).not.toContain('Asana');
+      expect(r.stdout).not.toContain('jira-tok-9');
+      expect(r.stdout).toContain('stored in file');
+      expect(getToken(e.RIXFLOW_CONFIG_DIR, {}, noKeychain, 'me', 'jira')).toBe('jira-tok-9');
+      expect(existsSync(join(e.RIXFLOW_CONFIG_DIR, 'asana-token'))).toBe(false);
+    });
+
+    it("asks with Asana's wording on a hub without workflow.yml", () => {
+      const e = machine('tok-asana');
+      const r = run(['token', 'set'], 'asana-tok-9\n', e);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('Asana token (input masked): ');
+      expect(getToken(e.RIXFLOW_CONFIG_DIR, {}, noKeychain, 'me', 'asana')).toBe('asana-tok-9');
+      expect(existsSync(join(e.RIXFLOW_CONFIG_DIR, 'jira-token'))).toBe(false);
     });
   });
 });

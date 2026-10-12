@@ -42,7 +42,7 @@ function asanaFrom(client: AsanaLike, wf: Workflow, workspace: string): TicketSo
 }
 
 export const BAD_URL =
-  `The team's Jira address is not a valid https:// address. Ask a teammate to fix it: they run setup and choose "change team setup".`;
+  `The team's Jira address is not a valid https:// address. Ask whoever set up the team to correct the address (tracker url) in the hub's config/workflow.yml.`;
 
 const isCode = (e: unknown, suffix: string): e is HubError => e instanceof HubError && e.code.endsWith(suffix);
 

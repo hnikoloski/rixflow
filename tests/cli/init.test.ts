@@ -214,15 +214,18 @@ describe('runInit dispatcher', () => {
     await expect(runInit(i, '/x/hub.cjs', envFor(tmp()))).rejects.toMatchObject({ code: 'ABORTED' });
     expect(i.asked).toHaveLength(1);
   });
-  it('keeps the original init on a machine that is already set up', async () => {
+  it('shows the menu on a machine that is already set up (only start over or exit when its hub is gone)', async () => {
     const root = tmp();
     mkdirSync(join(root, 'cfg'));
     writeFileSync(join(root, 'cfg', 'config.yml'), 'name: me\nrole: dev\nprojectsRoot: /p\n');
-    const i = io(['yes', join(root, 'missing.git')]);
-    await expect(runInit(i, '/x/hub.cjs', envFor(root))).rejects.toThrow();
-    expect(i.logs.join('\n')).not.toContain('Join an existing team');
-    expect(i.asked[1]).toMatch(/^Hub git URL/);
-    expect(i.logs).toContain(ACCESS_HINT);
+    const i = io(['yes', '2']);
+    await runInit(i, '/x/hub.cjs', envFor(root));
+    const out = i.logs.join('\n');
+    expect(out).not.toContain('Join an existing team');
+    expect(out).toContain('The team hub is not on this machine');
+    expect(out).toMatch(/1\) Start over on this machine\n {2}2\) Exit/);
+    expect(i.asked.slice(1)).toEqual(['Choose 1-2: ']);
+    expect(existsSync(join(root, 'cfg', 'config.yml'))).toBe(true);
   });
   it('goes straight back into an unfinished join', async () => {
     const root = tmp();

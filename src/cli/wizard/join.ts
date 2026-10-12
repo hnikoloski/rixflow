@@ -16,12 +16,12 @@ import { askValid, choose, confirm } from './prompts';
 export type { WizardDeps } from './connect';
 
 export const NOT_ON_TEAM =
-  `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "change team setup"), then run setup again.`;
+  `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "Add a teammate"), then run setup again.`;
 export const PUBLIC_HUB =
   'This hub repository is public: anyone on the internet can read it. Make the repository private, or use a private one, then run setup again.';
 const PUBLIC_OVERRIDE = 'WARNING: this hub repository is public, so anyone can read what your team saves. Continuing only because RIXFLOW_ALLOW_PUBLIC_HUB=1 is set.';
 const MAPPING_HINT =
-  'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "change team setup".';
+  'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "Redo the ticket mapping".';
 const NOT_LISTED = '-';
 
 // A URL safe to print: any user name / password in a URL-style address is dropped.

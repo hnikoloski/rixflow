@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
+import { writeGuarded } from './hubfs';
+import { scrub } from './scrub';
 import { HubError, assertGid, assertName, assertSiteCode, type Role } from './types';
 
 export interface TeamMember {
@@ -10,6 +12,8 @@ export interface TeamMember {
 }
 
 export interface SiteDef {
+  // Display name; the code (the sites.yml key) never changes.
+  name?: string;
   folder: string;
   aliases?: string[];
 }
@@ -75,14 +79,28 @@ export function loadSites(hubDir: string): Record<string, SiteDef> {
       fail(file, `invalid site code: ${code}`);
     }
     if (!isMapping(def)) fail(file, `site ${code} must be a mapping`);
-    const { folder, aliases } = def;
+    const { name, folder, aliases } = def;
+    if (name !== undefined && name !== null && typeof name !== 'string') fail(file, `site ${code}: name must be a string`);
     if (typeof folder !== 'string' || !FOLDER.test(folder) || folder.includes('..')) {
       fail(file, `site ${code}: invalid folder`);
     }
     if (aliases !== undefined && (!Array.isArray(aliases) || !aliases.every((a) => typeof a === 'string'))) {
       fail(file, `site ${code}: aliases must be a list of strings`);
     }
-    out[code] = aliases === undefined ? { folder } : { folder, aliases: aliases as string[] };
+    out[code] = {
+      ...(typeof name === 'string' && name.trim() ? { name: name.trim() } : {}),
+      folder,
+      ...(aliases === undefined ? {} : { aliases: aliases as string[] }),
+    };
   }
   return out;
+}
+
+// The wizard menu's team changes. Callers validate first; config/ files are rewritten, never deleted.
+export function saveTeam(hubDir: string, members: TeamMember[]): void {
+  writeGuarded(join(hubDir, 'config', 'team.yml'), scrub(YAML.stringify({ members })));
+}
+
+export function saveSites(hubDir: string, sites: Record<string, SiteDef>): void {
+  writeGuarded(join(hubDir, 'config', 'sites.yml'), scrub(YAML.stringify({ sites })));
 }

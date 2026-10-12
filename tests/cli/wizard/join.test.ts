@@ -233,7 +233,7 @@ describe('runJoin', () => {
     const m = machine(h.root, 'me');
     const io = scriptedIo([h.remote, '3']);
     await expect(runJoin(io, deps({}), m.env)).rejects.toThrow(
-      `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "change team setup"), then run setup again.`,
+      `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "Add a teammate"), then run setup again.`,
     );
     expect(io.logs.join('\n')).toMatch(/1\) me \(dev\)\n\s+2\) pm \(pm\)/);
   });

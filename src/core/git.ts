@@ -131,6 +131,11 @@ export async function commitAll(git: Git, message: string, paths: string[]): Pro
   return true;
 }
 
+// Team setup changes from the wizard menu: commits only what changed under config/.
+export async function commitConfig(git: Git, message: string): Promise<boolean> {
+  return commitAll(git, message, ['config']);
+}
+
 // ok: pushed, or nothing was pending. offline: the remote could not be reached (or there is none).
 // rejected: reachable, but every push was refused. blocked: a commit or rebase failed (a hook,
 // unmerged files). locked: another RixFlow process holds the hub lock; the write is saved locally.

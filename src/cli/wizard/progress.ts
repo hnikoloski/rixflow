@@ -75,6 +75,22 @@ export async function runSteps(io: InitIo, configDir: string, flow: Progress['fl
     else if (await confirm(io, `Continue where you stopped (${last})?`, true)) state = prev;
     else clearProgress(configDir);
   }
+  const answers = await walk(steps, state, (s) => {
+    state = { ...state, ...s, updatedAt: new Date().toISOString() };
+    saveProgress(configDir, state);
+  });
+  clearProgress(configDir);
+  return answers;
+}
+
+// The same steps (with "go back"), starting from given answers and saving nothing: the wizard
+// menu's redo of the ticket mapping, which is short and is simply started again if interrupted.
+export async function runStepsFrom(steps: Step[], answers: Answers): Promise<Answers> {
+  return walk(steps, { done: [], answers }, () => {});
+}
+
+async function walk(steps: Step[], start: { done: string[]; answers: Answers }, save: (s: { done: string[]; answers: Answers }) => void): Promise<Answers> {
+  let state = { done: start.done, answers: start.answers };
   let i = 0;
   while (i < steps.length) {
     const step = steps[i];
@@ -87,11 +103,10 @@ export async function runSteps(io: InitIo, configDir: string, flow: Progress['fl
       state = { ...state, done: state.done.filter((d) => !drop.has(d)) };
       i = t;
     } else {
-      state = { ...state, done: [...state.done, step.id], answers: { ...state.answers, ...out }, updatedAt: new Date().toISOString() };
+      state = { done: [...state.done, step.id], answers: { ...state.answers, ...out } };
       i++;
     }
-    saveProgress(configDir, state);
+    save(state);
   }
-  clearProgress(configDir);
   return state.answers;
 }

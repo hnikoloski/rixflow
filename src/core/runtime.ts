@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { AsanaClient } from './asana';
-import { Git, NO_REMOTE_DETAIL, commitAll, detailLine, ownedPaths, pendingCount, sync, type SyncResult } from './git';
+import { Git, NO_REMOTE_DETAIL, commitAll, commitConfig, detailLine, ownedPaths, pendingCount, sync, type SyncResult } from './git';
 import { acquireLock } from './lock';
 import { mergeHubGitignore } from './template';
 import { asanaSource } from './tickets/asana';
@@ -64,6 +64,24 @@ export async function persistHub(
   opts: PersistOptions = {},
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SyncResult> {
+  return commitAndSync(hubDir, user, opts, env, async (git) => {
+    // Old clones get the editor-file ignores without re-running init.
+    mergeHubGitignore(hubDir);
+    await commitAll(git, message, ownedPaths(user));
+  });
+}
+
+// A team setup change from the wizard menu: one commit of config/ only, then the same sync and
+// guarantees as persistHub (lock held throughout, never throws).
+export async function persistConfig(
+  ctx: Ctx, message: string, opts: PersistOptions = {}, env: NodeJS.ProcessEnv = process.env,
+): Promise<SyncResult> {
+  return commitAndSync(ctx.hubDir, ctx.user.name, opts, env, (git) => commitConfig(git, message));
+}
+
+async function commitAndSync(
+  hubDir: string, user: string, opts: PersistOptions, env: NodeJS.ProcessEnv, commit: (git: Git) => Promise<unknown>,
+): Promise<SyncResult> {
   if (!existsSync(join(hubDir, '.git'))) return { status: 'blocked', detail: 'hub is not a git repo', pending: 0, conflicts: [] };
   let release: (() => void) | null;
   try {
@@ -74,9 +92,7 @@ export async function persistHub(
   if (!release) return { ...LOCKED };
   const git = new Git(hubDir, env);
   try {
-    // Old clones get the editor-file ignores without re-running init.
-    mergeHubGitignore(hubDir);
-    await commitAll(git, message, ownedPaths(user));
+    await commit(git);
     return await sync(git, user, { sleep: opts.sleep, holdsLock: true });
   } catch (e) {
     const pending = await pendingCount(git).catch(() => 0);

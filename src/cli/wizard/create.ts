@@ -16,7 +16,7 @@ import { applyClaudeSettings, withAccessHint, type InitIo } from '../init';
 import { connect, scopeLabel, storedSource, type Connection, type WizardDeps } from './connect';
 import { inviteText } from './invite';
 import { askProjectsRoot, refusePublicHub, setUpHubHooks, withoutLogin } from './join';
-import { runSteps } from './progress';
+import { runSteps, type Step } from './progress';
 import { askValid, choose, chooseMany, confirm } from './prompts';
 
 type Answers = Record<string, unknown>;
@@ -32,6 +32,7 @@ const MAPPING_STEPS = ['project-source', 'project-values', 'statuses', 'sprints'
 
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
 const pairs = (v: unknown): Pairs => (Array.isArray(v) ? (v as Pairs) : []);
+const scope = (a: Answers) => (a.projects as string[] | undefined) ?? [];
 const isJira = (a: Answers) => (a.tracker as { type?: string } | undefined)?.type === 'jira';
 
 function trackerOf(a: Answers): Workflow['tracker'] {
@@ -84,7 +85,7 @@ function validMember(line: string, taken: TeamMember[]): string | null {
   return null;
 }
 
-const slug = (v: string) => v.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/\.{2,}/g, '.').replace(/^[^a-z0-9]+|[-.]+$/g, '');
+export const slug = (v: string) => v.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/\.{2,}/g, '.').replace(/^[^a-z0-9]+|[-.]+$/g, '');
 
 function previewTable(rows: ReturnType<typeof previewRows>): string {
   const cells = [
@@ -93,6 +94,164 @@ function previewTable(rows: ReturnType<typeof previewRows>): string {
   ];
   const widths = cells[0].map((_, i) => Math.max(...cells.map((c) => c[i].length)));
   return cells.map((c) => `  ${c.map((x, i) => x.padEnd(widths[i])).join('  ').trimEnd()}`).join('\n');
+}
+
+// Create's steps 3-7 (how a ticket names its project, project codes, statuses, sprints, urgent,
+// preview with "go back"). Each step starts from the answers already given, so the wizard menu
+// reuses them to redo the mapping from the hub's current workflow.
+export interface MappingHelpers {
+  source: (a: Answers) => Promise<Source>;
+  samples: (a: Answers) => Promise<Ticket[]>;
+  now: () => Date;
+}
+
+export function mappingSteps(io: InitIo, h: MappingHelpers): Step[] {
+  return [
+    {
+      id: 'project-source',
+      async run(a) {
+        const options = projectOptions(await h.samples(a), isJira(a) ? 'jira' : 'asana');
+        if (options.length === 0) {
+          throw new HubError('NO_PROJECT_VALUES',
+            'None of the tickets RixFlow looked at names a project (in a field, component, label or project). Add one to your tickets, then run setup again.');
+        }
+        const current = options.findIndex((o) => o.from === a.projectFrom && o.field === (a.projectField ?? null));
+        const i = await choose(io, 'How does a ticket say which project it belongs to?',
+          options.map((o, n) => ({ value: String(n), label: `${o.label} (e.g. ${o.examples.map(clean).join(', ')})` })),
+          current >= 0 ? String(current) : undefined);
+        const picked = options[Number(i)];
+        return { projectFrom: picked.from, projectField: picked.field };
+      },
+    },
+    {
+      id: 'project-values',
+      async run(a) {
+        const values = distinctValues(await h.samples(a), a.projectFrom as Workflow['project']['from'], (a.projectField as string | null) ?? null);
+        const before = new Map(pairs(a.projectValues));
+        io.log('Each project gets a short code (capital letters and digits, e.g. AC). Press Enter to keep the suggestion, or type - to leave a value out.');
+        const taken = new Set<string>();
+        const out: Pairs = [];
+        for (const v of values) {
+          const suggestion = before.get(v) ?? suggestCode(v, taken);
+          const code = (await askValid(io, `Project code for "${clean(v)}":`,
+            (s) => (s === '-' || SITE.test(s.toUpperCase()) ? null : 'Please use 1 to 10 capital letters or digits (or - to leave it out).'),
+            suggestion)).toUpperCase();
+          if (code === '-') continue;
+          taken.add(code);
+          out.push([v, code]);
+        }
+        if (out.length === 0) io.log('No value has a code, so every ticket will show as "no project" until the mapping is redone.');
+        return { projectValues: out };
+      },
+    },
+    {
+      id: 'statuses',
+      async run(a) {
+        const src = await h.source(a);
+        const seen = new Set<string>();
+        const names: string[] = [];
+        for (const s of [...(await src.statuses(scope(a))), ...(await h.samples(a)).map((t) => t.status)]) {
+          if (s && !seen.has(s.toLowerCase())) { seen.add(s.toLowerCase()); names.push(s); }
+        }
+        if (names.length === 0) {
+          io.log(isJira(a)
+            ? 'RixFlow found no statuses in these projects, so tickets will show without a status.'
+            : 'No ticket has a "Status" field value, so tickets will show without a status.');
+          return { statusBuckets: [] };
+        }
+        const before = new Map(pairs(a.statusBuckets).map(([n, b]) => [n.toLowerCase(), b]));
+        io.log('Place each status in one of RixFlow\'s buckets. Press Enter to keep the suggestion.');
+        const out: Pairs = [];
+        for (const s of names) {
+          const fallback = (before.get(s.toLowerCase()) as Bucket | undefined) ?? guessBucket(s) ?? undefined;
+          out.push([s, await choose(io, `Status "${clean(s)}" means:`, BUCKETS.map((b) => ({ value: b, label: BUCKET_LABEL[b] })), fallback)]);
+        }
+        return { statusBuckets: out };
+      },
+    },
+    {
+      id: 'sprints',
+      async run(a) {
+        const src = await h.source(a);
+        if (isJira(a)) {
+          const boards = await src.boards(scope(a));
+          if (boards.length === 0) {
+            io.log('No Jira board was found for these projects, so sprints are off.');
+            return { sprints: { mode: 'none' } };
+          }
+          const prev = a.sprints as Workflow['sprints'] | undefined;
+          const pick = await choose(io, 'Does the team work in sprints?', [
+            { value: 'none', label: 'No sprints' },
+            ...boards.map((b) => ({ value: String(b.id), label: `Sprints of board "${clean(b.name)}" (board ${b.id})` })),
+          ], prev ? (prev.mode === 'jira-sprints' ? String(prev.board) : 'none') : undefined);
+          return { sprints: pick === 'none' ? { mode: 'none' } : { mode: 'jira-sprints', board: Number(pick) } };
+        }
+        const today = h.now();
+        const sections = [...new Set((await h.samples(a)).flatMap((t) => t.sections))];
+        const sprintish = sections.filter((n) => parseSprintSection(n, today.getUTCFullYear()) !== null);
+        if (sprintish.length === 0) {
+          io.log('No section name looks like a sprint (RixFlow reads names like "Sprint 41 | 5.10 - 9.10"), so sprints are off.');
+          return { sprints: { mode: 'none' } };
+        }
+        const current = sprintish.find((n) => isCurrentSprint(n, today));
+        io.log(`Sections that look like sprints: ${sprintish.map(clean).join(', ')}.\nCurrent sprint today: ${current ? clean(current) : 'none of them'}.`);
+        const use = await confirm(io, 'Use these sections as sprints?', true);
+        return { sprints: use ? { mode: 'asana-sections' } : { mode: 'none' } };
+      },
+    },
+    {
+      id: 'urgent',
+      async run(a) {
+        const src = await h.source(a);
+        const prios = [...new Set([...(await src.priorities()), ...(await h.samples(a)).flatMap((t) => (t.priority ? [t.priority] : []))])];
+        if (prios.length === 0) {
+          io.log('No priority values were found, so no ticket will be marked urgent.');
+          return { urgentValues: [] };
+        }
+        const prev = (a.urgentValues as string[] | undefined)?.map((v) => v.toLowerCase());
+        const picks = await chooseMany(io, 'Which priorities count as urgent?',
+          prios.map((p) => ({ value: p, label: clean(p) })), prios.filter((p) => (prev ? prev.includes(p.toLowerCase()) : URGENT_GUESS.test(p))));
+        return { urgentValues: picks };
+      },
+    },
+    {
+      id: 'preview',
+      async run(a) {
+        const rows = previewRows((await h.samples(a)).slice(0, PREVIEW_COUNT), workflowOf(a), h.now());
+        io.log(`Some tickets as RixFlow will see them:\n${previewTable(rows)}`);
+        const labels: Record<(typeof MAPPING_STEPS)[number], string> = {
+          'project-source': 'Go back: how a ticket names its project',
+          'project-values': 'Go back: project codes',
+          statuses: 'Go back: statuses',
+          sprints: 'Go back: sprints',
+          urgent: 'Go back: urgent priorities',
+        };
+        const pick = await choose<string>(io, 'Is this right?', [
+          { value: 'accept', label: 'Yes, keep this mapping' },
+          ...MAPPING_STEPS.map((id) => ({ value: id, label: labels[id] })),
+        ]);
+        return pick === 'accept' ? {} : { goto: pick };
+      },
+    },
+  ];
+}
+
+// The inverse of workflowOf: a workflow's answers, as the mapping steps' starting point.
+export function mappingAnswers(wf: Workflow): Answers {
+  const t = wf.tracker;
+  const statusBuckets: Pairs = [];
+  for (const b of BUCKETS) for (const name of wf.status[b]) statusBuckets.push([name, b]);
+  return {
+    ...(t.type === 'jira'
+      ? { tracker: { type: 'jira', url: t.url, flavor: t.flavor }, projects: t.projects }
+      : { tracker: { type: 'asana' }, workspace: t.workspace }),
+    projectFrom: wf.project.from,
+    projectField: wf.project.field,
+    projectValues: wf.project.values === 'codes' ? [] : Object.entries(wf.project.values),
+    statusBuckets,
+    sprints: wf.sprints,
+    urgentValues: wf.urgent.values,
+  };
 }
 
 const REPO_HINT = 'For an ssh URL, load your key into ssh-agent (ssh-add); for an https URL, set up a git credential helper.';
@@ -143,8 +302,6 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
     return (await doConnect(a)).source as Source;
   };
 
-  const scope = (a: Answers) => (a.projects as string[] | undefined) ?? [];
-
   const samples = async (a: Answers): Promise<Ticket[]> => {
     if (cached) return cached;
     const got = await (await source(a)).sample(scope(a), SAMPLE_COUNT);
@@ -192,130 +349,7 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
         return { projects };
       },
     },
-    {
-      id: 'project-source',
-      async run(a) {
-        const options = projectOptions(await samples(a), isJira(a) ? 'jira' : 'asana');
-        if (options.length === 0) {
-          throw new HubError('NO_PROJECT_VALUES',
-            'None of the tickets RixFlow looked at names a project (in a field, component, label or project). Add one to your tickets, then run setup again.');
-        }
-        const i = await choose(io, 'How does a ticket say which project it belongs to?',
-          options.map((o, n) => ({ value: String(n), label: `${o.label} (e.g. ${o.examples.map(clean).join(', ')})` })));
-        const picked = options[Number(i)];
-        return { projectFrom: picked.from, projectField: picked.field };
-      },
-    },
-    {
-      id: 'project-values',
-      async run(a) {
-        const values = distinctValues(await samples(a), a.projectFrom as Workflow['project']['from'], (a.projectField as string | null) ?? null);
-        const before = new Map(pairs(a.projectValues));
-        io.log('Each project gets a short code (capital letters and digits, e.g. AC). Press Enter to keep the suggestion, or type - to leave a value out.');
-        const taken = new Set<string>();
-        const out: Pairs = [];
-        for (const v of values) {
-          const suggestion = before.get(v) ?? suggestCode(v, taken);
-          const code = (await askValid(io, `Project code for "${clean(v)}":`,
-            (s) => (s === '-' || SITE.test(s.toUpperCase()) ? null : 'Please use 1 to 10 capital letters or digits (or - to leave it out).'),
-            suggestion)).toUpperCase();
-          if (code === '-') continue;
-          taken.add(code);
-          out.push([v, code]);
-        }
-        if (out.length === 0) io.log('No value has a code, so every ticket will show as "no project" until the mapping is redone.');
-        return { projectValues: out };
-      },
-    },
-    {
-      id: 'statuses',
-      async run(a) {
-        const src = await source(a);
-        const seen = new Set<string>();
-        const names: string[] = [];
-        for (const s of [...(await src.statuses(scope(a))), ...(await samples(a)).map((t) => t.status)]) {
-          if (s && !seen.has(s.toLowerCase())) { seen.add(s.toLowerCase()); names.push(s); }
-        }
-        if (names.length === 0) {
-          io.log(isJira(a)
-            ? 'RixFlow found no statuses in these projects, so tickets will show without a status.'
-            : 'No ticket has a "Status" field value, so tickets will show without a status.');
-          return { statusBuckets: [] };
-        }
-        const before = new Map(pairs(a.statusBuckets));
-        io.log('Place each status in one of RixFlow\'s buckets. Press Enter to keep the suggestion.');
-        const out: Pairs = [];
-        for (const s of names) {
-          const fallback = (before.get(s) as Bucket | undefined) ?? guessBucket(s) ?? undefined;
-          out.push([s, await choose(io, `Status "${clean(s)}" means:`, BUCKETS.map((b) => ({ value: b, label: BUCKET_LABEL[b] })), fallback)]);
-        }
-        return { statusBuckets: out };
-      },
-    },
-    {
-      id: 'sprints',
-      async run(a) {
-        const src = await source(a);
-        if (isJira(a)) {
-          const boards = await src.boards(scope(a));
-          if (boards.length === 0) {
-            io.log('No Jira board was found for these projects, so sprints are off.');
-            return { sprints: { mode: 'none' } };
-          }
-          const prev = a.sprints as Workflow['sprints'] | undefined;
-          const pick = await choose(io, 'Does the team work in sprints?', [
-            { value: 'none', label: 'No sprints' },
-            ...boards.map((b) => ({ value: String(b.id), label: `Sprints of board "${clean(b.name)}" (board ${b.id})` })),
-          ], prev ? (prev.mode === 'jira-sprints' ? String(prev.board) : 'none') : undefined);
-          return { sprints: pick === 'none' ? { mode: 'none' } : { mode: 'jira-sprints', board: Number(pick) } };
-        }
-        const today = now();
-        const sections = [...new Set((await samples(a)).flatMap((t) => t.sections))];
-        const sprintish = sections.filter((n) => parseSprintSection(n, today.getUTCFullYear()) !== null);
-        if (sprintish.length === 0) {
-          io.log('No section name looks like a sprint (RixFlow reads names like "Sprint 41 | 5.10 - 9.10"), so sprints are off.');
-          return { sprints: { mode: 'none' } };
-        }
-        const current = sprintish.find((n) => isCurrentSprint(n, today));
-        io.log(`Sections that look like sprints: ${sprintish.map(clean).join(', ')}.\nCurrent sprint today: ${current ? clean(current) : 'none of them'}.`);
-        const use = await confirm(io, 'Use these sections as sprints?', true);
-        return { sprints: use ? { mode: 'asana-sections' } : { mode: 'none' } };
-      },
-    },
-    {
-      id: 'urgent',
-      async run(a) {
-        const src = await source(a);
-        const prios = [...new Set([...(await src.priorities()), ...(await samples(a)).flatMap((t) => (t.priority ? [t.priority] : []))])];
-        if (prios.length === 0) {
-          io.log('No priority values were found, so no ticket will be marked urgent.');
-          return { urgentValues: [] };
-        }
-        const prev = a.urgentValues as string[] | undefined;
-        const picks = await chooseMany(io, 'Which priorities count as urgent?',
-          prios.map((p) => ({ value: p, label: clean(p) })), prev ?? prios.filter((p) => URGENT_GUESS.test(p)));
-        return { urgentValues: picks };
-      },
-    },
-    {
-      id: 'preview',
-      async run(a) {
-        const rows = previewRows((await samples(a)).slice(0, PREVIEW_COUNT), workflowOf(a), now());
-        io.log(`Some tickets as RixFlow will see them:\n${previewTable(rows)}`);
-        const labels: Record<(typeof MAPPING_STEPS)[number], string> = {
-          'project-source': 'Go back: how a ticket names its project',
-          'project-values': 'Go back: project codes',
-          statuses: 'Go back: statuses',
-          sprints: 'Go back: sprints',
-          urgent: 'Go back: urgent priorities',
-        };
-        const pick = await choose<string>(io, 'Is this right?', [
-          { value: 'accept', label: 'Yes, keep this mapping' },
-          ...MAPPING_STEPS.map((id) => ({ value: id, label: labels[id] })),
-        ]);
-        return pick === 'accept' ? {} : { goto: pick };
-      },
-    },
+    ...mappingSteps(io, { source, samples, now }),
     {
       id: 'teammates',
       async run(a) {

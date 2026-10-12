@@ -36528,14 +36528,19 @@ function loadSites(hubDir2) {
       fail(file2, `invalid site code: ${code}`);
     }
     if (!isMapping(def)) fail(file2, `site ${code} must be a mapping`);
-    const { folder, aliases } = def;
+    const { name, folder, aliases } = def;
+    if (name !== void 0 && name !== null && typeof name !== "string") fail(file2, `site ${code}: name must be a string`);
     if (typeof folder !== "string" || !FOLDER.test(folder) || folder.includes("..")) {
       fail(file2, `site ${code}: invalid folder`);
     }
     if (aliases !== void 0 && (!Array.isArray(aliases) || !aliases.every((a) => typeof a === "string"))) {
       fail(file2, `site ${code}: aliases must be a list of strings`);
     }
-    out[code] = aliases === void 0 ? { folder } : { folder, aliases };
+    out[code] = {
+      ...typeof name === "string" && name.trim() ? { name: name.trim() } : {},
+      folder,
+      ...aliases === void 0 ? {} : { aliases }
+    };
   }
   return out;
 }
@@ -37189,6 +37194,12 @@ function errorDetail(e) {
   return detailLine(e instanceof Error ? e.message : String(e));
 }
 async function persistHub(hubDir2, user, message, opts = {}, env = process.env) {
+  return commitAndSync(hubDir2, user, opts, env, async (git) => {
+    mergeHubGitignore(hubDir2);
+    await commitAll(git, message, ownedPaths(user));
+  });
+}
+async function commitAndSync(hubDir2, user, opts, env, commit) {
   if (!(0, import_node_fs10.existsSync)((0, import_node_path11.join)(hubDir2, ".git"))) return { status: "blocked", detail: "hub is not a git repo", pending: 0, conflicts: [] };
   let release;
   try {
@@ -37199,8 +37210,7 @@ async function persistHub(hubDir2, user, message, opts = {}, env = process.env) 
   if (!release) return { ...LOCKED };
   const git = new Git(hubDir2, env);
   try {
-    mergeHubGitignore(hubDir2);
-    await commitAll(git, message, ownedPaths(user));
+    await commit(git);
     return await sync(git, user, { sleep: opts.sleep, holdsLock: true });
   } catch (e) {
     const pending = await pendingCount(git).catch(() => 0);
