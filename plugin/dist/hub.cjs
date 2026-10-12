@@ -13956,7 +13956,18 @@ async function runCreate(io, deps, env = process.env) {
   const now = () => (deps.now ?? (() => /* @__PURE__ */ new Date()))();
   let connection;
   let cached;
-  const saveMachine = (a, projectsRoot, jiraEmail) => {
+  let jiraEmail;
+  const isCloud = (a) => a.tracker?.flavor === "cloud";
+  const emailFor = async (a) => {
+    if (!isCloud(a)) return void 0;
+    jiraEmail ??= await askValid(
+      io,
+      "Your Jira login email:",
+      (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? null : "Please enter the email address you log in to Jira with."
+    );
+    return jiraEmail;
+  };
+  const saveMachine = (a, projectsRoot) => {
     const cfg = {
       name: String(a.name),
       role: a.role,
@@ -13969,12 +13980,13 @@ async function runCreate(io, deps, env = process.env) {
   };
   const doConnect = async (a) => {
     connection = await connect(io, deps, workflowOf2(a), { name: String(a.name), configDir: configDir2 });
-    saveMachine(a, (0, import_node_path20.join)(homeDir(env), "projects"), connection.jiraEmail);
+    jiraEmail = connection.jiraEmail;
     return connection;
   };
   const source = async (a) => {
     if (connection) return connection.source;
-    const stored = storedSource(deps, workflowOf2(a), { ...loadUserConfig(configDir2, env), configDir: configDir2 }, env);
+    const name = String(a.name);
+    const stored = storedSource(deps, workflowOf2(a), { name, configDir: configDir2, jiraEmail: await emailFor(a) }, env);
     if (stored) return stored;
     io.log("Your ticket login was not found on this machine; please sign in again.");
     return (await doConnect(a)).source;
@@ -14268,7 +14280,8 @@ ${previewTable(rows)}`);
       id: "self-join",
       async run(a) {
         const projectsRoot = await askProjectsRoot(io, env);
-        saveMachine(a, projectsRoot, loadUserConfig(configDir2, env).jiraEmail);
+        await emailFor(a);
+        saveMachine(a, projectsRoot);
         await setUpHubHooks(io, deps, String(a.name), env);
         await applyClaudeSettings(io, (0, import_node_path20.join)(homeDir(env), ".claude", "settings.json"), hubDir2);
         return {};

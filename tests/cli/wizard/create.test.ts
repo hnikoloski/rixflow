@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import YAML from 'yaml';
+import { runInit } from '../../../src/cli/init';
 import { runCreate } from '../../../src/cli/wizard/create';
 import { inviteText } from '../../../src/cli/wizard/invite';
 import type { WizardDeps } from '../../../src/cli/wizard/connect';
@@ -167,19 +168,53 @@ describe('runCreate', () => {
     });
   });
 
-  it('resumes after connect without asking for the login again', async () => {
+  it('resumes after connect asking only the Jira email again, never the token; no config.yml before the hub exists', async () => {
     const m = machine();
     await emptyRemote(m.remote);
     const j = fakeJira();
     const first = scriptedIo(head().slice(0, 7));
     await expect(runCreate(first, deps({ makeJira: j.makeJira }), m.env)).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(existsSync(join(m.cfg, 'config.yml'))).toBe(false);
     expect(readFileSync(join(m.cfg, 'setup-progress.json'), 'utf8')).not.toMatch(/jira-tok-1|@/);
-    const io = scriptedIo(['y', ...head().slice(7), '1', ...tail(m.remote, m.home)]);
+    const io = scriptedIo(['y', 'me@example.com', ...head().slice(7), '1', ...tail(m.remote, m.home)]);
     await runCreate(io, deps({ makeJira: j.makeJira }), m.env);
     expect(io.asked[0]).toMatch(/Continue where you stopped \(connect\)/);
-    expect(io.asked.some((q) => /token|email/i.test(q))).toBe(false);
+    expect(io.asked.filter((q) => /email/i.test(q))).toHaveLength(1);
+    expect(io.asked.some((q) => /token/i.test(q))).toBe(false);
     expect(j.calls.at(-1)?.auth).toEqual({ flavor: 'cloud', email: 'me@example.com', token: 'jira-tok-1' });
     expect(loadWorkflow(m.hub)).toEqual(EXPECTED);
+    expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8')).jiraEmail).toBe('me@example.com');
+  });
+
+  it('a create interrupted at the repo step and resumed asks the email once more for config.yml', async () => {
+    const m = machine();
+    await emptyRemote(m.remote);
+    const j = fakeJira();
+    const first = scriptedIo([...head(), '1', '', '', '']);
+    await expect(runCreate(first, deps({ makeJira: j.makeJira }), m.env)).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(existsSync(join(m.cfg, 'config.yml'))).toBe(false);
+    expect(readFileSync(join(m.cfg, 'setup-progress.json'), 'utf8')).not.toContain('@');
+    const io = scriptedIo(['y', m.remote, join(m.home, 'projects'), 'me@example.com', 'n']);
+    await runCreate(io, deps({ makeJira: j.makeJira }), m.env);
+    expect(io.asked.some((q) => /token/i.test(q))).toBe(false);
+    expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8'))).toEqual({
+      name: 'me', role: 'dev', projectsRoot: join(m.home, 'projects'), jiraEmail: 'me@example.com', siteFolders: {}, taskSites: {},
+    });
+  });
+
+  it('an abandoned create leaves no config.yml, so init still offers join or create', async () => {
+    const m = machine();
+    const j = fakeJira();
+    const d = { tokenExec: noKeychain, runGit: realGit, gh: noGh, now: () => NOW, makeJira: j.makeJira };
+    const cli = join(__dirname, '..', '..', '..', 'plugin', 'dist', 'hub.cjs');
+    await expect(runInit(scriptedIo(['yes', '2', ...head().slice(0, 7)]), cli, m.env, d)).rejects.toMatchObject({ code: 'ABORTED' });
+    // Declining "Continue" drops the progress; quitting before the first answer leaves nothing behind.
+    await expect(runInit(scriptedIo(['yes', 'n']), cli, m.env, d)).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(existsSync(join(m.cfg, 'config.yml'))).toBe(false);
+    expect(existsSync(join(m.cfg, 'setup-progress.json'))).toBe(false);
+    const io = scriptedIo(['yes']);
+    await expect(runInit(io, cli, m.env, d)).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(io.logs.join('\n')).toContain('Join an existing team, or create a new one?');
   });
 
   it('refuses a remote that already has commits', async () => {
@@ -191,6 +226,7 @@ describe('runCreate', () => {
     expect(err).toMatchObject({ code: 'REPO_NOT_EMPTY' });
     expect(err.message).toMatch(/empty/);
     expect(existsSync(m.hub)).toBe(false);
+    expect(existsSync(join(m.cfg, 'config.yml'))).toBe(false);
     // The answers so far are kept: running again continues at the repo step.
     expect(JSON.parse(readFileSync(join(m.cfg, 'setup-progress.json'), 'utf8')).done.at(-1)).toBe('folders');
   });

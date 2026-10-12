@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { configDir as getConfigDir, homeDir, hubDir as getHubDir, loadUserConfig, saveUserConfig } from '../../core/config';
+import { configDir as getConfigDir, homeDir, hubDir as getHubDir, saveUserConfig } from '../../core/config';
 import { Git } from '../../core/git';
 import { BUCKET_LABEL, distinctValues, guessBucket, previewRows, projectOptions, suggestCode, type Bucket } from '../../core/mapping';
 import { checkReach, systemGh } from '../../core/repo';
@@ -107,7 +107,19 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
   let connection: Connection | undefined;
   let cached: Ticket[] | undefined;
 
-  const saveMachine = (a: Answers, projectsRoot: string, jiraEmail?: string) => {
+  // Kept in memory only: an email never goes in the progress file.
+  let jiraEmail: string | undefined;
+  const isCloud = (a: Answers) => (a.tracker as { flavor?: string } | undefined)?.flavor === 'cloud';
+  // A resumed wizard has no email in memory; it is asked again (the token stays stored, never re-asked).
+  const emailFor = async (a: Answers): Promise<string | undefined> => {
+    if (!isCloud(a)) return undefined;
+    jiraEmail ??= await askValid(io, 'Your Jira login email:',
+      (s) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? null : 'Please enter the email address you log in to Jira with.'));
+    return jiraEmail;
+  };
+
+  // config.yml marks this machine as set up, so it is written only once the hub exists (self-join).
+  const saveMachine = (a: Answers, projectsRoot: string) => {
     const cfg: UserConfig = {
       name: String(a.name), role: a.role as Role, projectsRoot,
       ...(jiraEmail ? { jiraEmail } : {}),
@@ -118,15 +130,14 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
 
   const doConnect = async (a: Answers): Promise<Connection> => {
     connection = await connect(io, deps, workflowOf(a), { name: String(a.name), configDir });
-    // Written now so a resumed wizard can rebuild the login (jiraEmail never goes in the progress file).
-    // The projects folder is asked for, and saved again, in the self-join step.
-    saveMachine(a, join(homeDir(env), 'projects'), connection.jiraEmail);
+    jiraEmail = connection.jiraEmail;
     return connection;
   };
 
   const source = async (a: Answers): Promise<Source> => {
     if (connection) return connection.source as Source;
-    const stored = storedSource(deps, workflowOf(a), { ...loadUserConfig(configDir, env), configDir }, env);
+    const name = String(a.name);
+    const stored = storedSource(deps, workflowOf(a), { name, configDir, jiraEmail: await emailFor(a) }, env);
     if (stored) return stored as Source;
     io.log('Your ticket login was not found on this machine; please sign in again.');
     return (await doConnect(a)).source as Source;
@@ -386,7 +397,8 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
       id: 'self-join',
       async run(a) {
         const projectsRoot = await askProjectsRoot(io, env);
-        saveMachine(a, projectsRoot, loadUserConfig(configDir, env).jiraEmail);
+        await emailFor(a);
+        saveMachine(a, projectsRoot);
         await setUpHubHooks(io, deps, String(a.name), env);
         await applyClaudeSettings(io, join(homeDir(env), '.claude', 'settings.json'), hubDir);
         return {};
