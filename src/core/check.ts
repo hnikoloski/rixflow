@@ -149,11 +149,12 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   // Handled here so a rejection during the sync wait is not reported as unhandled; it is still
   // awaited (and its error handled) further down.
   ticketFetch?.catch(() => undefined);
-  // At most once per UTC day, at session start; every failure counts as not public.
-  let publicCheck: Promise<boolean> | null = null;
+  // Probed at most once per UTC day, at session start. A probe that fails or times out (null)
+  // leaves the stored verdict as it was.
+  let publicCheck: Promise<boolean | null> | null = null;
   if (trigger === 'session' && state.publicHubCheckDay !== today) {
     state.publicHubCheckDay = today;
-    publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => false);
+    publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => null);
   }
   const synced = await withTimeout(() => deps.sync(), budget).catch(() => null);
 
@@ -193,7 +194,12 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
     }
   }
 
-  if (publicCheck && (await publicCheck)) parts.push(PUBLIC_HUB);
+  if (publicCheck) {
+    const verdict = await publicCheck;
+    if (verdict !== null) state.publicHub = verdict;
+  }
+  // Repeated in every session brief while the stored verdict says the hub is public (spec §4).
+  if (trigger === 'session' && state.publicHub === true) parts.push(PUBLIC_HUB);
 
   const health = describeHealth(synced, trigger, state, today);
   if (health) parts.push(health);

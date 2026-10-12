@@ -31,6 +31,8 @@ export interface CheckState {
   noRemoteNoticeDay?: string;
   // Calendar day (YYYY-MM-DD, UTC) the hub's origin was last checked for public access.
   publicHubCheckDay?: string;
+  // The last verdict of that check; the session brief warns while it is true.
+  publicHub?: boolean;
 }
 
 export class HubError extends Error {

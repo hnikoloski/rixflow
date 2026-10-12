@@ -11260,6 +11260,7 @@ function loadState(dir) {
     if (typeof s.offlineNoticeDay === "string") state.offlineNoticeDay = s.offlineNoticeDay;
     if (typeof s.noRemoteNoticeDay === "string") state.noRemoteNoticeDay = s.noRemoteNoticeDay;
     if (typeof s.publicHubCheckDay === "string") state.publicHubCheckDay = s.publicHubCheckDay;
+    if (typeof s.publicHub === "boolean") state.publicHub = s.publicHub;
     return state;
   } catch {
     return { seenTaskModified: {}, notified: [] };
@@ -12154,7 +12155,7 @@ async function check(ctx, deps, trigger) {
   let publicCheck = null;
   if (trigger === "session" && state.publicHubCheckDay !== today) {
     state.publicHubCheckDay = today;
-    publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => false);
+    publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => null);
   }
   const synced = await withTimeout(() => deps.sync(), budget).catch(() => null);
   let fresh = [];
@@ -12188,7 +12189,11 @@ async function check(ctx, deps, trigger) {
       if (trigger === "session") parts.push(`${source.label} unreachable`);
     }
   }
-  if (publicCheck && await publicCheck) parts.push(PUBLIC_HUB);
+  if (publicCheck) {
+    const verdict = await publicCheck;
+    if (verdict !== null) state.publicHub = verdict;
+  }
+  if (trigger === "session" && state.publicHub === true) parts.push(PUBLIC_HUB);
   const health = describeHealth(synced, trigger, state, today);
   if (health) parts.push(health);
   if (synced?.conflicts?.length) parts.push(`${synced.conflicts.length} conflict copies kept`);

@@ -268,16 +268,38 @@ describe('runCheck', () => {
     );
   });
 
-  it('warns about a public hub at most once per UTC day, at session start only', async () => {
+  it('probes the hub at most once per UTC day, but warns in every session brief while it is public', async () => {
     const ctx = withOrigin(makeCtx());
     const urls: string[] = [];
-    const isPublic = async (url: string) => { urls.push(url); return true; };
+    let verdict = true;
+    const isPublic = async (url: string) => { urls.push(url); return verdict; };
     const deps = { source: fakeAsanaSource([]), sync: noSync, isPublic };
     expect(await runCheck(at(ctx, '2026-10-08T09:00:00Z'), deps, 'prompt')).toBe('');
     expect(await runCheck(at(ctx, '2026-10-08T10:00:00Z'), deps, 'session')).toBe(PUBLIC);
-    expect(await runCheck(at(ctx, '2026-10-08T23:00:00Z'), deps, 'session')).toBe('');
-    expect(await runCheck(at(ctx, '2026-10-09T00:30:00Z'), deps, 'session')).toBe(PUBLIC);
+    // A later session the same day still warns, from the stored verdict, without probing again.
+    expect(await runCheck(at(ctx, '2026-10-08T23:00:00Z'), deps, 'session')).toBe(PUBLIC);
+    // Prompt checks never carry the warning.
+    expect(await runCheck(at(ctx, '2026-10-08T23:30:00Z'), deps, 'prompt')).toBe('');
+    expect(urls).toHaveLength(1);
+    // The next day's probe finds it private: the warning stops, and stays stopped that day.
+    verdict = false;
+    expect(await runCheck(at(ctx, '2026-10-09T00:30:00Z'), deps, 'session')).toBe('');
+    expect(await runCheck(at(ctx, '2026-10-09T12:00:00Z'), deps, 'session')).toBe('');
     expect(urls).toEqual(['https://git.example.com/acme/hub.git', 'https://git.example.com/acme/hub.git']);
+  });
+
+  it('a failed or timed-out public-hub probe keeps the previous verdict', async () => {
+    const ctx = withOrigin(makeCtx());
+    const pub = { source: fakeAsanaSource([]), sync: noSync, isPublic: async () => true };
+    expect(await runCheck(at(ctx, '2026-10-08T10:00:00Z'), pub, 'session')).toBe(PUBLIC);
+    const failing = { ...pub, isPublic: async () => { throw new Error('offline'); } };
+    expect(await runCheck(at(ctx, '2026-10-09T10:00:00Z'), failing, 'session')).toBe(PUBLIC);
+    expect(JSON.parse(readFileSync(join(ctx.configDir, 'state.json'), 'utf8'))).toMatchObject({ publicHub: true, publicHubCheckDay: '2026-10-09' });
+    const hanging = { ...pub, isPublic: () => new Promise<boolean>(() => {}) };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const later = runCheck(at(ctx, '2026-10-10T10:00:00Z'), hanging, 'session');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await later).toBe(PUBLIC);
   });
 
   it('stays silent about a private hub, a failing public check and a hub without origin', async () => {
