@@ -14018,6 +14018,16 @@ function previewTable(rows) {
   const widths = cells[0].map((_, i) => Math.max(...cells.map((c) => c[i].length)));
   return cells.map((c) => `  ${c.map((x, i) => x.padEnd(widths[i])).join("  ").trimEnd()}`).join("\n");
 }
+async function keptFromBefore(io, items, describe) {
+  if (items.length === 0) return [];
+  io.log("Kept from before (not in the tickets RixFlow looked at now). Press Enter to keep each one, or type - to remove it.");
+  const out = [];
+  for (const item of items) {
+    const a = await askValid(io, `  ${describe(item)}:`, (s) => s === "" || s === "-" ? null : "Press Enter to keep it, or type - to remove it.");
+    if (a !== "-") out.push(item);
+  }
+  return out;
+}
 function mappingSteps(io, h) {
   return [
     {
@@ -14038,7 +14048,8 @@ function mappingSteps(io, h) {
           current >= 0 ? String(current) : void 0
         );
         const picked = options[Number(i)];
-        return { projectFrom: picked.from, projectField: picked.field };
+        const changed = a.projectFrom !== void 0 && (picked.from !== a.projectFrom || picked.field !== (a.projectField ?? null));
+        return { projectFrom: picked.from, projectField: picked.field, ...changed ? { projectValues: [] } : {} };
       }
     },
     {
@@ -14061,6 +14072,12 @@ function mappingSteps(io, h) {
           taken.add(code);
           out.push([v, code]);
         }
+        const shown = new Set(values);
+        for (const [v, code] of await keptFromBefore(
+          io,
+          pairs(a.projectValues).filter(([v2]) => !shown.has(v2)),
+          ([v2, code2]) => `"${clean3(v2)}" -> ${code2}`
+        )) out.push([v, code]);
         if (out.length === 0) io.log('No value has a code, so every ticket will show as "no project" until the mapping is redone.');
         return { projectValues: out };
       }
@@ -14077,17 +14094,19 @@ function mappingSteps(io, h) {
             names.push(s);
           }
         }
-        if (names.length === 0) {
+        const earlier = pairs(a.statusBuckets).filter(([n]) => !seen.has(n.toLowerCase()));
+        if (names.length === 0 && earlier.length === 0) {
           io.log(isJira(a) ? "RixFlow found no statuses in these projects, so tickets will show without a status." : 'No ticket has a "Status" field value, so tickets will show without a status.');
           return { statusBuckets: [] };
         }
         const before = new Map(pairs(a.statusBuckets).map(([n, b]) => [n.toLowerCase(), b]));
-        io.log("Place each status in one of RixFlow's buckets. Press Enter to keep the suggestion.");
         const out = [];
+        if (names.length) io.log("Place each status in one of RixFlow's buckets. Press Enter to keep the suggestion.");
         for (const s of names) {
           const fallback = before.get(s.toLowerCase()) ?? guessBucket(s) ?? void 0;
           out.push([s, await choose(io, `Status "${clean3(s)}" means:`, BUCKETS3.map((b) => ({ value: b, label: BUCKET_LABEL[b] })), fallback)]);
         }
+        out.push(...await keptFromBefore(io, earlier, ([n, b]) => `status "${clean3(n)}" -> ${BUCKET_LABEL[b] ?? b}`));
         return { statusBuckets: out };
       }
     },
@@ -14127,17 +14146,20 @@ Current sprint today: ${current ? clean3(current) : "none of them"}.`);
       async run(a) {
         const src = await h.source(a);
         const prios = [.../* @__PURE__ */ new Set([...await src.priorities(), ...(await h.samples(a)).flatMap((t) => t.priority ? [t.priority] : [])])];
-        if (prios.length === 0) {
+        const known = new Set(prios.map((p) => p.toLowerCase()));
+        const earlier = (a.urgentValues ?? []).filter((v) => !known.has(v.toLowerCase()));
+        if (prios.length === 0 && earlier.length === 0) {
           io.log("No priority values were found, so no ticket will be marked urgent.");
           return { urgentValues: [] };
         }
         const prev = a.urgentValues?.map((v) => v.toLowerCase());
-        const picks = await chooseMany(
+        const picks = prios.length === 0 ? [] : await chooseMany(
           io,
           "Which priorities count as urgent?",
           prios.map((p) => ({ value: p, label: clean3(p) })),
           prios.filter((p) => prev ? prev.includes(p.toLowerCase()) : URGENT_GUESS.test(p))
         );
+        picks.push(...await keptFromBefore(io, earlier, (v) => `urgent priority "${clean3(v)}"`));
         return { urgentValues: picks };
       }
     },

@@ -99,6 +99,20 @@ function previewTable(rows: ReturnType<typeof previewRows>): string {
 // Create's steps 3-7 (how a ticket names its project, project codes, statuses, sprints, urgent,
 // preview with "go back"). Each step starts from the answers already given, so the wizard menu
 // reuses them to redo the mapping from the hub's current workflow.
+// Earlier answers the current sample does not show (a redo of the mapping, or a resumed wizard).
+// Each is kept unless the person types - for it, so a redo never silently drops part of the mapping.
+// On a fresh create the list is empty and nothing is asked.
+async function keptFromBefore<T>(io: InitIo, items: T[], describe: (t: T) => string): Promise<T[]> {
+  if (items.length === 0) return [];
+  io.log('Kept from before (not in the tickets RixFlow looked at now). Press Enter to keep each one, or type - to remove it.');
+  const out: T[] = [];
+  for (const item of items) {
+    const a = await askValid(io, `  ${describe(item)}:`, (s) => (s === '' || s === '-' ? null : 'Press Enter to keep it, or type - to remove it.'));
+    if (a !== '-') out.push(item);
+  }
+  return out;
+}
+
 export interface MappingHelpers {
   source: (a: Answers) => Promise<Source>;
   samples: (a: Answers) => Promise<Ticket[]>;
@@ -120,7 +134,9 @@ export function mappingSteps(io: InitIo, h: MappingHelpers): Step[] {
           options.map((o, n) => ({ value: String(n), label: `${o.label} (e.g. ${o.examples.map(clean).join(', ')})` })),
           current >= 0 ? String(current) : undefined);
         const picked = options[Number(i)];
-        return { projectFrom: picked.from, projectField: picked.field };
+        // Codes given for another source's values do not carry over to this one.
+        const changed = a.projectFrom !== undefined && (picked.from !== a.projectFrom || picked.field !== (a.projectField ?? null));
+        return { projectFrom: picked.from, projectField: picked.field, ...(changed ? { projectValues: [] } : {}) };
       },
     },
     {
@@ -140,6 +156,9 @@ export function mappingSteps(io: InitIo, h: MappingHelpers): Step[] {
           taken.add(code);
           out.push([v, code]);
         }
+        const shown = new Set(values);
+        for (const [v, code] of await keptFromBefore(io, pairs(a.projectValues).filter(([v]) => !shown.has(v)),
+          ([v, code]) => `"${clean(v)}" -> ${code}`)) out.push([v, code]);
         if (out.length === 0) io.log('No value has a code, so every ticket will show as "no project" until the mapping is redone.');
         return { projectValues: out };
       },
@@ -153,19 +172,21 @@ export function mappingSteps(io: InitIo, h: MappingHelpers): Step[] {
         for (const s of [...(await src.statuses(scope(a))), ...(await h.samples(a)).map((t) => t.status)]) {
           if (s && !seen.has(s.toLowerCase())) { seen.add(s.toLowerCase()); names.push(s); }
         }
-        if (names.length === 0) {
+        const earlier = pairs(a.statusBuckets).filter(([n]) => !seen.has(n.toLowerCase()));
+        if (names.length === 0 && earlier.length === 0) {
           io.log(isJira(a)
             ? 'RixFlow found no statuses in these projects, so tickets will show without a status.'
             : 'No ticket has a "Status" field value, so tickets will show without a status.');
           return { statusBuckets: [] };
         }
         const before = new Map(pairs(a.statusBuckets).map(([n, b]) => [n.toLowerCase(), b]));
-        io.log('Place each status in one of RixFlow\'s buckets. Press Enter to keep the suggestion.');
         const out: Pairs = [];
+        if (names.length) io.log('Place each status in one of RixFlow\'s buckets. Press Enter to keep the suggestion.');
         for (const s of names) {
           const fallback = (before.get(s.toLowerCase()) as Bucket | undefined) ?? guessBucket(s) ?? undefined;
           out.push([s, await choose(io, `Status "${clean(s)}" means:`, BUCKETS.map((b) => ({ value: b, label: BUCKET_LABEL[b] })), fallback)]);
         }
+        out.push(...await keptFromBefore(io, earlier, ([n, b]) => `status "${clean(n)}" -> ${BUCKET_LABEL[b as Bucket] ?? b}`));
         return { statusBuckets: out };
       },
     },
@@ -204,13 +225,16 @@ export function mappingSteps(io: InitIo, h: MappingHelpers): Step[] {
       async run(a) {
         const src = await h.source(a);
         const prios = [...new Set([...(await src.priorities()), ...(await h.samples(a)).flatMap((t) => (t.priority ? [t.priority] : []))])];
-        if (prios.length === 0) {
+        const known = new Set(prios.map((p) => p.toLowerCase()));
+        const earlier = ((a.urgentValues as string[] | undefined) ?? []).filter((v) => !known.has(v.toLowerCase()));
+        if (prios.length === 0 && earlier.length === 0) {
           io.log('No priority values were found, so no ticket will be marked urgent.');
           return { urgentValues: [] };
         }
         const prev = (a.urgentValues as string[] | undefined)?.map((v) => v.toLowerCase());
-        const picks = await chooseMany(io, 'Which priorities count as urgent?',
+        const picks = prios.length === 0 ? [] : await chooseMany(io, 'Which priorities count as urgent?',
           prios.map((p) => ({ value: p, label: clean(p) })), prios.filter((p) => (prev ? prev.includes(p.toLowerCase()) : URGENT_GUESS.test(p))));
+        picks.push(...await keptFromBefore(io, earlier, (v) => `urgent priority "${clean(v)}"`));
         return { urgentValues: picks };
       },
     },

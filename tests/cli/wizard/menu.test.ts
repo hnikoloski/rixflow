@@ -132,6 +132,7 @@ describe('runMenu', () => {
       '', // "AC" keeps AC
       '', // status keeps its guess
       '', // urgent keeps Urgent (the current answer, any case)
+      '', '', '', // the legacy urgent values the sample lacks (critical, p0, highest) are kept
       '1', // accept the preview
       MENU.exit,
     ]);
@@ -145,7 +146,7 @@ describe('runMenu', () => {
       project: { from: 'custom-field', field: 'Website', values: { AC: 'AC' } },
       status: { field: 'Status', todo: [], in_progress: ['In progress'], waiting: [], done: [] },
       sprints: { mode: 'none' },
-      urgent: { field: 'Priority', values: ['Urgent'] },
+      urgent: { field: 'Priority', values: ['Urgent', 'critical', 'p0', 'highest'] },
     };
     expect(loadWorkflow(s.ctx.hubDir)).toEqual(expected);
     expect(readFileSync(join(s.ctx.hubDir, 'config', 'workflow.yml'), 'utf8')).toMatch(new RegExp(`^requires: ${RIXFLOW_VERSION.replace(/\./g, '\\.')}`));
@@ -153,6 +154,96 @@ describe('runMenu', () => {
     expect(s.inHub('show', '--name-only', '--format=', 'HEAD').trim()).toBe('config/workflow.yml');
     expect(s.inHub('log', '-1', '--format=%s').trim()).toBe('chore: redo the ticket mapping (me)');
     expect(existsSync(join(s.ctx.configDir, 'setup-progress.json'))).toBe(false);
+  });
+
+  // A redo where the sample lacks a project value, a status and an urgent priority the team mapped before.
+  const commitWorkflow = (s: Awaited<ReturnType<typeof setUp>>, wf: Workflow) => {
+    writeWorkflow(s.ctx.hubDir, wf);
+    s.inHub('add', '-A');
+    s.inHub('commit', '-q', '-m', 'workflow');
+  };
+  const keepRun = (keep: string) => [
+    MENU.redoMapping,
+    '', // project source keeps the current answer
+    '', // the sampled value keeps its code
+    keep, // kept from before: the project value not in the sample
+  ];
+
+  it('redo on a Jira workflow keeps mapped values the sample lacks, and - removes them', async () => {
+    const s = await setUp();
+    const wf: Workflow = {
+      requires: RIXFLOW_VERSION, legacy: false,
+      tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB'] },
+      project: { from: 'component', field: null, values: { 'Acme site': 'AC', 'Globex web': 'GL' } },
+      status: { field: null, todo: ['To Do'], in_progress: ['In Progress'], waiting: ['QA Review'], done: ['Done'] },
+      sprints: { mode: 'none' }, urgent: { field: null, values: ['Blocker'] },
+    };
+    commitWorkflow(s, wf);
+    writeFileSync(join(s.ctx.configDir, 'config.yml'), YAML.stringify({ ...s.ctx.user, jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net' }));
+    writeFileSync(join(s.ctx.configDir, 'jira-token'), 'tok-j', { mode: 0o600 });
+    const ctx: Ctx = { ...s.ctx, user: { ...s.ctx.user, jiraEmail: 'me@example.com' } };
+    const ticket: Ticket = {
+      id: 'WEB-1', title: 'Fix the login page', notes: '', modifiedAt: '2026-10-01T00:00:00Z', due: null, url: null, parent: null,
+      status: 'In Progress', priority: 'High', fields: [], components: ['Acme site'], labels: [], containers: ['WEB'], sections: [], sprints: [], restricted: false,
+    };
+    const makeJira = (): TicketSource & Discovery => ({
+      kind: 'jira', label: 'Jira', normalizeId: (x) => x,
+      whoAmI: async () => ({ id: 'acc-1', name: 'Me' }),
+      myTickets: async () => [ticket], ticket: async () => ticket, comments: async () => [],
+      scopes: async () => [], sample: async () => [ticket], statuses: async () => ['To Do', 'In Progress', 'Done'],
+      priorities: async () => ['Highest', 'High'], boards: async () => [],
+    });
+    const statuses = ['', '', '']; // To Do, In Progress, Done keep their current buckets
+    const keep = scriptedIo([...keepRun(''), ...statuses, '', '', '', '1', MENU.exit]);
+    await runMenu(keep, deps({ makeJira }), ctx, s.env);
+    expect(keep.logs.join('\n')).toContain('Kept from before');
+    expect(loadWorkflow(s.ctx.hubDir)).toEqual(wf);
+
+    const drop = scriptedIo([...keepRun('-'), ...statuses, '-', '', '-', '1', MENU.exit]);
+    await runMenu(drop, deps({ makeJira }), ctx, s.env);
+    expect(loadWorkflow(s.ctx.hubDir)).toEqual({
+      ...wf,
+      project: { ...wf.project, values: { 'Acme site': 'AC' } },
+      status: { ...wf.status, waiting: [] },
+      urgent: { field: null, values: [] },
+    });
+    expect(drop.left()).toBe(0);
+  });
+
+  it('redo on an Asana workflow keeps mapped values the sample lacks, and - removes them', async () => {
+    const s = await setUp();
+    const wf: Workflow = {
+      requires: RIXFLOW_VERSION, legacy: false,
+      tracker: { type: 'asana', workspace: '111' },
+      project: { from: 'custom-field', field: 'Website', values: { AC: 'AC', GL: 'GL' } },
+      status: { field: 'Status', todo: [], in_progress: ['In progress'], waiting: ['On hold'], done: [] },
+      sprints: { mode: 'none' }, urgent: { field: 'Priority', values: ['Urgent', 'Critical'] },
+    };
+    commitWorkflow(s, wf);
+    writeFileSync(join(s.ctx.configDir, 'asana-token'), 'tok-a', { mode: 0o600 });
+    const task: AsanaTask = {
+      gid: '1001', name: 'Acme homepage', modified_at: '2026-10-01T00:00:00Z',
+      memberships: [{ project: { gid: '9', name: 'Acme web' }, section: { gid: '8', name: 'Backlog' } }],
+      custom_fields: [{ name: 'Website', display_value: 'AC' }, { name: 'Status', display_value: 'In progress' }, { name: 'Priority', display_value: 'Urgent' }],
+    };
+    const makeAsana = () => ({
+      getMe: async () => ({ gid: '42', name: 'Me', workspaces: [{ gid: '111', name: 'Acme' }] }),
+      getMyTasks: async () => [task], getTask: async () => task, getComments: async () => [],
+    });
+    const keep = scriptedIo([...keepRun(''), '', '', '', '', '1', MENU.exit]);
+    await runMenu(keep, deps({ makeAsana }), s.ctx, s.env);
+    expect(keep.logs.join('\n')).toContain('Kept from before');
+    expect(loadWorkflow(s.ctx.hubDir)).toEqual(wf);
+
+    const drop = scriptedIo([...keepRun('-'), '', '-', '', '-', '1', MENU.exit]);
+    await runMenu(drop, deps({ makeAsana }), s.ctx, s.env);
+    expect(loadWorkflow(s.ctx.hubDir)).toEqual({
+      ...wf,
+      project: { ...wf.project, values: { AC: 'AC' } },
+      status: { ...wf.status, waiting: [] },
+      urgent: { field: 'Priority', values: ['Urgent'] },
+    });
+    expect(drop.left()).toBe(0);
   });
 
   it('start over removes this machine\'s setup and tokens but leaves the hub clone untouched', async () => {
