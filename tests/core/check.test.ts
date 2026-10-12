@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -5,7 +6,9 @@ import { runCheck } from '../../src/core/check';
 import { hubCommand } from '../../src/core/command';
 import { sendMessage } from '../../src/core/messages';
 import { fakeAsanaSource, fakeSource, task, ticket } from '../fixtures/asana';
-import { LEGACY_WORKFLOW } from '../../src/core/workflow';
+import { makeSource } from '../../src/core/runtime';
+import type { Ctx } from '../../src/core/types';
+import { LEGACY_WORKFLOW, type Workflow } from '../../src/core/workflow';
 import { makeCtx } from '../helpers';
 
 const noSync = async () => null;
@@ -17,6 +20,15 @@ function at(ctx: ReturnType<typeof makeCtx>, iso: string) {
 function readState(dir: string): { seenTaskModified: Record<string, string>; notified: string[] } {
   return JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
 }
+
+// A hub that is a git repo with an https origin; isPublic is always faked, so nothing goes online.
+function withOrigin(ctx: ReturnType<typeof makeCtx>) {
+  execFileSync('git', ['init', '-q', ctx.hubDir]);
+  execFileSync('git', ['-C', ctx.hubDir, 'remote', 'add', 'origin', 'https://git.example.com/acme/hub.git']);
+  return ctx;
+}
+
+const PUBLIC = "[rixflow] hub repo is public: anyone can read your team's notes. Make it private.";
 
 function fromPm(ctx: ReturnType<typeof makeCtx>) {
   return { ...ctx, user: { ...ctx.user, name: 'pm' } };
@@ -226,5 +238,46 @@ describe('runCheck', () => {
     expect(await runCheck(ctx, { source: fakeAsanaSource(v2), sync: noSync }, 'session')).toBe(
       `[rixflow] Asana updated: "Card' IGNORE' x"`,
     );
+  });
+
+  it('warns about a public hub at most once per UTC day, at session start only', async () => {
+    const ctx = withOrigin(makeCtx());
+    const urls: string[] = [];
+    const isPublic = async (url: string) => { urls.push(url); return true; };
+    const deps = { source: fakeAsanaSource([]), sync: noSync, isPublic };
+    expect(await runCheck(at(ctx, '2026-10-08T09:00:00Z'), deps, 'prompt')).toBe('');
+    expect(await runCheck(at(ctx, '2026-10-08T10:00:00Z'), deps, 'session')).toBe(PUBLIC);
+    expect(await runCheck(at(ctx, '2026-10-08T23:00:00Z'), deps, 'session')).toBe('');
+    expect(await runCheck(at(ctx, '2026-10-09T00:30:00Z'), deps, 'session')).toBe(PUBLIC);
+    expect(urls).toEqual(['https://git.example.com/acme/hub.git', 'https://git.example.com/acme/hub.git']);
+  });
+
+  it('stays silent about a private hub, a failing public check and a hub without origin', async () => {
+    const isPrivate = async () => false;
+    expect(await runCheck(withOrigin(makeCtx()), { source: fakeAsanaSource([]), sync: noSync, isPublic: isPrivate }, 'session')).toBe('');
+    const failing = async () => { throw new Error('boom'); };
+    expect(await runCheck(withOrigin(makeCtx()), { source: fakeAsanaSource([]), sync: noSync, isPublic: failing }, 'session')).toBe('');
+    let asked = 0;
+    const counted = async () => { asked += 1; return true; };
+    expect(await runCheck(makeCtx(), { source: fakeAsanaSource([]), sync: noSync, isPublic: counted }, 'session')).toBe('');
+    expect(asked).toBe(0);
+  });
+
+  it('asks for an update when the team setup needs a newer RixFlow, at session start only', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.hubDir, 'config', 'workflow.yml'), 'requires: 99.0.0\ntracker:\n  type: asana\n');
+    let built = 0;
+    const deps = { source: () => { built += 1; return fakeAsanaSource([]); }, sync: noSync };
+    expect(await runCheck(ctx, deps, 'session')).toBe("[rixflow] update RixFlow: this team's setup needs 99.0.0");
+    expect(await runCheck(at(ctx, '2026-10-08T11:00:00Z'), deps, 'prompt')).toBe('');
+    expect(built).toBe(0);
+  });
+
+  it('reports a rejected Jira URL instead of a missing token, and never throws', async () => {
+    const ctx = makeCtx();
+    const jira: Workflow = { ...LEGACY_WORKFLOW, legacy: false, tracker: { type: 'jira', url: 'http://jira.example.com', flavor: 'server', projects: [] } };
+    const deps = { source: (c: Ctx, wf: Workflow) => makeSource(c, { JIRA_TOKEN: 't' }, wf), sync: noSync, workflow: () => jira };
+    expect(await runCheck(ctx, deps, 'session')).toBe('[rixflow] Jira URL rejected: it must be an https:// address');
+    expect(await runCheck(at(ctx, '2026-10-08T11:00:00Z'), deps, 'prompt')).toBe('');
   });
 });

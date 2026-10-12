@@ -9,7 +9,7 @@ import { loadUserConfig } from '../../src/core/config';
 import { fakeAsanaSource, fakeSource, field, task, ticket } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
 import { hubCommand } from '../../src/core/command';
-import { readHandover, writeHandover } from '../../src/core/notes';
+import { readHandover, writeCheckpoint, writeHandover } from '../../src/core/notes';
 import { writePrivateBrief } from '../../src/core/private';
 import { HubError } from '../../src/core/types';
 import type { SyncResult } from '../../src/core/git';
@@ -188,6 +188,30 @@ describe('MCP server', () => {
     const r = await call('finish_task', { task: '101' });
     expect(JSON.parse(r.text).handoverEnded).toBe(true);
     expect(readHandover(ctx, '101')?.outcome).toBe('finished');
+  });
+
+  it('ticket tools say the team setup needs a newer RixFlow', async () => {
+    const { call, ctx } = await connect();
+    writeFileSync(join(ctx.hubDir, 'config', 'workflow.yml'), 'requires: 99.0.0\ntracker:\n  type: asana\n');
+    for (const [tool, args] of [['plate', {}], ['task_details', { task: '101' }], ['start_task', { task: '101', cwd: '/w' }]] as const) {
+      const r = await call(tool, args);
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/^WORKFLOW_TOO_NEW: This team's setup needs RixFlow 99\.0\.0 or newer/);
+    }
+  });
+
+  it('resume_task with an invalid workflow still returns the handover, checkpoint and notes', async () => {
+    const { call, ctx } = await connect();
+    writeHandover(ctx, { task: '101', projectDir: '/home/u/p/acme', asanaModifiedAt: '', brief: '# Testimonial card', related: [] });
+    writeCheckpoint(ctx, { task: '101', done: 'card', pending: 'tests', blockers: 'none', resume: 'npm test' });
+    writeFileSync(join(ctx.hubDir, 'config', 'workflow.yml'), 'tracker:\n  type: trello\n');
+    const r = await call('resume_task', { task: '101' });
+    expect(r.isError).toBe(false);
+    const out = JSON.parse(r.text);
+    expect(out.handover.brief).toBe('# Testimonial card');
+    expect(out.checkpoint.pending).toBe('tests');
+    expect(out.ticketsUnavailable).toBe(true);
+    expect(out.reason).toBe("the ticket can't be loaded: the team's workflow.yml is invalid");
   });
 
   it('hands the workflow it loaded to the source factory', async () => {

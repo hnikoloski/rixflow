@@ -36567,6 +36567,13 @@ var FILE = "config/workflow.yml";
 var SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 var FROMS = ["custom-field", "asana-project", "component", "label", "jira-project"];
 var BUCKETS = ["todo", "in_progress", "waiting", "done"];
+var WorkflowTooNew = class extends HubError {
+  constructor(requires) {
+    super("WORKFLOW_TOO_NEW", `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`);
+    this.requires = requires;
+  }
+  requires;
+};
 function fail2(reason) {
   throw new HubError("BAD_CONFIG", `${FILE}: ${reason}`);
 }
@@ -36677,12 +36684,7 @@ function loadWorkflow(hubDir2, version2 = RIXFLOW_VERSION) {
   if (raw.requires !== void 0 && raw.requires !== null && raw.requires !== "") {
     if (typeof raw.requires !== "string" || !SEMVER.test(raw.requires)) fail2("requires must be a version like 0.3.0");
     requires = raw.requires;
-    if (compareVersions(requires, version2) > 0) {
-      throw new HubError(
-        "WORKFLOW_TOO_NEW",
-        `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`
-      );
-    }
+    if (compareVersions(requires, version2) > 0) throw new WorkflowTooNew(requires);
   }
   const urgent = section(raw, "urgent");
   return {
@@ -46178,7 +46180,7 @@ async function startTask(ctx, source, wf, input2) {
     needsSite: !site.folder
   };
 }
-async function resumeTask(ctx, source, task) {
+async function resumeTask(ctx, source, task, noSource = "the ticket tracker is not configured") {
   assertTicketId(task);
   const handover = readHandover(ctx, task);
   const checkpoint = readCheckpoint(ctx, task);
@@ -46196,7 +46198,7 @@ async function resumeTask(ctx, source, task) {
     ticketsUnavailable: true,
     reason: oneLine(scrub(reason)).slice(0, 200)
   });
-  if (!source) return unavailable("the ticket tracker is not configured");
+  if (!source) return unavailable(noSource);
   let current;
   let id;
   try {
@@ -46340,7 +46342,15 @@ function createServer(deps) {
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
-    return resumeTask(ctx, deps.source(ctx, workflowFor(ctx)), task);
+    let source = null;
+    let reason;
+    try {
+      source = deps.source(ctx, workflowFor(ctx));
+    } catch (e) {
+      if (!(e instanceof HubError)) throw e;
+      reason = e.code === "BAD_CONFIG" ? "the ticket can't be loaded: the team's workflow.yml is invalid" : `${e.code}: ${e.message}`;
+    }
+    return resumeTask(ctx, source, task, reason);
   }));
   server2.registerTool("remember_site", {
     description: "Remember which site (code from the hub config/sites.yml, e.g. AC or GL) an Asana task belongs to, when it cannot be resolved automatically.",

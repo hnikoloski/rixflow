@@ -6,6 +6,7 @@ import { buildStatus, emptyStatus, STATUS_VERSION, type StatusDeps, type StatusO
 import { sendMessage } from '../../src/core/messages';
 import { endHandover, writeCheckpoint, writeHandover } from '../../src/core/notes';
 import { HubError, type Ctx } from '../../src/core/types';
+import { makeSource } from '../../src/core/runtime';
 import { LEGACY_WORKFLOW } from '../../src/core/workflow';
 import { asSource, fakeAsanaSource, fakeSource, field, task } from '../fixtures/asana';
 import { makeCtx } from '../helpers';
@@ -317,6 +318,26 @@ describe('buildStatus', () => {
     const s = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => fakeAsanaSource([]) }));
     expect(s.problems).toEqual(['tickets: workflow invalid']);
     expect(s.inbox).toHaveLength(1);
+  });
+
+  it('asks for an update when the team setup needs a newer RixFlow, skips tickets and serves the rest', async () => {
+    const ctx = makeCtx();
+    writeFileSync(join(ctx.hubDir, 'config', 'workflow.yml'), 'requires: 99.0.0\ntracker:\n  type: asana\n');
+    sendMessage(as(ctx, 'pm'), { to: 'hristijan', type: 'request', body: 'hi' });
+    let built = 0;
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { source: () => { built += 1; return fakeAsanaSource([]); } }));
+    expect(s.problems).toEqual(['tickets: update rixflow']);
+    expect(s.sprint).toBeNull();
+    expect(built).toBe(0);
+    expect(s.inbox).toHaveLength(1);
+  });
+
+  it('reports a rejected Jira URL as a tickets problem instead of throwing', async () => {
+    const ctx = makeCtx();
+    const jira = { ...structuredClone(LEGACY_WORKFLOW), legacy: false, tracker: { type: 'jira' as const, url: 'http://jira.example.com', flavor: 'server' as const, projects: [] } };
+    const s = await buildStatus(opts({ asana: true }), deps(ctx, { workflow: () => jira, source: (c, wf) => makeSource(c, { JIRA_TOKEN: 't' }, wf) }));
+    expect(s.problems).toEqual(['tickets: jira url invalid']);
+    expect(s.initialized).toBe(true);
   });
 
   it('reports any *_AUTH error as a rejected token', async () => {

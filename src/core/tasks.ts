@@ -123,7 +123,10 @@ export async function startTask(ctx: Ctx, source: TicketSource, wf: Workflow, in
   };
 }
 
-export async function resumeTask(ctx: Ctx, source: TicketSource | null, task: string): Promise<ResumeResult> {
+// `noSource` is the reason given when `source` is null.
+export async function resumeTask(
+  ctx: Ctx, source: TicketSource | null, task: string, noSource = 'the ticket tracker is not configured',
+): Promise<ResumeResult> {
   assertTicketId(task);
   const handover = readHandover(ctx, task);
   const checkpoint = readCheckpoint(ctx, task);
@@ -136,7 +139,7 @@ export async function resumeTask(ctx: Ctx, source: TicketSource | null, task: st
   const unavailable = (reason: string): ResumeResult => ({
     ...local, changed: false, newComments: [], currentModifiedAt: null, ticketsUnavailable: true, reason: oneLine(scrub(reason)).slice(0, 200),
   });
-  if (!source) return unavailable('the ticket tracker is not configured');
+  if (!source) return unavailable(noSource);
   let current: Ticket;
   let id: string;
   try {

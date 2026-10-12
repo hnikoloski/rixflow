@@ -46,6 +46,13 @@ const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 const FROMS = ['custom-field', 'asana-project', 'component', 'label', 'jira-project'] as const;
 const BUCKETS = ['todo', 'in_progress', 'waiting', 'done'] as const;
 
+// A workflow.yml whose `requires` is newer than this RixFlow: its ticket features are skipped.
+export class WorkflowTooNew extends HubError {
+  constructor(readonly requires: string) {
+    super('WORKFLOW_TOO_NEW', `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`);
+  }
+}
+
 function fail(reason: string): never {
   throw new HubError('BAD_CONFIG', `${FILE}: ${reason}`);
 }
@@ -165,12 +172,7 @@ export function loadWorkflow(hubDir: string, version: string = RIXFLOW_VERSION):
   if (raw.requires !== undefined && raw.requires !== null && raw.requires !== '') {
     if (typeof raw.requires !== 'string' || !SEMVER.test(raw.requires)) fail('requires must be a version like 0.3.0');
     requires = raw.requires;
-    if (compareVersions(requires, version) > 0) {
-      throw new HubError(
-        'WORKFLOW_TOO_NEW',
-        `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`,
-      );
-    }
+    if (compareVersions(requires, version) > 0) throw new WorkflowTooNew(requires);
   }
   const urgent = section(raw, 'urgent');
   return {

@@ -80,6 +80,7 @@ export function loadState(dir: string): CheckState {
     if (typeof s.summaryFailureReported === 'string') state.summaryFailureReported = s.summaryFailureReported;
     if (typeof s.offlineNoticeDay === 'string') state.offlineNoticeDay = s.offlineNoticeDay;
     if (typeof s.noRemoteNoticeDay === 'string') state.noRemoteNoticeDay = s.noRemoteNoticeDay;
+    if (typeof s.publicHubCheckDay === 'string') state.publicHubCheckDay = s.publicHubCheckDay;
     return state;
   } catch {
     return { seenTaskModified: {}, notified: [] };

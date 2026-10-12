@@ -1,12 +1,13 @@
 import { hubCommand } from './command';
 import { loadState, saveState } from './config';
-import { NO_REMOTE_DETAIL, type SyncResult } from './git';
+import { Git, NO_REMOTE_DETAIL, type SyncResult } from './git';
 import { listInbox, type Message } from './messages';
+import { isPublicRepo } from './repo';
 import { scrub } from './scrub';
 import { lastSummaryFailure } from './summarylog';
 import type { TicketSource } from './tickets/types';
-import type { CheckState, Ctx } from './types';
-import { loadWorkflow, type Workflow } from './workflow';
+import { HubError, type CheckState, type Ctx } from './types';
+import { loadWorkflow, WorkflowTooNew, type Workflow } from './workflow';
 
 export const PROMPT_INTERVAL_MS = 300_000;
 
@@ -29,17 +30,37 @@ export interface CheckDeps {
   sync: () => Promise<SyncResult | null>;
   // Names the tracker when no source could be built. Defaults to the hub's config/workflow.yml.
   workflow?: () => Workflow;
+  // Whether a hub remote can be read without credentials. Defaults to an anonymous `git ls-remote`.
+  isPublic?: (url: string) => Promise<boolean>;
 }
+
+const PUBLIC_HUB = "hub repo is public: anyone can read your team's notes. Make it private.";
 
 const LABELS: Record<Workflow['tracker']['type'], string> = { asana: 'Asana', jira: 'Jira' };
 
-// The workflow, loaded once per check; null when it cannot be read (hooks stay quiet).
-function workflowOf(ctx: Ctx, deps: CheckDeps): Workflow | null {
+// The workflow, loaded once per check. An unreadable one leaves wf null (hooks stay quiet about it);
+// one that needs a newer RixFlow is kept as the error, so the brief can ask for an update.
+function workflowOf(ctx: Ctx, deps: CheckDeps): { wf: Workflow | null; error: unknown } {
   try {
-    return deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir);
-  } catch {
-    return null;
+    return { wf: deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir), error: null };
+  } catch (e) {
+    return { wf: null, error: e };
   }
+}
+
+// The session brief's line when no ticket source could be built, or null to say nothing.
+function noSourceNote(wf: Workflow | null, error: unknown): string | null {
+  if (error instanceof WorkflowTooNew) return `update RixFlow: this team's setup needs ${error.requires}`;
+  if (error instanceof HubError && error.code === 'JIRA_BAD_URL') return 'Jira URL rejected: it must be an https:// address';
+  return wf ? `${LABELS[wf.tracker.type]} token missing (run: ${hubCommand('token set')})` : null;
+}
+
+// True only when the hub's origin can be read anonymously; anything else (no origin, an error) is false.
+async function hubIsPublic(ctx: Ctx, deps: CheckDeps): Promise<boolean> {
+  const origin = await new Git(ctx.hubDir).tryRun(['remote', 'get-url', 'origin']);
+  const url = origin.ok ? origin.out.trim() : '';
+  if (!url) return false;
+  return (deps.isPublic ?? ((u: string) => isPublicRepo(u)))(url);
 }
 
 // Makes one untrusted string safe to inject: one line, no control or bidi characters,
@@ -110,19 +131,28 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   state.lastPromptCheck = now.toISOString();
   const parts: string[] = [];
   const budget = trigger === 'prompt' ? PROMPT_TIMEOUT_MS : SESSION_TIMEOUT_MS;
+  const today = now.toISOString().slice(0, 10);
 
-  // Tickets and sync start together so their latency overlaps instead of adding up.
-  const wf = workflowOf(ctx, deps);
+  // Tickets, the public-hub check and sync start together so their latency overlaps instead of adding up.
+  const { wf, error: wfError } = workflowOf(ctx, deps);
+  let sourceError = wfError;
   let source: TicketSource | null;
   try {
     source = typeof deps.source === 'function' ? (wf ? deps.source(ctx, wf) : null) : deps.source;
-  } catch {
+  } catch (e) {
     source = null;
+    sourceError = e;
   }
   const ticketFetch = source ? withTimeout(() => source.myTickets(), budget) : null;
   // Handled here so a rejection during the sync wait is not reported as unhandled; it is still
   // awaited (and its error handled) further down.
   ticketFetch?.catch(() => undefined);
+  // At most once per UTC day, at session start; every failure counts as not public.
+  let publicCheck: Promise<boolean> | null = null;
+  if (trigger === 'session' && state.publicHubCheckDay !== today) {
+    state.publicHubCheckDay = today;
+    publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => false);
+  }
   const synced = await withTimeout(() => deps.sync(), budget).catch(() => null);
 
   let fresh: Message[] = [];
@@ -141,8 +171,8 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   state.notified = [...previous.filter((id) => !freshSet.has(id)), ...freshIds].slice(-NOTIFIED_CAP);
 
   if (!source || !ticketFetch) {
-    const label = trigger === 'session' && wf ? LABELS[wf.tracker.type] : null;
-    if (label) parts.push(`${label} token missing (run: ${hubCommand('token set')})`);
+    const note = trigger === 'session' ? noSourceNote(wf, sourceError) : null;
+    if (note) parts.push(note);
   } else {
     try {
       const tickets = await ticketFetch;
@@ -161,7 +191,9 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
     }
   }
 
-  const health = describeHealth(synced, trigger, state, now.toISOString().slice(0, 10));
+  if (publicCheck && (await publicCheck)) parts.push(PUBLIC_HUB);
+
+  const health = describeHealth(synced, trigger, state, today);
   if (health) parts.push(health);
   if (synced?.conflicts?.length) parts.push(`${synced.conflicts.length} conflict copies kept`);
 

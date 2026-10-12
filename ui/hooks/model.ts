@@ -141,6 +141,9 @@ export function unseen(s: Status | null, seen: readonly string[]): InboxItem[] {
   return s.inbox.filter(m => m.status === 'new' && !known.has(m.id))
 }
 
+// The `hub status` problem for a team setup that needs a newer RixFlow; the band shows it too.
+export const UPDATE_PROBLEM = 'tickets: update rixflow'
+
 export type BandParts = { chip: string; who: string; what: string }
 
 export function bandParts(items: InboxItem[]): BandParts {

@@ -321,6 +321,29 @@ test('a tickets problem shows in the sprint area, not in the general problem lis
   expect(await pane.find({ type: 'Text', text: ' ! ' })).toBeUndefined()
 })
 
+test('a setup that needs a newer RixFlow shows in the band in warning color and in the sprint area', async ($, on) => {
+  const clock = world(on)
+  on('process.run', async () => ran(status({ inbox: [], problems: ['tickets: update rixflow'] })))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async () => ({ value: undefined }))
+  await $.session.start(START)
+  await clock.settle()
+  const band = await $.ui.mount({
+    plugin: 'rixflow-ui', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 80, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+    viewport: { columns: 80, rows: 40 },
+  })
+  const warning = await band.find({ type: 'Text', text: '▲ tickets: update rixflow' })
+  expect((warning as Node | undefined)?.props).toMatchObject({ color: 'warning' })
+  expect(((await band.drawn()) as Node).props).toMatchObject({ paddingX: 1 })
+  const pane = await $.ui.mount({
+    plugin: 'rixflow-ui', surface: 'terminal', component: 'Pane', requestId: 'rixflow',
+    props: { title: 'RixFlow', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+    viewport: { columns: 60, rows: 40 },
+  })
+  expect(await pane.find({ type: 'Text', text: 'tickets: update rixflow' })).toBeDefined()
+})
+
 // The kit hands back the tree a surface is given, not a painted screen, so it cannot measure a
 // rendered line. This asserts what decides the width: the root's padding, and that the text of every
 // plain row (Buttons excluded, they sit beside it) fits the width left after that padding. The NOW

@@ -27,6 +27,8 @@ export interface CheckState {
   // Calendar day (YYYY-MM-DD, UTC) of the last "offline, 0 pending" / "no remote" notice.
   offlineNoticeDay?: string;
   noRemoteNoticeDay?: string;
+  // Calendar day (YYYY-MM-DD, UTC) the hub's origin was last checked for public access.
+  publicHubCheckDay?: string;
 }
 
 export class HubError extends Error {

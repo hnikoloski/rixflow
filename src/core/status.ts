@@ -94,6 +94,13 @@ function writeCache(ctx: Ctx, cache: TicketCache): void {
   }
 }
 
+// The problem line for a workflow or ticket source that could not be set up.
+function setupProblem(e: unknown, fallback: string): string {
+  if (e instanceof HubError && e.code === 'WORKFLOW_TOO_NEW') return 'tickets: update rixflow';
+  if (e instanceof HubError && e.code === 'JIRA_BAD_URL') return 'tickets: jira url invalid';
+  return fallback;
+}
+
 const toTask = (i: PlateItem): StatusTask => ({ task: i.ref, title: i.title, sites: i.sites, status: i.status, due: i.due, paused: i.paused });
 
 // Resolves 'timeout' once `ms` have passed, unless `work` settles first; the timer never outlives it.
@@ -122,8 +129,9 @@ async function ticketSection(
   let source: TicketSource | null;
   try {
     source = deps.source(ctx, wf);
-  } catch {
-    source = null;
+  } catch (e) {
+    problems.push(setupProblem(e, 'tickets token missing'));
+    return cached;
   }
   if (!source) {
     problems.push('tickets token missing');
@@ -204,8 +212,8 @@ export async function buildStatus(opts: StatusOptions, deps: StatusDeps): Promis
   let wf: Workflow | null = null;
   try {
     wf = deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
-  } catch {
-    problems.push('tickets: workflow invalid');
+  } catch (e) {
+    problems.push(setupProblem(e, 'tickets: workflow invalid'));
   }
   if (wf) tickets = opts.asana ? await ticketSection(ctx, wf, opts, deps, problems, deadline) : readCache(ctx, cacheScope(ctx, wf));
   if (tickets) out.sprint = { name: tickets.name, fetchedAt: tickets.fetchedAt, items: tickets.items };

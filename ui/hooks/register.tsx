@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { InboxItem, Status, View } from '../types'
 import {
   ACCENT, bandParts, canFill, cell, contextBadge, cliPath, fitRow, staleAge, titleHasSite, fillFor, fit, nextCurrentTask, parseStatus, relTime, remember, RIXFLOW_TOOL,
-  PANE_PAD_X, refreshGate, rule, shouldFetchAsana, statusArgv, statusLine, syncBadge, TOOL, unseen, type Action, type Refresh,
+  PANE_PAD_X, refreshGate, rule, shouldFetchAsana, statusArgv, statusLine, syncBadge, TOOL, unseen, UPDATE_PROBLEM, type Action, type Refresh,
 } from './model'
 
 const PANE = 'rixflow'
@@ -203,22 +203,28 @@ export const register: Register = on => {
     if (!mod.active) return next(e)
     const { status } = await read($, view)
     const items = unseen(status, mod.seen)
-    if (!items.length || e.props.hasSurvey) return next(e)
+    const update = status?.problems.includes(UPDATE_PROBLEM) ?? false
+    if ((!items.length && !update) || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const [one] = items
     const open: Action = items.length === 1 && one ? { kind: 'inbox', id: one.id } : { kind: 'inbox' }
-    const band = bandParts(items)
+    const band = items.length ? bandParts(items) : null
     return (
-      <Box paddingX={1}>
-        <Text backgroundColor={ACCENT.inbox} color="inverseText" bold> {band.chip} </Text>
-        <Text color={ACCENT.inbox} bold> {band.who}</Text>
-        <Box flexShrink={1}>
-          <Text color="subtle" wrap="truncate"> {band.what} </Text>
-        </Box>
-        <Box gap={1} marginLeft={1}>
-          <Button key="band-open" variant="primary" label={items.length === 1 ? 'Open' : 'Open inbox'} onPress={async () => { await markSeen($, items); await fill($, open) }} />
-          <Button key="band-later" dimColor label="Later" onPress={() => markSeen($, items)} />
-        </Box>
+      <Box flexDirection="column" paddingX={1}>
+        {update && <Text color="warning" wrap="truncate">▲ {UPDATE_PROBLEM}</Text>}
+        {band && (
+          <Box>
+            <Text backgroundColor={ACCENT.inbox} color="inverseText" bold> {band.chip} </Text>
+            <Text color={ACCENT.inbox} bold> {band.who}</Text>
+            <Box flexShrink={1}>
+              <Text color="subtle" wrap="truncate"> {band.what} </Text>
+            </Box>
+            <Box gap={1} marginLeft={1}>
+              <Button key="band-open" variant="primary" label={items.length === 1 ? 'Open' : 'Open inbox'} onPress={async () => { await markSeen($, items); await fill($, open) }} />
+              <Button key="band-later" dimColor label="Later" onPress={() => markSeen($, items)} />
+            </Box>
+          </Box>
+        )}
       </Box>
     )
   }).catch(($, e, next) => next(e))

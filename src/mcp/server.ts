@@ -155,7 +155,16 @@ export function createServer(deps: ServerDeps): McpServer {
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
-    return resumeTask(ctx, deps.source(ctx, workflowFor(ctx)), task);
+    // Works from local files even when the team's workflow cannot be used; only the ticket part is lost.
+    let source: TicketSource | null = null;
+    let reason: string | undefined;
+    try {
+      source = deps.source(ctx, workflowFor(ctx));
+    } catch (e) {
+      if (!(e instanceof HubError)) throw e;
+      reason = e.code === 'BAD_CONFIG' ? "the ticket can't be loaded: the team's workflow.yml is invalid" : `${e.code}: ${e.message}`;
+    }
+    return resumeTask(ctx, source, task, reason);
   }));
 
   server.registerTool('remember_site', {

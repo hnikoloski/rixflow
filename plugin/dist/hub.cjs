@@ -10924,6 +10924,7 @@ function loadState(dir) {
     if (typeof s.summaryFailureReported === "string") state.summaryFailureReported = s.summaryFailureReported;
     if (typeof s.offlineNoticeDay === "string") state.offlineNoticeDay = s.offlineNoticeDay;
     if (typeof s.noRemoteNoticeDay === "string") state.noRemoteNoticeDay = s.noRemoteNoticeDay;
+    if (typeof s.publicHubCheckDay === "string") state.publicHubCheckDay = s.publicHubCheckDay;
     return state;
   } catch {
     return { seenTaskModified: {}, notified: [] };
@@ -11397,9 +11398,111 @@ function listWaiting(ctx, olderThanDays) {
   return (0, import_node_fs5.readdirSync)(inboxRoot, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== ctx.user.name && passes(assertName, e.name)).flatMap((e) => readAll(listMd((0, import_node_path6.join)(inboxRoot, e.name)), e.name)).filter((m) => m.from === ctx.user.name && m.type !== "answer").filter((m) => !answered.has(m.thread) && Date.parse(m.created) < cutoff).sort(byCreated);
 }
 
+// src/core/repo.ts
+var import_node_child_process2 = require("node:child_process");
+var import_promises = require("node:fs/promises");
+var import_node_os2 = require("node:os");
+var import_node_path7 = require("node:path");
+var LS_REMOTE_TIMEOUT_MS = 15e3;
+var GH_TIMEOUT_MS = 6e4;
+var REPO_NAME = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/;
+var HOST = /^[A-Za-z0-9.-]+$/;
+var PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/;
+function anonymousUrl(url) {
+  const u = url.trim();
+  const scp = /^[A-Za-z0-9._-]+@([^:/\s]+):([^\s]+)$/.exec(u);
+  if (scp) return HOST.test(scp[1]) && PATH.test(scp[2]) ? `https://${scp[1]}/${scp[2]}` : null;
+  try {
+    const p = new URL(u);
+    if (p.protocol !== "https:" && p.protocol !== "ssh:") return null;
+    const path = p.pathname.replace(/^\/+/, "");
+    if (!p.hostname || !HOST.test(p.hostname) || !PATH.test(path)) return null;
+    return p.protocol === "https:" ? `https://${p.host}/${path}` : `https://${p.hostname}/${path}`;
+  } catch {
+    return null;
+  }
+}
+var systemGit = (args, env, cwd) => new Promise((resolve9) => {
+  (0, import_node_child_process2.execFile)("git", args, { env, cwd, timeout: LS_REMOTE_TIMEOUT_MS, encoding: "utf8", maxBuffer: 1 << 20 }, (err, stdout) => resolve9({ ok: !err, stdout: err ? "" : stdout }));
+});
+function cleanEnv(home) {
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) if (k.startsWith("GIT_CONFIG_")) delete env[k];
+  for (const k of ["GIT_SSH_COMMAND", "GIT_SSH", "GIT_DIR"]) delete env[k];
+  return {
+    ...env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: import_node_os2.devNull,
+    GIT_CONFIG_SYSTEM: import_node_os2.devNull,
+    HOME: home,
+    XDG_CONFIG_HOME: home,
+    USERPROFILE: home,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
+    GCM_INTERACTIVE: "never"
+  };
+}
+async function isPublicRepo(url, run = systemGit) {
+  const anon = anonymousUrl(url);
+  if (!anon) return false;
+  let dir;
+  try {
+    dir = await (0, import_promises.mkdtemp)((0, import_node_path7.join)((0, import_node_os2.tmpdir)(), "rixflow-anon-"));
+    const args = [
+      "-c",
+      "credential.helper=",
+      "-c",
+      "http.extraHeader=",
+      "-c",
+      "protocol.allow=never",
+      "-c",
+      "protocol.https.allow=always",
+      "ls-remote",
+      "--",
+      anon
+    ];
+    return (await run(args, cleanEnv(dir), dir)).ok;
+  } catch {
+    return false;
+  } finally {
+    if (dir) await (0, import_promises.rm)(dir, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
+async function checkReach(url, run = systemGit) {
+  if (url.startsWith("-")) return { ok: false, empty: false };
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" };
+  try {
+    const r = await run(["ls-remote", "--", url], env);
+    return r.ok ? { ok: true, empty: r.stdout.trim() === "" } : { ok: false, empty: false };
+  } catch {
+    return { ok: false, empty: false };
+  }
+}
+var runGh = (args) => new Promise((resolve9) => {
+  (0, import_node_child_process2.execFile)("gh", args, { timeout: GH_TIMEOUT_MS, encoding: "utf8", maxBuffer: 1 << 20 }, (err, stdout) => resolve9({ ok: !err, stdout: err ? "" : stdout }));
+});
+function systemGh() {
+  return {
+    available: async () => (await runGh(["auth", "status"])).ok,
+    async createPrivate(name) {
+      if (!REPO_NAME.test(name)) throw new HubError("BAD_REPO_NAME", 'Repository name must be "owner/repo" or "repo" (letters, digits, . _ -).');
+      if (!(await runGh(["repo", "create", name, "--private"])).ok) throw new HubError("GH_FAILED", "gh could not create the repository.");
+      const view = await runGh(["repo", "view", name, "--json", "sshUrl"]);
+      let ssh;
+      try {
+        ssh = JSON.parse(view.stdout).sshUrl;
+      } catch {
+      }
+      if (!view.ok || typeof ssh !== "string" || !ssh) throw new HubError("GH_FAILED", `Created the repo, but could not read its address. Run gh repo view ${name} --json sshUrl.`);
+      return ssh;
+    }
+  };
+}
+
 // src/core/summarylog.ts
 var import_node_fs6 = require("node:fs");
-var import_node_path7 = require("node:path");
+var import_node_path8 = require("node:path");
 var SUMMARY_LOG = "summary-errors.log";
 var SUMMARY_LOG_MAX_LINES = 200;
 var DETAIL_MAX = 200;
@@ -11409,7 +11512,7 @@ var field = (text2, max) => {
 };
 function logSummary(configDir2, entry) {
   try {
-    const path = (0, import_node_path7.join)(configDir2, SUMMARY_LOG);
+    const path = (0, import_node_path8.join)(configDir2, SUMMARY_LOG);
     (0, import_node_fs6.mkdirSync)(configDir2, { recursive: true });
     const line2 = [
       (entry.now ?? /* @__PURE__ */ new Date()).toISOString(),
@@ -11428,7 +11531,7 @@ function logSummary(configDir2, entry) {
 }
 function lastSummaryFailure(configDir2) {
   try {
-    const path = (0, import_node_path7.join)(configDir2, SUMMARY_LOG);
+    const path = (0, import_node_path8.join)(configDir2, SUMMARY_LOG);
     if (!(0, import_node_fs6.existsSync)(path)) return null;
     const lines = (0, import_node_fs6.readFileSync)(path, "utf8").split("\n").filter(Boolean);
     for (let i = lines.length - 1; i >= 0; i--) {
@@ -11444,7 +11547,7 @@ function lastSummaryFailure(configDir2) {
 
 // src/core/workflow.ts
 var import_node_fs7 = require("node:fs");
-var import_node_path8 = require("node:path");
+var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
@@ -11469,6 +11572,13 @@ var FILE = "config/workflow.yml";
 var SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 var FROMS = ["custom-field", "asana-project", "component", "label", "jira-project"];
 var BUCKETS = ["todo", "in_progress", "waiting", "done"];
+var WorkflowTooNew = class extends HubError {
+  constructor(requires) {
+    super("WORKFLOW_TOO_NEW", `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`);
+    this.requires = requires;
+  }
+  requires;
+};
 function fail2(reason) {
   throw new HubError("BAD_CONFIG", `${FILE}: ${reason}`);
 }
@@ -11572,19 +11682,14 @@ function parseSprints(raw) {
   return fail2(`unknown sprints mode: ${String(mode)}`);
 }
 function loadWorkflow(hubDir2, version = RIXFLOW_VERSION) {
-  const path = (0, import_node_path8.join)(hubDir2, FILE);
+  const path = (0, import_node_path9.join)(hubDir2, FILE);
   if (!(0, import_node_fs7.existsSync)(path)) return structuredClone(LEGACY);
   const raw = readYaml(path, FILE);
   let requires = null;
   if (raw.requires !== void 0 && raw.requires !== null && raw.requires !== "") {
     if (typeof raw.requires !== "string" || !SEMVER.test(raw.requires)) fail2("requires must be a version like 0.3.0");
     requires = raw.requires;
-    if (compareVersions(requires, version) > 0) {
-      throw new HubError(
-        "WORKFLOW_TOO_NEW",
-        `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`
-      );
-    }
+    if (compareVersions(requires, version) > 0) throw new WorkflowTooNew(requires);
   }
   const urgent = section(raw, "urgent");
   return {
@@ -11602,7 +11707,7 @@ function workflowToYaml(wf) {
   return import_yaml4.default.stringify(requires === null ? rest : { requires, ...rest });
 }
 function writeWorkflow(hubDir2, wf) {
-  writeGuarded((0, import_node_path8.join)(hubDir2, FILE), scrub(workflowToYaml(wf)));
+  writeGuarded((0, import_node_path9.join)(hubDir2, FILE), scrub(workflowToYaml(wf)));
 }
 
 // src/core/check.ts
@@ -11615,13 +11720,25 @@ var CONTROL_CHARS = new RegExp(
   "[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2028\\u2029\\u2066-\\u2069]",
   "g"
 );
+var PUBLIC_HUB = "hub repo is public: anyone can read your team's notes. Make it private.";
 var LABELS = { asana: "Asana", jira: "Jira" };
 function workflowOf(ctx, deps) {
   try {
-    return deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir);
-  } catch {
-    return null;
+    return { wf: deps.workflow ? deps.workflow() : loadWorkflow(ctx.hubDir), error: null };
+  } catch (e) {
+    return { wf: null, error: e };
   }
+}
+function noSourceNote(wf, error) {
+  if (error instanceof WorkflowTooNew) return `update RixFlow: this team's setup needs ${error.requires}`;
+  if (error instanceof HubError && error.code === "JIRA_BAD_URL") return "Jira URL rejected: it must be an https:// address";
+  return wf ? `${LABELS[wf.tracker.type]} token missing (run: ${hubCommand("token set")})` : null;
+}
+async function hubIsPublic(ctx, deps) {
+  const origin = await new Git(ctx.hubDir).tryRun(["remote", "get-url", "origin"]);
+  const url = origin.ok ? origin.out.trim() : "";
+  if (!url) return false;
+  return (deps.isPublic ?? ((u) => isPublicRepo(u)))(url);
 }
 function clean(text2) {
   const oneLine3 = scrub(String(text2).replace(CONTROL_CHARS, " ")).replace(/\s+/g, " ").trim();
@@ -11679,15 +11796,23 @@ async function check(ctx, deps, trigger) {
   state.lastPromptCheck = now.toISOString();
   const parts = [];
   const budget = trigger === "prompt" ? PROMPT_TIMEOUT_MS : SESSION_TIMEOUT_MS;
-  const wf = workflowOf(ctx, deps);
+  const today = now.toISOString().slice(0, 10);
+  const { wf, error: wfError } = workflowOf(ctx, deps);
+  let sourceError = wfError;
   let source;
   try {
     source = typeof deps.source === "function" ? wf ? deps.source(ctx, wf) : null : deps.source;
-  } catch {
+  } catch (e) {
     source = null;
+    sourceError = e;
   }
   const ticketFetch = source ? withTimeout(() => source.myTickets(), budget) : null;
   ticketFetch?.catch(() => void 0);
+  let publicCheck = null;
+  if (trigger === "session" && state.publicHubCheckDay !== today) {
+    state.publicHubCheckDay = today;
+    publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => false);
+  }
   const synced = await withTimeout(() => deps.sync(), budget).catch(() => null);
   let fresh = [];
   try {
@@ -11703,8 +11828,8 @@ async function check(ctx, deps, trigger) {
   const previous = Array.isArray(state.notified) ? state.notified : [];
   state.notified = [...previous.filter((id) => !freshSet.has(id)), ...freshIds].slice(-NOTIFIED_CAP);
   if (!source || !ticketFetch) {
-    const label = trigger === "session" && wf ? LABELS[wf.tracker.type] : null;
-    if (label) parts.push(`${label} token missing (run: ${hubCommand("token set")})`);
+    const note = trigger === "session" ? noSourceNote(wf, sourceError) : null;
+    if (note) parts.push(note);
   } else {
     try {
       const tickets = await ticketFetch;
@@ -11720,7 +11845,8 @@ async function check(ctx, deps, trigger) {
       if (trigger === "session") parts.push(`${source.label} unreachable`);
     }
   }
-  const health = describeHealth(synced, trigger, state, now.toISOString().slice(0, 10));
+  if (publicCheck && await publicCheck) parts.push(PUBLIC_HUB);
+  const health = describeHealth(synced, trigger, state, today);
   if (health) parts.push(health);
   if (synced?.conflicts?.length) parts.push(`${synced.conflicts.length} conflict copies kept`);
   if (trigger === "session") {
@@ -11746,7 +11872,7 @@ async function runCheck(ctx, deps, trigger) {
 
 // src/core/runtime.ts
 var import_node_fs11 = require("node:fs");
-var import_node_path12 = require("node:path");
+var import_node_path13 = require("node:path");
 
 // src/core/asana.ts
 var DEFAULT_BASE = "https://app.asana.com/api/1.0";
@@ -11858,10 +11984,10 @@ var AsanaClient = class {
 // src/core/lock.ts
 var import_node_crypto = require("node:crypto");
 var import_node_fs8 = require("node:fs");
-var import_node_path9 = require("node:path");
+var import_node_path10 = require("node:path");
 var LOCK_STALE_MS = 6e4;
 var POLL_MS = 100;
-var lockPath = (hubDir2) => (0, import_node_path9.join)(hubDir2, ".git", "rixflow.lock");
+var lockPath = (hubDir2) => (0, import_node_path10.join)(hubDir2, ".git", "rixflow.lock");
 function readLock(path) {
   try {
     const v = JSON.parse((0, import_node_fs8.readFileSync)(path, "utf8"));
@@ -11929,7 +12055,7 @@ async function acquireLock(hubDir2, waitMs, sleep = (ms) => new Promise((r) => s
 
 // src/core/template.ts
 var import_node_fs9 = require("node:fs");
-var import_node_path10 = require("node:path");
+var import_node_path11 = require("node:path");
 var import_yaml5 = __toESM(require_dist(), 1);
 var README = `# Team hub
 
@@ -11964,12 +12090,12 @@ function validate(members, sites) {
 }
 async function bootstrapHub(dir, members, sites, env = process.env, workflow) {
   validate(members, sites);
-  if ((0, import_node_fs9.existsSync)((0, import_node_path10.join)(dir, ".git"))) throw new HubError("ALREADY_EXISTS", `${dir} is already a git repository`);
+  if ((0, import_node_fs9.existsSync)((0, import_node_path11.join)(dir, ".git"))) throw new HubError("ALREADY_EXISTS", `${dir} is already a git repository`);
   const putRaw = (rel, text2) => {
-    (0, import_node_fs9.mkdirSync)((0, import_node_path10.dirname)((0, import_node_path10.join)(dir, rel)), { recursive: true });
-    (0, import_node_fs9.writeFileSync)((0, import_node_path10.join)(dir, rel), text2);
+    (0, import_node_fs9.mkdirSync)((0, import_node_path11.dirname)((0, import_node_path11.join)(dir, rel)), { recursive: true });
+    (0, import_node_fs9.writeFileSync)((0, import_node_path11.join)(dir, rel), text2);
   };
-  const putDoc = (rel, type, body) => writeDoc((0, import_node_path10.join)(dir, rel), { type, generated: true }, body);
+  const putDoc = (rel, type, body) => writeDoc((0, import_node_path11.join)(dir, rel), { type, generated: true }, body);
   putRaw("config/team.yml", import_yaml5.default.stringify({ members }));
   putRaw("config/sites.yml", import_yaml5.default.stringify({ sites }));
   if (workflow) writeWorkflow(dir, workflow);
@@ -11990,7 +12116,7 @@ _Generated by RixFlow. Do not edit._
   await commitAll(git, "chore: bootstrap team hub", BOOTSTRAP_PATHS);
 }
 function mergeHubGitignore(dir) {
-  const path = (0, import_node_path10.join)(dir, ".gitignore");
+  const path = (0, import_node_path11.join)(dir, ".gitignore");
   const current = (0, import_node_fs9.existsSync)(path) ? (0, import_node_fs9.readFileSync)(path, "utf8") : "";
   const have = new Set(current.split(/\r?\n/).map((l) => l.trim()));
   const missing = HUB_GITIGNORE.filter((e) => !have.has(e));
@@ -12426,12 +12552,12 @@ var JiraClient = class {
 };
 
 // src/core/token.ts
-var import_node_child_process2 = require("node:child_process");
+var import_node_child_process3 = require("node:child_process");
 var import_node_fs10 = require("node:fs");
-var import_node_path11 = require("node:path");
+var import_node_path12 = require("node:path");
 var KEYCHAIN_TIMEOUT_MS = 5e3;
-var defaultExec = (cmd, args, input) => (0, import_node_child_process2.execFileSync)(cmd, args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: KEYCHAIN_TIMEOUT_MS });
-var tokenFile = (configDir2, kind) => (0, import_node_path11.join)(configDir2, `${kind}-token`);
+var defaultExec = (cmd, args, input) => (0, import_node_child_process3.execFileSync)(cmd, args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: KEYCHAIN_TIMEOUT_MS });
+var tokenFile = (configDir2, kind) => (0, import_node_path12.join)(configDir2, `${kind}-token`);
 var LEGACY_ACCOUNT = "asana";
 var accountFor = (kind, user) => user ? `${kind}:${user}` : kind;
 var ENV_VAR = { asana: "ASANA_TOKEN", jira: "JIRA_TOKEN" };
@@ -12530,7 +12656,7 @@ async function persistConfig(ctx, message, opts = {}, env = process.env) {
   return commitAndSync(ctx.hubDir, ctx.user.name, opts, env, (git) => commitConfig(git, message));
 }
 async function commitAndSync(hubDir2, user, opts, env, commit) {
-  if (!(0, import_node_fs11.existsSync)((0, import_node_path12.join)(hubDir2, ".git"))) return { status: "blocked", detail: "hub is not a git repo", pending: 0, conflicts: [] };
+  if (!(0, import_node_fs11.existsSync)((0, import_node_path13.join)(hubDir2, ".git"))) return { status: "blocked", detail: "hub is not a git repo", pending: 0, conflicts: [] };
   let release;
   try {
     release = await acquireLock(hubDir2, opts.waitMs ?? TOOL_LOCK_WAIT_MS);
@@ -12550,7 +12676,7 @@ async function commitAndSync(hubDir2, user, opts, env, commit) {
   }
 }
 async function syncHub(ctx) {
-  if (!(0, import_node_fs11.existsSync)((0, import_node_path12.join)(ctx.hubDir, ".git"))) return null;
+  if (!(0, import_node_fs11.existsSync)((0, import_node_path13.join)(ctx.hubDir, ".git"))) return null;
   return persistHub(ctx.hubDir, ctx.user.name, `sync: ${ctx.user.name}`, { waitMs: 0 });
 }
 async function persist(ctx, message, opts = {}) {
@@ -12573,15 +12699,15 @@ function describeSync(r) {
 }
 
 // src/core/summarize.ts
-var import_node_child_process3 = require("node:child_process");
+var import_node_child_process4 = require("node:child_process");
 var import_node_fs14 = require("node:fs");
 
 // src/core/private.ts
 var import_node_fs12 = require("node:fs");
-var import_node_path14 = require("node:path");
+var import_node_path15 = require("node:path");
 
 // src/core/sites.ts
-var import_node_path13 = require("node:path");
+var import_node_path14 = require("node:path");
 function isSiteCode(v) {
   try {
     assertSiteCode(v);
@@ -12596,9 +12722,9 @@ function folderFor(code, sites, user) {
   const site = Object.hasOwn(sites, code) ? sites[code] : void 0;
   if (!site) return null;
   const root = normalizeDir(user.projectsRoot);
-  const folder = (0, import_node_path13.resolve)(root, site.folder);
-  const rel = (0, import_node_path13.relative)(root, folder);
-  if (rel === "" || rel === ".." || rel.startsWith(".." + import_node_path13.sep) || (0, import_node_path13.isAbsolute)(rel)) return null;
+  const folder = (0, import_node_path14.resolve)(root, site.folder);
+  const rel = (0, import_node_path14.relative)(root, folder);
+  if (rel === "" || rel === ".." || rel.startsWith(".." + import_node_path14.sep) || (0, import_node_path14.isAbsolute)(rel)) return null;
   return folder;
 }
 function resolveSite(chain, mapped, sites, user) {
@@ -12617,7 +12743,7 @@ function resolveSite(chain, mapped, sites, user) {
 // src/core/private.ts
 function privateFile(configDir2, task) {
   assertTicketId(task);
-  return (0, import_node_path14.join)(configDir2, "private", `${task}.md`);
+  return (0, import_node_path15.join)(configDir2, "private", `${task}.md`);
 }
 var isLink = (path) => {
   try {
@@ -12628,10 +12754,10 @@ var isLink = (path) => {
 };
 var markerFile = (configDir2, task) => {
   assertTicketId(task);
-  return (0, import_node_path14.join)(configDir2, "private", `${task}.restricted`);
+  return (0, import_node_path15.join)(configDir2, "private", `${task}.restricted`);
 };
 function hasPrivateBrief(configDir2, task) {
-  if (isLink((0, import_node_path14.join)(configDir2, "private"))) return false;
+  if (isLink((0, import_node_path15.join)(configDir2, "private"))) return false;
   for (const file2 of [privateFile(configDir2, task), markerFile(configDir2, task)]) {
     try {
       if ((0, import_node_fs12.lstatSync)(file2).isFile()) return true;
@@ -12640,11 +12766,11 @@ function hasPrivateBrief(configDir2, task) {
   }
   return false;
 }
-var privateDirIsLink = (configDir2) => isLink((0, import_node_path14.join)(configDir2, "private"));
+var privateDirIsLink = (configDir2) => isLink((0, import_node_path15.join)(configDir2, "private"));
 function privateIds(configDir2) {
   try {
     if (privateDirIsLink(configDir2)) return [];
-    return (0, import_node_fs12.readdirSync)((0, import_node_path14.join)(configDir2, "private")).filter((f) => /\.(md|restricted)$/.test(f)).map((f) => f.replace(/\.(md|restricted)$/, ""));
+    return (0, import_node_fs12.readdirSync)((0, import_node_path15.join)(configDir2, "private")).filter((f) => /\.(md|restricted)$/.test(f)).map((f) => f.replace(/\.(md|restricted)$/, ""));
   } catch {
     return [];
   }
@@ -12652,18 +12778,18 @@ function privateIds(configDir2) {
 
 // src/core/notes.ts
 var import_node_fs13 = require("node:fs");
-var import_node_path16 = require("node:path");
+var import_node_path17 = require("node:path");
 
 // src/core/indexes.ts
-var import_node_path15 = require("node:path");
+var import_node_path16 = require("node:path");
 function rebuildIndex(hubDir2, relDir, title) {
-  const dir = (0, import_node_path15.join)(hubDir2, relDir);
+  const dir = (0, import_node_path16.join)(hubDir2, relDir);
   const groups = /* @__PURE__ */ new Map();
   for (const file2 of listMd(dir)) {
-    if ((0, import_node_path15.basename)(file2) === "_index.md") continue;
-    const inDir = (0, import_node_path15.relative)(dir, file2);
-    const group = inDir.includes(import_node_path15.sep) ? inDir.split(import_node_path15.sep)[0] : "(root)";
-    const link = (0, import_node_path15.relative)(hubDir2, file2).split(import_node_path15.sep).join("/").replace(/\.md$/, "");
+    if ((0, import_node_path16.basename)(file2) === "_index.md") continue;
+    const inDir = (0, import_node_path16.relative)(dir, file2);
+    const group = inDir.includes(import_node_path16.sep) ? inDir.split(import_node_path16.sep)[0] : "(root)";
+    const link = (0, import_node_path16.relative)(hubDir2, file2).split(import_node_path16.sep).join("/").replace(/\.md$/, "");
     groups.set(group, [...groups.get(group) ?? [], link]);
   }
   const lines = [`# ${title}`, "", "_Generated by RixFlow. Do not edit._", ""];
@@ -12672,7 +12798,7 @@ function rebuildIndex(hubDir2, relDir, title) {
     for (const link of groups.get(group).sort().reverse()) lines.push(`- [[${link}]]`);
     lines.push("");
   }
-  writeDoc((0, import_node_path15.join)(dir, "_index.md"), { type: "index", generated: true }, lines.join("\n"));
+  writeDoc((0, import_node_path16.join)(dir, "_index.md"), { type: "index", generated: true }, lines.join("\n"));
 }
 
 // src/core/notes.ts
@@ -12730,7 +12856,7 @@ function reindex(ctx) {
 var str2 = (v) => v === void 0 || v === null ? void 0 : String(v);
 function writeSession(ctx, s) {
   if (s.task) assertTicketId(s.task);
-  const dir = (0, import_node_path16.join)(personDir(ctx), "sessions");
+  const dir = (0, import_node_path17.join)(personDir(ctx), "sessions");
   const date = isoDate(ctx.now());
   const base = `${date}-${s.task ?? "misc"}`;
   const related = [s.task ? `[[people/${ctx.user.name}/handovers/${s.task}]]` : "", siteLink(s.site)].filter(Boolean).join(" \xB7 ");
@@ -12763,7 +12889,7 @@ function writeSession(ctx, s) {
     author: ctx.user.name
   };
   for (let n = 1; ; n++) {
-    const path = (0, import_node_path16.join)(dir, `${base}-${n}.md`);
+    const path = (0, import_node_path17.join)(dir, `${base}-${n}.md`);
     try {
       writeDoc(path, data, body, { exclusive: true });
       reindex(ctx);
@@ -12774,7 +12900,7 @@ function writeSession(ctx, s) {
   }
 }
 function hasSessionSummary(ctx, sessionId) {
-  return readAll2(listMd((0, import_node_path16.join)(personDir(ctx), "sessions")), (f) => readDoc(f).data.session_id).includes(sessionId);
+  return readAll2(listMd((0, import_node_path17.join)(personDir(ctx), "sessions")), (f) => readDoc(f).data.session_id).includes(sessionId);
 }
 function toCheckpoint(path) {
   const { data, body } = readDoc(path);
@@ -12793,11 +12919,11 @@ function toCheckpoint(path) {
   };
 }
 function listCheckpoints(ctx) {
-  return readAll2(listMd((0, import_node_path16.join)(personDir(ctx), "checkpoints")), toCheckpoint);
+  return readAll2(listMd((0, import_node_path17.join)(personDir(ctx), "checkpoints")), toCheckpoint);
 }
 function handoverPath(ctx, task) {
   assertTicketId(task);
-  return (0, import_node_path16.join)(personDir(ctx), "handovers", `${task}.md`);
+  return (0, import_node_path17.join)(personDir(ctx), "handovers", `${task}.md`);
 }
 function toHandover(path) {
   const { data, body } = readDoc(path);
@@ -12823,15 +12949,15 @@ function readHandover(ctx, task) {
   return (0, import_node_fs13.existsSync)(path) ? toHandover(path) : null;
 }
 function restrictedHandoverTasks(ctx) {
-  const dir = (0, import_node_path16.join)(personDir(ctx), "handovers");
+  const dir = (0, import_node_path17.join)(personDir(ctx), "handovers");
   if (!(0, import_node_fs13.existsSync)(dir)) return [];
-  return readAll2((0, import_node_fs13.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path16.join)(dir, f)), toHandover).filter((h) => h.restricted).map((h) => h.task);
+  return readAll2((0, import_node_fs13.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path17.join)(dir, f)), toHandover).filter((h) => h.restricted).map((h) => h.task);
 }
 function findActiveHandover(ctx, cwd) {
-  const dir = (0, import_node_path16.join)(personDir(ctx), "handovers");
+  const dir = (0, import_node_path17.join)(personDir(ctx), "handovers");
   if (!(0, import_node_fs13.existsSync)(dir)) return null;
   const matches = readAll2(
-    (0, import_node_fs13.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path16.join)(dir, f)),
+    (0, import_node_fs13.readdirSync)(dir).filter((f) => f.endsWith(".md") && f !== "_index.md").map((f) => (0, import_node_path17.join)(dir, f)),
     toHandover
   ).filter((h) => !h.ended && h.projectDir && isInsideDir(cwd, h.projectDir));
   matches.sort((a, b) => String(b.created).localeCompare(String(a.created)));
@@ -12854,7 +12980,7 @@ var MAX_OUTPUT_BYTES = 1024 * 1024;
 var TAIL_BYTES = 8 * 1024 * 1024;
 function makeRunClaude(opts) {
   return (prompt, input) => {
-    const result = (0, import_node_child_process3.spawnSync)(
+    const result = (0, import_node_child_process4.spawnSync)(
       opts.command,
       [
         "-p",
@@ -13121,7 +13247,7 @@ function errorText(e) {
 }
 
 // src/cli/hooks.ts
-var import_node_child_process4 = require("node:child_process");
+var import_node_child_process5 = require("node:child_process");
 var DETAILS = " (details: /rixflow:plate or /rixflow:inbox)";
 function withTimeout2(p, ms) {
   let timer;
@@ -13169,7 +13295,7 @@ async function runHook(event, stdin, deps) {
     return "";
   }
 }
-function detachedSummarySpawner(cliPath2, env = process.env, spawnFn = import_node_child_process4.spawn) {
+function detachedSummarySpawner(cliPath2, env = process.env, spawnFn = import_node_child_process5.spawn) {
   return (args) => {
     const childEnv = { ...env };
     delete childEnv.RIXFLOW_CHILD;
@@ -13186,7 +13312,7 @@ function parseSyncResult(text2) {
   if (typeof r !== "object" || !SYNC_STATUSES.includes(r.status) || typeof r.detail !== "string" || typeof r.pending !== "number" || !Array.isArray(r.conflicts) || !r.conflicts.every((c) => typeof c === "string")) throw new Error("unreadable sync result");
   return r;
 }
-function detachedSync(cliPath2, env = process.env, spawnFn = import_node_child_process4.spawn) {
+function detachedSync(cliPath2, env = process.env, spawnFn = import_node_child_process5.spawn) {
   return () => new Promise((resolve9, reject) => {
     const child = spawnFn(process.execPath, [cliPath2, "sync", "--json"], {
       detached: true,
@@ -13380,108 +13506,6 @@ function previewRows(samples, wf, now) {
       urgent: m.urgent
     };
   });
-}
-
-// src/core/repo.ts
-var import_node_child_process5 = require("node:child_process");
-var import_promises = require("node:fs/promises");
-var import_node_os2 = require("node:os");
-var import_node_path17 = require("node:path");
-var LS_REMOTE_TIMEOUT_MS = 15e3;
-var GH_TIMEOUT_MS = 6e4;
-var REPO_NAME = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/;
-var HOST = /^[A-Za-z0-9.-]+$/;
-var PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/;
-function anonymousUrl(url) {
-  const u = url.trim();
-  const scp = /^[A-Za-z0-9._-]+@([^:/\s]+):([^\s]+)$/.exec(u);
-  if (scp) return HOST.test(scp[1]) && PATH.test(scp[2]) ? `https://${scp[1]}/${scp[2]}` : null;
-  try {
-    const p = new URL(u);
-    if (p.protocol !== "https:" && p.protocol !== "ssh:") return null;
-    const path = p.pathname.replace(/^\/+/, "");
-    if (!p.hostname || !HOST.test(p.hostname) || !PATH.test(path)) return null;
-    return p.protocol === "https:" ? `https://${p.host}/${path}` : `https://${p.hostname}/${path}`;
-  } catch {
-    return null;
-  }
-}
-var systemGit = (args, env, cwd) => new Promise((resolve9) => {
-  (0, import_node_child_process5.execFile)("git", args, { env, cwd, timeout: LS_REMOTE_TIMEOUT_MS, encoding: "utf8", maxBuffer: 1 << 20 }, (err, stdout) => resolve9({ ok: !err, stdout: err ? "" : stdout }));
-});
-function cleanEnv(home) {
-  const env = { ...process.env };
-  for (const k of Object.keys(env)) if (k.startsWith("GIT_CONFIG_")) delete env[k];
-  for (const k of ["GIT_SSH_COMMAND", "GIT_SSH", "GIT_DIR"]) delete env[k];
-  return {
-    ...env,
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: import_node_os2.devNull,
-    GIT_CONFIG_SYSTEM: import_node_os2.devNull,
-    HOME: home,
-    XDG_CONFIG_HOME: home,
-    USERPROFILE: home,
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_ASKPASS: "",
-    SSH_ASKPASS: "",
-    GCM_INTERACTIVE: "never"
-  };
-}
-async function isPublicRepo(url, run = systemGit) {
-  const anon = anonymousUrl(url);
-  if (!anon) return false;
-  let dir;
-  try {
-    dir = await (0, import_promises.mkdtemp)((0, import_node_path17.join)((0, import_node_os2.tmpdir)(), "rixflow-anon-"));
-    const args = [
-      "-c",
-      "credential.helper=",
-      "-c",
-      "http.extraHeader=",
-      "-c",
-      "protocol.allow=never",
-      "-c",
-      "protocol.https.allow=always",
-      "ls-remote",
-      "--",
-      anon
-    ];
-    return (await run(args, cleanEnv(dir), dir)).ok;
-  } catch {
-    return false;
-  } finally {
-    if (dir) await (0, import_promises.rm)(dir, { recursive: true, force: true }).catch(() => void 0);
-  }
-}
-async function checkReach(url, run = systemGit) {
-  if (url.startsWith("-")) return { ok: false, empty: false };
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" };
-  try {
-    const r = await run(["ls-remote", "--", url], env);
-    return r.ok ? { ok: true, empty: r.stdout.trim() === "" } : { ok: false, empty: false };
-  } catch {
-    return { ok: false, empty: false };
-  }
-}
-var runGh = (args) => new Promise((resolve9) => {
-  (0, import_node_child_process5.execFile)("gh", args, { timeout: GH_TIMEOUT_MS, encoding: "utf8", maxBuffer: 1 << 20 }, (err, stdout) => resolve9({ ok: !err, stdout: err ? "" : stdout }));
-});
-function systemGh() {
-  return {
-    available: async () => (await runGh(["auth", "status"])).ok,
-    async createPrivate(name) {
-      if (!REPO_NAME.test(name)) throw new HubError("BAD_REPO_NAME", 'Repository name must be "owner/repo" or "repo" (letters, digits, . _ -).');
-      if (!(await runGh(["repo", "create", name, "--private"])).ok) throw new HubError("GH_FAILED", "gh could not create the repository.");
-      const view = await runGh(["repo", "view", name, "--json", "sshUrl"]);
-      let ssh;
-      try {
-        ssh = JSON.parse(view.stdout).sshUrl;
-      } catch {
-      }
-      if (!view.ok || typeof ssh !== "string" || !ssh) throw new HubError("GH_FAILED", `Created the repo, but could not read its address. Run gh repo view ${name} --json sshUrl.`);
-      return ssh;
-    }
-  };
 }
 
 // src/cli/wizard/prompts.ts
@@ -13768,7 +13792,7 @@ async function walk(steps, start, save) {
 
 // src/cli/wizard/join.ts
 var NOT_ON_TEAM = `You're not on this team's list yet. Ask anyone on the team to add you (they run setup and choose "Add a teammate"), then run setup again.`;
-var PUBLIC_HUB = "This hub repository is public: anyone on the internet can read it. Make the repository private, or use a private one, then run setup again.";
+var PUBLIC_HUB2 = "This hub repository is public: anyone on the internet can read it. Make the repository private, or use a private one, then run setup again.";
 var PUBLIC_OVERRIDE = "WARNING: this hub repository is public, so anyone can read what your team saves. Continuing only because RIXFLOW_ALLOW_PUBLIC_HUB=1 is set.";
 var MAPPING_HINT = 'If projects or statuses look wrong, the team mapping needs fixing, not your setup. Anyone on the team can redo it: run setup and choose "Redo the ticket mapping".';
 var NOT_LISTED = "-";
@@ -13785,7 +13809,7 @@ function withoutLogin(url) {
 }
 async function refusePublicHub(io, url, deps, env) {
   if (!await isPublicRepo(url, deps.runGit)) return;
-  if (env.RIXFLOW_ALLOW_PUBLIC_HUB !== "1") throw new HubError("PUBLIC_HUB", PUBLIC_HUB);
+  if (env.RIXFLOW_ALLOW_PUBLIC_HUB !== "1") throw new HubError("PUBLIC_HUB", PUBLIC_HUB2);
   io.log(PUBLIC_OVERRIDE);
 }
 async function askProjectsRoot(io, env) {
@@ -14924,6 +14948,11 @@ function writeCache(ctx, cache) {
     (0, import_node_fs21.rmSync)(tmp, { force: true });
   }
 }
+function setupProblem(e, fallback) {
+  if (e instanceof HubError && e.code === "WORKFLOW_TOO_NEW") return "tickets: update rixflow";
+  if (e instanceof HubError && e.code === "JIRA_BAD_URL") return "tickets: jira url invalid";
+  return fallback;
+}
 var toTask = (i) => ({ task: i.ref, title: i.title, sites: i.sites, status: i.status, due: i.due, paused: i.paused });
 async function within(work, ms) {
   let timer;
@@ -14945,8 +14974,9 @@ async function ticketSection(ctx, wf, opts, deps, problems, deadline) {
   let source;
   try {
     source = deps.source(ctx, wf);
-  } catch {
-    source = null;
+  } catch (e) {
+    problems.push(setupProblem(e, "tickets token missing"));
+    return cached;
   }
   if (!source) {
     problems.push("tickets token missing");
@@ -15027,8 +15057,8 @@ async function buildStatus(opts, deps) {
   let wf = null;
   try {
     wf = deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
-  } catch {
-    problems.push("tickets: workflow invalid");
+  } catch (e) {
+    problems.push(setupProblem(e, "tickets: workflow invalid"));
   }
   if (wf) tickets = opts.asana ? await ticketSection(ctx, wf, opts, deps, problems, deadline) : readCache(ctx, cacheScope(ctx, wf));
   if (tickets) out.sprint = { name: tickets.name, fetchedAt: tickets.fetchedAt, items: tickets.items };
