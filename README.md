@@ -2,13 +2,13 @@
 
 Async team workflow for [Claude Code](https://claude.com/claude-code). Each teammate's Claude shares one git **hub** repo with the rest of the team, so work moves between people without meetings:
 
-- **Plate:** your Asana tasks, inbox and paused work in one list.
+- **Plate:** your tickets (Asana, or Jira Cloud or self-hosted), inbox and paused work in one list.
 - **Handovers:** start a task with a brief, pause it with a checkpoint, and pick it up later (or let someone else).
 - **Inbox:** send requests and questions to a teammate's Claude; it sees them at its next session.
-- **Shared knowledge:** searchable notes per site, promoted from sessions.
+- **Shared knowledge:** searchable notes per project, promoted from sessions.
 - **RixFlow UI:** a status line, a band above the prompt and a `RixFlow` pane that show all of the above live.
 
-Asana is **read-only by design**, and every string written to the hub passes through a secret scrubber first.
+Your ticket system is **read-only by design**, and every string written to the hub passes through a secret scrubber first.
 
 ## Table of contents
 
@@ -82,34 +82,51 @@ Set `RIXFLOW_DIR` (the hub clone) and `RIXFLOW_CONFIG_DIR` (this machine's confi
 
 ## First-time setup
 
-### Join an existing team hub
-
 In Claude Code, run:
 
 ```
 /rixflow:setup
 ```
 
-It prints the exact `init` command for your machine. Run that command **in your own terminal**: it asks questions and reads your Asana personal access token as hidden input. `init` clones the hub, asks for your name and projects folder, stores the token (system keychain, or a `0600` file) and installs the hub's pre-commit check. The hub URL must work without a password prompt (ssh-agent for ssh, a credential helper for https).
+It prints the exact `init` command for your machine. Run that command **in your own terminal**: it opens a guided setup. On a fresh machine you choose to **join** a team or **create** one; once the machine is set up, the same command opens a **change** menu. The hub URL must work without a password prompt (ssh-agent for ssh, a credential helper for https).
 
-### Create a hub for a new team
+### Join an existing team
 
-Do this once per team, then push the result to a private git remote:
+Choose "join". The wizard clones the team's hub, asks for your name and projects folder, reads your personal access token for the team's ticket system (Asana, or Jira Cloud or self-hosted) as hidden input, stores it (system keychain, or a `0600` file) and installs the hub's pre-commit check. A team whose setup needs a newer RixFlow tells you to update first.
 
-```sh
-node plugin/dist/hub.cjs bootstrap ./my-team-hub --members alice:dev,bob:pm --sites AC:acme,GL:globex-web
-git -C ./my-team-hub remote add origin <private-git-url>
-git -C ./my-team-hub push -u origin main
+### Create a team
+
+Choose "create". The wizard connects your ticket system (Asana, or Jira Cloud or self-hosted), asks for the team's projects and teammates, and maps your tickets to those projects, statuses, sprints and urgency. It then creates the hub and prints what to share with teammates. Push the hub to a private git remote when asked.
+
+With Asana, the wizard samples projects from the tasks assigned to you. A team project you are not assigned to will not appear as a mapping value until someone redoes the mapping (change menu, "Redo the ticket mapping").
+
+### Change the setup
+
+Run the same command again on a set-up machine. The menu offers: add or remove a teammate, add a project, rename or move a project, redo the ticket mapping, reconnect your ticket account, or start over on this machine. Each change to the team's setup is one commit, synced like any other hub write. Removing a project and switching ticket systems are deliberately not offered.
+
+### The workflow file
+
+The team's ticket mapping lives in the hub as `config/workflow.yml`, written by the wizard. For example, for Jira:
+
+```yaml
+requires: 0.3.0
+tracker: { type: jira, url: https://acme.atlassian.net, flavor: cloud, projects: [WEB] }
+project: { from: component, values: { Storefront: AC } }
+status: { field: null, todo: [To Do], in_progress: [In Progress], waiting: [Blocked], done: [Done] }
+sprints: { mode: jira-sprints, board: null }
+urgent: { field: Priority, values: [Highest] }
 ```
 
-`--sites` maps short site codes to project folder names, so a task tagged `AC` opens in `~/projects/acme`.
+`requires` is the lowest RixFlow version that understands the file; an older RixFlow skips the ticket features and says so. Hubs without a `workflow.yml` keep the original Asana mapping.
+
+Advanced: `node plugin/dist/hub.cjs bootstrap ./my-team-hub --members alice:dev,bob:pm --sites AC:acme,GL:globex-web` creates a hub non-interactively. `--sites` maps short project codes to project folder names, so a ticket tagged `AC` opens in `~/projects/acme`.
 
 ## Usage
 
 | Command | What it does |
 | --- | --- |
-| `/rixflow:plate` | Everything on your plate: Asana tasks, inbox, paused work |
-| `/rixflow:start <task id or plate number>` | Start an Asana task with a handover brief |
+| `/rixflow:plate` | Everything on your plate: tickets, inbox, paused work |
+| `/rixflow:start <ticket id or plate number>` | Start a ticket with a handover brief |
 | `/rixflow:checkpoint [task id]` | Pause the current task and save where you left off |
 | `/rixflow:resume <task id>` | Resume a task from its handover and checkpoint |
 | `/rixflow:wrapup [task id]` | Finish the task and capture what the team should know |
@@ -149,7 +166,7 @@ npm run check        # typecheck + tests + build, and fails if plugin/dist is st
 | `claude --plugin-dir ui` | Run the UI mod straight from this checkout |
 | `claude plugin validate ui && claude plugin test ui` | Validate the mod and run its kit tests |
 
-[`AGENTS.md`](AGENTS.md) is the contributor guide. It covers the layout, the rules the code enforces (read-only Asana, scrubbing, hooks that never fail a session) and conventions.
+[`AGENTS.md`](AGENTS.md) is the contributor guide. It covers the layout, the rules the code enforces (read-only ticket clients, scrubbing, hooks that never fail a session) and conventions.
 
 ## License
 

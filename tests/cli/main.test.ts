@@ -152,7 +152,7 @@ describe('hub CLI', () => {
 
     it("asks with Jira's wording on a Jira hub and stores the token where getToken finds it", () => {
       const e = machine('tok-jira', YAML.stringify({
-        requires: '0.2.0', tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB'] },
+        requires: '0.3.0', tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB'] },
         project: { from: 'component', values: { 'Acme site': 'AC' } },
       }));
       const r = run(['token', 'set'], 'jira-tok-9\n', e);

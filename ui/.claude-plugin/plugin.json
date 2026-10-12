@@ -1,7 +1,7 @@
 {
   "name": "rixflow-ui",
   "author": { "name": "rixflow" },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "description": "RixFlow in your Claude Code session: current task, inbox, paused work and sprint in a pane, band and status line",
   "types": "./types/index.d.ts",

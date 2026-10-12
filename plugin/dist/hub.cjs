@@ -11551,7 +11551,7 @@ var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "0.2.0";
+var RIXFLOW_VERSION = "0.3.0";
 
 // src/core/workflow.ts
 var LEGACY = {
@@ -15225,7 +15225,7 @@ program2.command("check").option("--trigger <trigger>", "session|prompt", "sessi
   }
   printAndExit0(out || "nothing new");
 });
-program2.command("status").description("status of the hub as JSON, for the RixFlow UI").option("--json", "print JSON (the only format)").option("--cwd <dir>", "folder for the current-task fallback").option("--task <gid>", "current task of the calling session").option("--asana", "refresh Asana data older than 10 minutes (without it, the cached sprint is shown)").option("--refresh", "with --asana, bypass the cache").option("--no-sync", "read local files only").action(async (opts) => {
+program2.command("status").description("status of the hub as JSON, for the RixFlow UI").option("--json", "print JSON (the only format)").option("--cwd <dir>", "folder for the current-task fallback").option("--task <gid>", "current task of the calling session").option("--asana", "refresh ticket data older than 10 minutes (without it, the cached sprint is shown)").option("--refresh", "with --asana, bypass the cache").option("--no-sync", "read local files only").action(async (opts) => {
   let out;
   try {
     out = await buildStatus(

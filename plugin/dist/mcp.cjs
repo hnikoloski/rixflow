@@ -36546,7 +36546,7 @@ function loadSites(hubDir2) {
 }
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "0.2.0";
+var RIXFLOW_VERSION = "0.3.0";
 
 // src/core/workflow.ts
 var LEGACY = {
@@ -46273,7 +46273,7 @@ function readablePath(ctx, path) {
   return insideHub(ctx.hubDir, path);
 }
 function createServer(deps) {
-  const server2 = new McpServer({ name: "hub", version: "0.2.0" });
+  const server2 = new McpServer({ name: "hub", version: "0.3.0" });
   const workflowFor = (ctx) => deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
   const sourceFor = (ctx, wf) => {
     const source = deps.source(ctx, wf);
@@ -46291,7 +46291,7 @@ function createServer(deps) {
     if (site !== void 0) assertSiteCode(site);
   };
   server2.registerTool("team_info", {
-    description: "Who you are in the team hub, the team roster (name and role) and the site codes with their folders. Read-only.",
+    description: "Who you are in the team hub, the team roster (name and role) and the project codes with their folders. Read-only.",
     inputSchema: {}
   }, async () => safe(() => {
     const ctx = deps.ctx();
@@ -46300,7 +46300,7 @@ function createServer(deps) {
     return { me: ctx.user.name, members: members2, sites };
   }));
   server2.registerTool("setup_info", {
-    description: "Whether RixFlow is set up on this machine, and the exact terminal commands to set it up (init) or store the Asana token. Works before setup. The commands need a terminal; never run them yourself.",
+    description: "Whether RixFlow is set up on this machine, and the exact terminal commands to set it up (init) or store the ticket-system token. Works before setup. The commands need a terminal; never run them yourself.",
     inputSchema: {}
   }, async () => safe(() => {
     let configured = true;
@@ -46315,11 +46315,11 @@ function createServer(deps) {
       tokenSet: hubCommand("token set"),
       hubDir: hubDir(),
       configDir: configDir(),
-      note: "Run these in your own terminal: init asks questions and reads the Asana token as hidden input."
+      note: "Run these in your own terminal: init asks questions and reads the ticket-system token as hidden input."
     };
   }));
   server2.registerTool("plate", {
-    description: "Everything on the user's plate: Asana tasks grouped as urgent / in progress / this sprint / backlog, inbox items and questions waiting on others. Returns markdown with numbered items; task ids and message ids are in parentheses.",
+    description: "Everything on the user's plate: tickets grouped as urgent / in progress / this sprint / backlog, inbox items and questions waiting on others. Returns markdown with numbered items; task ids and message ids are in parentheses.",
     inputSchema: {}
   }, async () => safe(async () => {
     const ctx = deps.ctx();
@@ -46327,7 +46327,7 @@ function createServer(deps) {
     return renderPlate(await gatherPlate(ctx, sourceFor(ctx, wf), wf));
   }));
   server2.registerTool("start_task", {
-    description: "Prepare a handover for an Asana task (brief, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.",
+    description: "Prepare a handover for a ticket (brief, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.",
     inputSchema: { task: text2, cwd: text2 }
   }, async ({ task: rawTask, cwd }) => safe(async () => {
     const ctx = deps.ctx();
@@ -46337,7 +46337,7 @@ function createServer(deps) {
     return { ...result, handoverPath: rel(ctx, result.handoverPath), ...await persisted(ctx, `handover: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("resume_task", {
-    description: "Load the handover and checkpoint for a task, and report Asana changes and new comments since the handover was written. Works offline from local files.",
+    description: "Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. Works offline from local files.",
     inputSchema: { task: text2 }
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
@@ -46353,7 +46353,7 @@ function createServer(deps) {
     return resumeTask(ctx, source, task, reason);
   }));
   server2.registerTool("remember_site", {
-    description: "Remember which site (code from the hub config/sites.yml, e.g. AC or GL) an Asana task belongs to, when it cannot be resolved automatically.",
+    description: "Remember which project (code from the hub config/sites.yml, e.g. AC or GL) a ticket belongs to, when it cannot be resolved automatically.",
     inputSchema: { task: text2, site: text2 }
   }, async ({ task: rawTask, site }) => safe(() => {
     const ctx = deps.ctx();
@@ -46365,7 +46365,7 @@ function createServer(deps) {
     return `remembered ${task} -> ${site}`;
   }));
   server2.registerTool("task_details", {
-    description: "Read an Asana task and its recent comments (read-only). Credentials in link fields are redacted.",
+    description: "Read a ticket and its recent comments (read-only). Credentials in link fields are redacted.",
     inputSchema: { task: text2 }
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
@@ -46448,7 +46448,7 @@ function createServer(deps) {
     return { checkpointRemoved: removed, handoverEnded: ended, ...await persisted(ctx, `drop: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("search", {
-    description: "Search the team hub (shared knowledge and everyone's notes and session summaries). Filter by person, site code, note type (decision, session, checkpoint, handover, note) and date (YYYY-MM-DD). " + UNTRUSTED,
+    description: "Search the team hub (shared knowledge and everyone's notes and session summaries). Filter by person, project code, note type (decision, session, checkpoint, handover, note) and date (YYYY-MM-DD). " + UNTRUSTED,
     inputSchema: {
       text: text2.optional(),
       person: text2.optional(),

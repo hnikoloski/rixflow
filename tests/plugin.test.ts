@@ -112,4 +112,25 @@ describe('plugin package', () => {
     expect(text).toContain('$ARGUMENTS');
     expect(text).toContain('argument-hint:');
   });
+
+  // R3: user-facing text says "project" and "tickets". Internal identifiers are exempt on purpose.
+  const userText = () => {
+    const files = [...readdirSync('plugin/commands').map((c) => `plugin/commands/${c}`), 'plugin/skills/rixflow/SKILL.md'];
+    const lines = files.flatMap((f) => read(f).split('\n').map((l) => ({ where: f, l })));
+    const server = read('src/mcp/server.ts');
+    const descs = [...server.matchAll(/description:\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)].map((m) => ({ where: 'server.ts', l: m[2] }));
+    return [...lines, ...descs];
+  };
+  it('user-facing text says "project", not "site" (internal names excepted)', () => {
+    // Allowed: the tool name remember_site, the file sites.yml, the hub path shared/sites/, the team_info `sites` field and the `site` tool argument.
+    const allowed = /remember_site|sites\.yml|shared\/sites\/|`sites?`/g;
+    const bad = userText().filter(({ l }) => /\bsites?\b/i.test(l.replace(allowed, '')));
+    expect(bad).toEqual([]);
+  });
+  it('user-facing text says "tickets", not "Asana", except where naming the supported systems or the read-only rule', () => {
+    // Allowlist: (1) the supported-systems list ("Asana or Jira"); (2) the never-writes rule, which names the real systems.
+    const allowed = /Asana or Jira|Jira or Asana|read-only|never writes?|Never write/i;
+    const bad = userText().filter(({ l }) => /\bAsana\b/.test(l) && !allowed.test(l));
+    expect(bad).toEqual([]);
+  });
 });

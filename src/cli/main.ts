@@ -94,7 +94,7 @@ program
   .option('--json', 'print JSON (the only format)')
   .option('--cwd <dir>', 'folder for the current-task fallback')
   .option('--task <gid>', 'current task of the calling session')
-  .option('--asana', 'refresh Asana data older than 10 minutes (without it, the cached sprint is shown)')
+  .option('--asana', 'refresh ticket data older than 10 minutes (without it, the cached sprint is shown)')
   .option('--refresh', 'with --asana, bypass the cache')
   .option('--no-sync', 'read local files only')
   .action(async (opts) => {
