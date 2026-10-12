@@ -8,9 +8,9 @@ import type { Discovery, Ticket, TicketSource, TrackerKind } from '../../core/ti
 import { deleteToken, tokenEnvVar } from '../../core/token';
 import { HubError, assertName, type Ctx, type Role } from '../../core/types';
 import { RIXFLOW_VERSION } from '../../core/version';
-import { loadWorkflow, writeWorkflow, type Workflow } from '../../core/workflow';
+import { jiraUrlChanged, loadWorkflow, writeWorkflow, type Workflow } from '../../core/workflow';
 import type { InitIo } from '../init';
-import { connect, scopeLabel, storedSource, type WizardDeps } from './connect';
+import { connect, scopeLabel, storedSource, type Connection, type WizardDeps } from './connect';
 import { mappingAnswers, mappingSteps, slug, workflowOf } from './create';
 import { runStepsFrom } from './progress';
 import { askValid, choose, confirm } from './prompts';
@@ -127,11 +127,11 @@ export async function runMenu(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJ
     },
     async reconnect() {
       const wf = loadWorkflow(ctx.hubDir);
+      if (wf.tracker.type === 'jira' && jiraUrlChanged(wf, ctx.user)) {
+        io.log(`The team's Jira address is ${wf.tracker.url}${ctx.user.jiraUrl ? ` (this machine used ${ctx.user.jiraUrl})` : ''}. Sign in only if you trust that address.`);
+      }
       const conn = await connect(io, deps, wf, { name: user, configDir: ctx.configDir });
-      updateMachineConfig(ctx.configDir, {
-        ...(conn.jiraEmail ? { jiraEmail: conn.jiraEmail } : {}),
-        ...(conn.asanaWorkspace ? { asanaWorkspace: conn.asanaWorkspace } : {}),
-      });
+      updateMachineConfig(ctx.configDir, machineFacts(conn));
     },
   };
 
@@ -153,7 +153,9 @@ export async function runMenu(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJ
 
 // Steps 3-7 of Create, pre-filled from the current workflow. The tracker and its scope never change.
 async function redoMapping(io: InitIo, deps: WizardDeps, ctx: Ctx, current: Workflow, env: NodeJS.ProcessEnv): Promise<Workflow> {
-  const user = { name: ctx.user.name, configDir: ctx.configDir, jiraEmail: ctx.user.jiraEmail, asanaWorkspace: ctx.user.asanaWorkspace };
+  const user = {
+    name: ctx.user.name, configDir: ctx.configDir, jiraEmail: ctx.user.jiraEmail, jiraUrl: ctx.user.jiraUrl, asanaWorkspace: ctx.user.asanaWorkspace,
+  };
   let src: Source | undefined;
   let cached: Ticket[] | undefined;
   const source = async (): Promise<Source> => {
@@ -161,12 +163,11 @@ async function redoMapping(io: InitIo, deps: WizardDeps, ctx: Ctx, current: Work
     const stored = storedSource(deps, current, user, env);
     if (stored) src = stored as Source;
     else {
-      io.log('Your ticket login was not found on this machine; please sign in again.');
+      io.log(current.tracker.type === 'jira' && jiraUrlChanged(current, user)
+        ? `The team's Jira address is ${current.tracker.url}, not the one this machine connected to. Sign in again only if you trust that address.`
+        : 'Your ticket login was not found on this machine; please sign in again.');
       const conn = await connect(io, deps, current, user);
-      updateMachineConfig(ctx.configDir, {
-        ...(conn.jiraEmail ? { jiraEmail: conn.jiraEmail } : {}),
-        ...(conn.asanaWorkspace ? { asanaWorkspace: conn.asanaWorkspace } : {}),
-      });
+      updateMachineConfig(ctx.configDir, machineFacts(conn));
       src = conn.source as Source;
     }
     return src;
@@ -183,7 +184,16 @@ async function redoMapping(io: InitIo, deps: WizardDeps, ctx: Ctx, current: Work
   return workflowOf(await runStepsFrom(mappingSteps(io, { source, samples, now }), mappingAnswers(current)));
 }
 
-// Machine facts from a reconnect (jiraEmail, asanaWorkspace), merged into config.yml as written.
+// The machine facts a connect produced (jiraEmail, jiraUrl, asanaWorkspace), for config.yml.
+function machineFacts(conn: Connection): Record<string, string> {
+  return {
+    ...(conn.jiraEmail ? { jiraEmail: conn.jiraEmail } : {}),
+    ...(conn.jiraUrl ? { jiraUrl: conn.jiraUrl } : {}),
+    ...(conn.asanaWorkspace ? { asanaWorkspace: conn.asanaWorkspace } : {}),
+  };
+}
+
+// Machine facts from a reconnect (jiraEmail, jiraUrl, asanaWorkspace), merged into config.yml as written.
 function updateMachineConfig(configDir: string, patch: Record<string, string>): void {
   if (Object.keys(patch).length === 0) return;
   const path = join(configDir, 'config.yml');

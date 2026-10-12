@@ -5,6 +5,7 @@ import YAML from 'yaml';
 import { runInit } from '../../../src/cli/init';
 import type { WizardDeps } from '../../../src/cli/wizard/connect';
 import { runMenu } from '../../../src/cli/wizard/menu';
+import { storedSource } from '../../../src/cli/wizard/connect';
 import type { AsanaTask } from '../../../src/core/asana';
 import { loadSites, loadTeam } from '../../../src/core/team';
 import type { Discovery, Ticket, TicketSource } from '../../../src/core/tickets/types';
@@ -181,7 +182,7 @@ describe('runMenu', () => {
     commitWorkflow(s, wf);
     writeFileSync(join(s.ctx.configDir, 'config.yml'), YAML.stringify({ ...s.ctx.user, jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net' }));
     writeFileSync(join(s.ctx.configDir, 'jira-token'), 'tok-j', { mode: 0o600 });
-    const ctx: Ctx = { ...s.ctx, user: { ...s.ctx.user, jiraEmail: 'me@example.com' } };
+    const ctx: Ctx = { ...s.ctx, user: { ...s.ctx.user, jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net' } };
     const ticket: Ticket = {
       id: 'WEB-1', title: 'Fix the login page', notes: '', modifiedAt: '2026-10-01T00:00:00Z', due: null, url: null, parent: null,
       status: 'In Progress', priority: 'High', fields: [], components: ['Acme site'], labels: [], containers: ['WEB'], sections: [], sprints: [], restricted: false,
@@ -305,5 +306,44 @@ describe('runInit on a set-up machine', () => {
     expect([...io.asked, ...io.logs].join('\n')).not.toMatch(/asana/i);
     expect(readFileSync(join(s.ctx.configDir, 'jira-token'), 'utf8')).toBe('jira-tok');
     expect(YAML.parse(readFileSync(join(s.ctx.configDir, 'config.yml'), 'utf8')).jiraEmail).toBe('me@example.com');
+    expect(YAML.parse(readFileSync(join(s.ctx.configDir, 'config.yml'), 'utf8')).jiraUrl).toBe('https://acme.atlassian.net');
+  });
+
+  const jiraWorkflow = (url: string): Workflow => ({
+    requires: RIXFLOW_VERSION, legacy: false,
+    tracker: { type: 'jira', url, flavor: 'cloud', projects: ['WEB'] },
+    project: { from: 'component', field: null, values: { 'Acme site': 'AC' } },
+    status: { field: null, todo: ['To Do'], in_progress: ['In Progress'], waiting: [], done: ['Done'] },
+    sprints: { mode: 'none' }, urgent: { field: null, values: [] },
+  });
+
+  it('the stored Jira token is never used for an address other than the one this machine pinned', () => {
+    const calls: string[] = [];
+    const spy = (url: string) => { calls.push(url); return makeJira(); };
+    const user = { name: 'me', configDir: '/nowhere', jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net' };
+    const env = { JIRA_TOKEN: 'tok-secret' };
+    expect(storedSource(deps({ makeJira: spy }), jiraWorkflow('https://globex.example.com'), user, env)).toBeNull();
+    expect(storedSource(deps({ makeJira: spy }), jiraWorkflow('https://acme.atlassian.net'), { ...user, jiraUrl: undefined }, env)).toBeNull();
+    expect(calls).toEqual([]);
+    expect(storedSource(deps({ makeJira: spy }), jiraWorkflow('https://acme.atlassian.net'), user, env)).not.toBeNull();
+    expect(calls).toEqual(['https://acme.atlassian.net']);
+  });
+
+  it('reconnect after the team\'s Jira address changed names the new address, then pins it', async () => {
+    const s = await setUp();
+    writeWorkflow(s.ctx.hubDir, jiraWorkflow('https://acme.atlassian.net'));
+    s.inHub('add', '-A');
+    s.inHub('commit', '-q', '-m', 'workflow');
+    writeFileSync(join(s.ctx.configDir, 'config.yml'), YAML.stringify({ ...s.ctx.user, jiraEmail: 'me@example.com', jiraUrl: 'https://jira.globex.example.com' }));
+    writeFileSync(join(s.ctx.configDir, 'jira-token'), 'old-tok', { mode: 0o600 });
+    const tokens: string[] = [];
+    const spy = (_u: string, auth: { token: string }) => { tokens.push(auth.token); return makeJira(); };
+    const io = scriptedIo(['yes', MENU.reconnect, 'me@example.com', 'new-tok', MENU.exit]);
+    await runInit(io, '/x/hub.cjs', s.env, { makeJira: spy, tokenExec: noKeychain });
+    expect(io.logs.join('\n')).toContain("The team's Jira address is https://acme.atlassian.net (this machine used https://jira.globex.example.com)");
+    expect(tokens).toEqual(['new-tok']);
+    const cfg = YAML.parse(readFileSync(join(s.ctx.configDir, 'config.yml'), 'utf8'));
+    expect(cfg.jiraUrl).toBe('https://acme.atlassian.net');
+    expect(readFileSync(join(s.ctx.configDir, 'jira-token'), 'utf8')).toBe('new-tok');
   });
 });

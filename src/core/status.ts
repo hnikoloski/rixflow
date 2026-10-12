@@ -6,7 +6,7 @@ import { findActiveHandover, listCheckpoints, readHandover, type Handover } from
 import { display, gatherPlate, type PlateItem } from './plate';
 import type { TicketSource } from './tickets/types';
 import { HubError, assertTicketId, type Ctx } from './types';
-import { loadWorkflow, type Workflow } from './workflow';
+import { jiraUrlChanged, loadWorkflow, type Workflow } from './workflow';
 
 export const STATUS_VERSION = 2;
 export const ASANA_CACHE_TTL_MS = 600_000;
@@ -134,7 +134,7 @@ async function ticketSection(
     return cached;
   }
   if (!source) {
-    problems.push('tickets token missing');
+    problems.push(jiraUrlChanged(wf, ctx.user) ? 'tickets: jira url changed' : 'tickets token missing');
     return cached;
   }
   try {

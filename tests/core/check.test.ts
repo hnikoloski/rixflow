@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runCheck } from '../../src/core/check';
+import { JIRA_URL_CHANGED, runCheck } from '../../src/core/check';
 import { hubCommand } from '../../src/core/command';
 import { sendMessage } from '../../src/core/messages';
 import { fakeAsanaSource, fakeSource, task, ticket } from '../fixtures/asana';
@@ -70,7 +70,8 @@ describe('runCheck', () => {
   });
 
   it('hands the workflow to the source factory, loading it once', async () => {
-    const ctx = makeCtx();
+    const base = makeCtx();
+    const ctx = { ...base, user: { ...base.user, jiraUrl: 'https://jira.example.com' } };
     const jira = { ...LEGACY_WORKFLOW, legacy: false, tracker: { type: 'jira' as const, url: 'https://jira.example.com', flavor: 'cloud' as const, projects: ['WEB'] } };
     const seen: unknown[] = [];
     let loads = 0;
@@ -86,12 +87,39 @@ describe('runCheck', () => {
   });
 
   it("names the team's tracker when no source can be built, and stays quiet on an invalid workflow", async () => {
-    const ctx = makeCtx();
+    const base = makeCtx();
+    const ctx = { ...base, user: { ...base.user, jiraUrl: 'https://jira.example.com' } };
     const jira = { ...LEGACY_WORKFLOW, legacy: false, tracker: { type: 'jira' as const, url: 'https://jira.example.com', flavor: 'cloud' as const, projects: ['WEB'] } };
     expect(await runCheck(ctx, { source: null, sync: noSync, workflow: () => jira }, 'session')).toBe(`[rixflow] Jira token missing (run: ${hubCommand('token set')})`);
     const bad = makeCtx();
     writeFileSync(join(bad.hubDir, 'config', 'workflow.yml'), 'tracker: [nope\n');
     expect(await runCheck(bad, { source: () => { throw new Error('BAD_CONFIG'); }, sync: noSync }, 'session')).toBe('');
+  });
+
+  it('never sends the Jira token to an address other than the pinned one, and says so in the brief', async () => {
+    const base = makeCtx();
+    const ctx = { ...base, user: { ...base.user, jiraEmail: 'dev@example.com', jiraUrl: 'https://acme.atlassian.net' } };
+    const wfAt = (url: string): Workflow => ({ ...LEGACY_WORKFLOW, legacy: false, tracker: { type: 'jira', url, flavor: 'cloud', projects: ['WEB'] } });
+    const calls: string[] = [];
+    const fetchSpy = vi.fn(async (url: unknown) => { calls.push(String(url)); return new Response('{}', { status: 401 }); });
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const source = (c: Ctx, wf: Workflow) => makeSource(c, { JIRA_TOKEN: 'tok-secret' }, wf);
+      const moved = await runCheck(ctx, { source, sync: noSync, workflow: () => wfAt('https://globex.example.com') }, 'session');
+      expect(moved).toBe(`[rixflow] ${JIRA_URL_CHANGED}`);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      // A prompt check stays silent about it; the next session brief says it again.
+      expect(await runCheck(at(ctx, '2026-10-08T11:00:00Z'), { source, sync: noSync, workflow: () => wfAt('https://globex.example.com') }, 'prompt')).toBe('');
+      expect(await runCheck(at(ctx, '2026-10-08T12:00:00Z'), { source, sync: noSync, workflow: () => wfAt('https://globex.example.com') }, 'session')).toContain(JIRA_URL_CHANGED);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      // The pinned address (any trailing slash) works as before.
+      const same = await runCheck(at(ctx, '2026-10-08T13:00:00Z'), { source, sync: noSync, workflow: () => wfAt('https://acme.atlassian.net/') }, 'session');
+      expect(same).not.toContain(JIRA_URL_CHANGED);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls.every((u) => u.startsWith('https://acme.atlassian.net/'))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("reports changes with the source's label", async () => {

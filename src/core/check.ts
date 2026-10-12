@@ -7,7 +7,7 @@ import { scrub } from './scrub';
 import { lastSummaryFailure } from './summarylog';
 import type { TicketSource } from './tickets/types';
 import { HubError, type CheckState, type Ctx } from './types';
-import { loadWorkflow, WorkflowTooNew, type Workflow } from './workflow';
+import { jiraUrlChanged, loadWorkflow, WorkflowTooNew, type Workflow } from './workflow';
 
 export const PROMPT_INTERVAL_MS = 300_000;
 
@@ -35,6 +35,7 @@ export interface CheckDeps {
 }
 
 const PUBLIC_HUB = "hub repo is public: anyone can read your team's notes. Make it private.";
+export const JIRA_URL_CHANGED = 'the team\'s Jira address changed: run setup and pick "Reconnect my ticket account" if this is expected';
 
 const LABELS: Record<Workflow['tracker']['type'], string> = { asana: 'Asana', jira: 'Jira' };
 
@@ -49,9 +50,10 @@ function workflowOf(ctx: Ctx, deps: CheckDeps): { wf: Workflow | null; error: un
 }
 
 // The session brief's line when no ticket source could be built, or null to say nothing.
-function noSourceNote(wf: Workflow | null, error: unknown): string | null {
+function noSourceNote(ctx: Ctx, wf: Workflow | null, error: unknown): string | null {
   if (error instanceof WorkflowTooNew) return `update RixFlow: this team's setup needs ${error.requires}`;
   if (error instanceof HubError && error.code === 'JIRA_BAD_URL') return 'Jira URL rejected: it must be an https:// address';
+  if (wf && jiraUrlChanged(wf, ctx.user)) return JIRA_URL_CHANGED;
   return wf ? `${LABELS[wf.tracker.type]} token missing (run: ${hubCommand('token set')})` : null;
 }
 
@@ -171,7 +173,7 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   state.notified = [...previous.filter((id) => !freshSet.has(id)), ...freshIds].slice(-NOTIFIED_CAP);
 
   if (!source || !ticketFetch) {
-    const note = trigger === 'session' ? noSourceNote(wf, sourceError) : null;
+    const note = trigger === 'session' ? noSourceNote(ctx, wf, sourceError) : null;
     if (note) parts.push(note);
   } else {
     try {

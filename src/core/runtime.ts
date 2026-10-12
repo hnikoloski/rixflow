@@ -9,10 +9,11 @@ import { JiraClient } from './tickets/jira';
 import type { TicketSource } from './tickets/types';
 import { getToken } from './token';
 import type { Ctx } from './types';
-import { loadWorkflow, type Workflow } from './workflow';
+import { jiraUrlChanged, loadWorkflow, type Workflow } from './workflow';
 
 // The ticket source for the hub's workflow, or null when it cannot be built (no workspace, no
-// token, or no Jira Cloud email). Throws BAD_CONFIG for an invalid workflow.yml.
+// token, no Jira Cloud email, or a Jira address other than the one pinned on this machine: the
+// token is never sent to an address the hub alone chose). Throws BAD_CONFIG for an invalid workflow.yml.
 export function makeSource(
   ctx: Ctx,
   env: Record<string, string | undefined> = process.env,
@@ -20,6 +21,7 @@ export function makeSource(
 ): TicketSource | null {
   if (wf.tracker.type === 'jira') {
     const { url, flavor, projects } = wf.tracker;
+    if (jiraUrlChanged(wf, ctx.user)) return null;
     const token = getToken(ctx.configDir, env, undefined, ctx.user.name, 'jira');
     if (!token) return null;
     if (flavor === 'server') return new JiraClient(url, { flavor, token }, { projects });

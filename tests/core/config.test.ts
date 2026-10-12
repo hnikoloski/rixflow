@@ -36,6 +36,13 @@ describe('user config', () => {
     saveUserConfig(dir, { name: 'dev', role: 'dev', projectsRoot: '/p', siteFolders: {}, taskSites: {} });
     expect(loadUserConfig(dir).jiraEmail).toBeUndefined();
   });
+  it('keeps the pinned Jira address on the machine config, normalized', () => {
+    const dir = tmp();
+    saveUserConfig(dir, { name: 'dev', role: 'dev', projectsRoot: '/p', jiraUrl: 'https://acme.atlassian.net/', siteFolders: {}, taskSites: {} });
+    expect(loadUserConfig(dir).jiraUrl).toBe('https://acme.atlassian.net');
+    saveUserConfig(dir, { name: 'dev', role: 'dev', projectsRoot: '/p', jiraUrl: 'http://acme.atlassian.net', siteFolders: {}, taskSites: {} });
+    expect(loadUserConfig(dir).jiraUrl).toBeUndefined();
+  });
   it('throws NOT_INITIALIZED when missing', () => {
     expect(() => loadUserConfig(tmp())).toThrowError(expect.objectContaining({ code: 'NOT_INITIALIZED' }));
   });

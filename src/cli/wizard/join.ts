@@ -63,7 +63,7 @@ export async function setUpHubHooks(io: InitIo, deps: WizardDeps, name: string, 
 
 // Join an existing team: clone the hub, pick your name, connect your own ticket account and
 // preview your plate. Team answers (workflow, mapping, projects) are read from the hub only;
-// config.yml gets machine facts: name, role, projects folder, jiraEmail, workspace if legacy.
+// config.yml gets machine facts: name, role, projects folder, jiraEmail and jiraUrl, workspace if legacy.
 export async function runJoin(io: InitIo, deps: WizardDeps, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const configDir = getConfigDir(env);
   const hubDir = getHubDir(env);
@@ -127,6 +127,7 @@ export async function runJoin(io: InitIo, deps: WizardDeps, env: NodeJS.ProcessE
           name, role: m.role, projectsRoot: String(a.projectsRoot),
           ...(connection.asanaWorkspace ? { asanaWorkspace: connection.asanaWorkspace } : {}),
           ...(connection.jiraEmail ? { jiraEmail: connection.jiraEmail } : {}),
+          ...(connection.jiraUrl ? { jiraUrl: connection.jiraUrl } : {}),
           siteFolders: {}, taskSites: {},
         };
         saveUserConfig(configDir, cfg);

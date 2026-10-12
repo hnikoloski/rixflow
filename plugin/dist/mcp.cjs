@@ -35920,6 +35920,340 @@ function assertSiteCode(v) {
   if (typeof v !== "string" || !SITE.test(v)) throw new HubError("BAD_SITE", `invalid site code: ${String(v)}`);
 }
 
+// src/core/tickets/adf.ts
+var kids = (v) => Array.isArray(v) ? v : [];
+var text = (v) => typeof v === "string" ? v : "";
+var obj = (v) => typeof v === "object" && v !== null ? v : {};
+var isNode = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+function inline(node2) {
+  if (!isNode(node2)) return "";
+  if (node2.type === "text") return text(node2.text);
+  if (node2.type === "hardBreak") return "\n";
+  if (node2.type === "mention") return "@" + text(obj(node2.attrs).text).replace(/^@/, "");
+  if (node2.type === "emoji") return text(obj(node2.attrs).shortName);
+  if (node2.type === "inlineCard") return text(obj(node2.attrs).url);
+  if (typeof node2.text === "string") return node2.text;
+  return kids(node2.content).map(inline).join("");
+}
+function blocks(nodes, indent) {
+  const out = [];
+  for (const n of nodes) {
+    if (!isNode(n)) continue;
+    const sub = kids(n.content);
+    if (n.type === "bulletList" || n.type === "orderedList") {
+      sub.forEach((item, i) => {
+        const marker = n.type === "orderedList" ? `${i + 1}. ` : "- ";
+        const lines = blocks(isNode(item) ? kids(item.content) : [], indent + "  ");
+        if (lines.length === 0) return;
+        out.push(indent + marker + lines[0].trimStart(), ...lines.slice(1));
+      });
+    } else if (n.type === "paragraph" || n.type === "heading" || n.type === "codeBlock") {
+      out.push(...inline(n).split("\n").map((l) => indent + l));
+    } else if (sub.length > 0 && sub.some((k) => isNode(k) && k.type !== "text" && k.type !== "mention")) {
+      out.push(...blocks(sub, indent));
+    } else {
+      const t = inline(n);
+      if (t) out.push(indent + t);
+    }
+  }
+  return out;
+}
+function adfToText(doc) {
+  if (typeof doc === "string") return doc;
+  if (!isNode(doc)) return "";
+  return blocks(doc.type === "doc" ? kids(doc.content) : [doc], "").join("\n").trim();
+}
+
+// src/core/tickets/jira.ts
+var JIRA_TIMEOUT_MS = 5e3;
+var MAX_PAGES = 50;
+var PAGE_SIZE = 100;
+var SEARCH_FIELDS = "*all,-comment,-worklog,-attachment,-issuelinks,-subtasks";
+var clampLimit = (n) => Math.min(100, Math.max(1, Math.floor(Number(n)) || 1));
+var PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
+function jiraBaseUrl(raw) {
+  let u;
+  try {
+    u = new URL(String(raw).trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) return null;
+  return (u.origin + u.pathname).replace(/\/+$/, "");
+}
+function parseBase(raw) {
+  const base = jiraBaseUrl(raw);
+  if (base === null) throw new HubError("JIRA_BAD_URL", "Jira URL must be an https:// address without a login, query or #fragment.");
+  return base;
+}
+var obj2 = (v) => typeof v === "object" && v !== null && !Array.isArray(v) ? v : {};
+var str = (v) => typeof v === "string" && v ? v : null;
+var named = (v) => str(obj2(v).name);
+var JiraClient = class {
+  kind = "jira";
+  label = "Jira";
+  #base;
+  #auth;
+  #projects;
+  #fetchFn;
+  #timeoutMs;
+  #meta;
+  constructor(baseUrl, auth, opts = {}) {
+    this.#base = parseBase(baseUrl);
+    this.#auth = auth;
+    this.#projects = (opts.projects ?? []).map((p) => this.#projectKey(p));
+    this.#fetchFn = opts.fetchFn ?? fetch;
+    this.#timeoutMs = opts.timeoutMs ?? JIRA_TIMEOUT_MS;
+  }
+  get #api() {
+    return this.#auth.flavor === "cloud" ? "/rest/api/3" : "/rest/api/2";
+  }
+  #projectKey(k) {
+    if (!PROJECT_KEY.test(k)) throw new HubError("BAD_PROJECT", `invalid Jira project key: ${String(k)}`);
+    return k;
+  }
+  #authHeader() {
+    const a = this.#auth;
+    return a.flavor === "cloud" ? "Basic " + Buffer.from(`${a.email}:${a.token}`).toString("base64") : `Bearer ${a.token}`;
+  }
+  async #get(path, params = {}) {
+    const url2 = new URL(this.#base + path);
+    for (const [k, v] of Object.entries(params)) url2.searchParams.set(k, v);
+    const signal = AbortSignal.timeout(this.#timeoutMs);
+    const unreachable = () => new HubError("JIRA_NETWORK", `Could not reach Jira at ${this.#base}. Check the URL and your network.`);
+    let res;
+    try {
+      res = await this.#fetchFn(url2, {
+        method: "GET",
+        headers: { Authorization: this.#authHeader(), Accept: "application/json" },
+        redirect: "error",
+        signal
+      });
+    } catch {
+      throw unreachable();
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new HubError("JIRA_AUTH", "Jira rejected your login. Check the email and API token (Cloud) or personal access token (self-hosted).");
+    }
+    if (!res.ok) throw new HubError("JIRA_HTTP", `Jira returned ${res.status} for ${path}`);
+    try {
+      return await res.json();
+    } catch {
+      if (signal.aborted) throw unreachable();
+      throw new HubError("JIRA_HTTP", `Jira returned an unreadable response for ${path}`);
+    }
+  }
+  #scopeJql(scope) {
+    return scope.length ? `project in (${scope.map((k) => this.#projectKey(k)).join(", ")})` : "";
+  }
+  normalizeId(raw) {
+    let id;
+    try {
+      id = normalizeTicketId(raw);
+    } catch {
+      throw new HubError("BAD_TICKET", `invalid ticket id: ${String(raw)}`);
+    }
+    if (/^\d+$/.test(id)) throw new HubError("BAD_TICKET", `invalid Jira ticket id: ${id} (expected a key like WEB-123)`);
+    return id;
+  }
+  async whoAmI() {
+    const me = obj2(await this.#get(`${this.#api}/myself`));
+    const id = str(me.accountId) ?? str(me.name) ?? str(me.key) ?? "";
+    if (!id) throw new HubError("JIRA_HTTP", "Jira returned no user id for /myself");
+    return { id, name: str(me.displayName) ?? id };
+  }
+  // Field metadata is fetched once per client so every search page requests the same field list.
+  #fieldMeta() {
+    this.#meta ??= this.#loadMeta().catch((e) => {
+      this.#meta = void 0;
+      throw e;
+    });
+    return this.#meta;
+  }
+  async #loadMeta() {
+    const res = await this.#get(`${this.#api}/field`);
+    if (!Array.isArray(res)) throw new HubError("JIRA_HTTP", `Jira returned no field list for ${this.#api}/field`);
+    const names = {};
+    const custom2 = [];
+    let bySchema = null;
+    let byName = null;
+    for (const f of res) {
+      const o = obj2(f);
+      const id = str(o.id);
+      if (!id) continue;
+      const name = str(o.name);
+      if (name) names[id] = name;
+      if (id.startsWith("customfield_")) custom2.push(id);
+      if (obj2(o.schema).custom === "com.pyxis.greenhopper.jira:gh-sprint") bySchema ??= id;
+      if (name === "Sprint") byName ??= id;
+    }
+    return { sprint: bySchema ?? byName, names, custom: custom2 };
+  }
+  async #search(jql, max) {
+    const meta3 = await this.#fieldMeta();
+    const fields = SEARCH_FIELDS;
+    const cloud = this.#auth.flavor === "cloud";
+    const path = `${this.#api}${cloud ? "/search/jql" : "/search"}`;
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    let token;
+    let startAt = 0;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const params = { jql, fields, maxResults: String(Math.min(PAGE_SIZE, max - out.length)) };
+      if (cloud && token) params.nextPageToken = token;
+      if (!cloud) params.startAt = String(startAt);
+      const res = obj2(await this.#get(path, params));
+      if (!Array.isArray(res.issues)) throw new HubError("JIRA_HTTP", `Jira returned no issue list for ${path}`);
+      const issues = res.issues;
+      out.push(...issues.filter((i) => typeof obj2(i).key === "string" && JIRA_KEY.test(i.key)));
+      if (out.length >= max) return out.slice(0, max);
+      if (cloud) {
+        const next = str(res.nextPageToken);
+        if (!next || res.isLast === true) return out;
+        if (seen.has(next)) throw new HubError("JIRA_PAGINATION", `Jira repeated a page token for ${path}`);
+        seen.add(next);
+        token = next;
+      } else {
+        startAt += issues.length;
+        const total = typeof res.total === "number" ? res.total : 0;
+        if (issues.length === 0 || startAt >= total) return out;
+      }
+    }
+    throw new HubError("JIRA_PAGINATION", `Jira pagination for ${path} did not finish in ${MAX_PAGES} pages`);
+  }
+  #text(v) {
+    return this.#auth.flavor === "cloud" ? adfToText(v) : str(v) ?? "";
+  }
+  #toTicket(issue2, meta3) {
+    const f = issue2.fields ?? {};
+    const names = meta3.names;
+    const sprintId = meta3.sprint;
+    const listNames = (v) => Array.isArray(v) ? v.map(named).filter((n) => !!n) : [];
+    const components = listNames(f.components);
+    const labels = Array.isArray(f.labels) ? f.labels.filter((l) => typeof l === "string") : [];
+    const fields = [];
+    if (components.length) fields.push({ name: "Components", value: components.join(", ") });
+    if (labels.length) fields.push({ name: "Labels", value: labels.join(", ") });
+    for (const [key, value] of Object.entries(f)) {
+      if (!key.startsWith("customfield_") || key === sprintId || !names[key]) continue;
+      const v = str(value) ?? str(obj2(value).value);
+      if (v) fields.push({ name: names[key], value: v });
+    }
+    const parent = obj2(f.parent);
+    const projectKey = str(obj2(f.project).key);
+    return {
+      id: issue2.key,
+      title: str(f.summary) ?? "",
+      notes: this.#text(f.description),
+      modifiedAt: str(f.updated) ?? "",
+      due: str(f.duedate),
+      url: `${this.#base}/browse/${issue2.key}`,
+      parent: str(parent.key) ? { id: parent.key, title: str(obj2(parent.fields).summary) ?? "" } : null,
+      status: named(f.status),
+      priority: named(f.priority),
+      fields,
+      components,
+      labels,
+      containers: projectKey ? [projectKey] : [],
+      sections: [],
+      sprints: sprintId ? this.#sprints(f[sprintId]) : [],
+      restricted: f.security != null
+    };
+  }
+  #sprints(v) {
+    if (!Array.isArray(v)) return [];
+    return v.flatMap((s) => {
+      if (typeof s === "string") {
+        const name2 = /name=([^,\]]*)/.exec(s)?.[1];
+        if (!name2) return [];
+        const board = /rapidViewId=(\d+)/.exec(s)?.[1];
+        return [{ name: name2, active: /state=ACTIVE/i.test(s), boardId: board ? Number(board) : null }];
+      }
+      const o = obj2(s);
+      const name = str(o.name);
+      if (!name) return [];
+      return [{ name, active: String(o.state).toLowerCase() === "active", boardId: typeof o.boardId === "number" ? o.boardId : null }];
+    });
+  }
+  async myTickets() {
+    const scope = this.#scopeJql(this.#projects);
+    const jql = "assignee = currentUser() AND statusCategory != Done" + (scope ? ` AND ${scope}` : "");
+    const issues = await this.#search(jql, 1e3);
+    const meta3 = await this.#fieldMeta();
+    return issues.map((i) => this.#toTicket(i, meta3));
+  }
+  async ticket(id) {
+    const key = this.normalizeId(id);
+    const meta3 = await this.#fieldMeta();
+    const issue2 = obj2(await this.#get(`${this.#api}/issue/${key}`));
+    if (typeof issue2.key !== "string" || !JIRA_KEY.test(issue2.key)) throw new HubError("JIRA_HTTP", `Jira returned no issue for /issue/${key}`);
+    return this.#toTicket(issue2, meta3);
+  }
+  async comments(id, limit = 10) {
+    const key = this.normalizeId(id);
+    if (limit <= 0) return [];
+    const res = obj2(await this.#get(`${this.#api}/issue/${key}/comment`, { orderBy: "-created", maxResults: String(clampLimit(limit)) }));
+    if (!Array.isArray(res.comments)) throw new HubError("JIRA_HTTP", `Jira returned no comment list for /issue/${key}/comment`);
+    return res.comments.map((c) => ({ createdAt: str(c.created) ?? "", author: str(obj2(c.author).displayName) ?? "unknown", text: this.#text(c.body) })).reverse();
+  }
+  async scopes() {
+    let projects;
+    if (this.#auth.flavor === "cloud") {
+      projects = [];
+      for (let startAt = 0, page = 0; page < MAX_PAGES; page++) {
+        const res = obj2(await this.#get(`${this.#api}/project/search`, { startAt: String(startAt), maxResults: String(PAGE_SIZE) }));
+        const values = Array.isArray(res.values) ? res.values : [];
+        projects.push(...values);
+        startAt += values.length;
+        if (res.isLast !== false || values.length === 0) break;
+      }
+    } else {
+      const res = await this.#get(`${this.#api}/project`);
+      projects = Array.isArray(res) ? res : [];
+    }
+    return projects.flatMap((p) => {
+      const o = obj2(p);
+      const key = str(o.key);
+      return key ? [{ id: key, name: str(o.name) ?? key }] : [];
+    });
+  }
+  async sample(scope, limit) {
+    if (scope.length === 0) return [];
+    const max = clampLimit(limit);
+    const issues = await this.#search(`${this.#scopeJql(scope)} ORDER BY updated DESC`, max);
+    const meta3 = await this.#fieldMeta();
+    return issues.map((i) => this.#toTicket(i, meta3));
+  }
+  async statuses(scope) {
+    const out = /* @__PURE__ */ new Set();
+    for (const key of scope) {
+      const res = await this.#get(`${this.#api}/project/${this.#projectKey(key)}/statuses`);
+      for (const type of Array.isArray(res) ? res : []) {
+        const list = obj2(type).statuses;
+        for (const s of Array.isArray(list) ? list : []) {
+          const n = named(s);
+          if (n) out.add(n);
+        }
+      }
+    }
+    return [...out];
+  }
+  async priorities() {
+    const res = await this.#get(`${this.#api}/priority`);
+    return (Array.isArray(res) ? res : []).map(named).filter((n) => !!n);
+  }
+  async boards(scope) {
+    const out = [];
+    for (const key of scope) {
+      const res = obj2(await this.#get("/rest/agile/1.0/board", { projectKeyOrId: this.#projectKey(key) }));
+      for (const b of Array.isArray(res.values) ? res.values : []) {
+        if (typeof b.id === "number" && str(b.name) && !out.some((o) => o.id === b.id)) out.push({ id: b.id, name: b.name });
+      }
+    }
+    return out;
+  }
+};
+
 // src/core/config.ts
 function homeDir(env = process.env) {
   return env.HOME || (0, import_node_os.homedir)();
@@ -35959,6 +36293,7 @@ function loadUserConfig(dir, env = process.env) {
     projectsRoot,
     asanaWorkspace: raw.asanaWorkspace === void 0 ? void 0 : String(raw.asanaWorkspace),
     jiraEmail: typeof raw.jiraEmail === "string" && raw.jiraEmail.trim() ? raw.jiraEmail.trim() : void 0,
+    jiraUrl: typeof raw.jiraUrl === "string" ? jiraBaseUrl(raw.jiraUrl) ?? void 0 : void 0,
     siteFolders: normalizeFolders(raw.siteFolders, env, projectsRoot),
     taskSites: raw.taskSites ?? {}
   };
@@ -35978,7 +36313,7 @@ var import_node_path11 = require("node:path");
 
 // src/core/asana.ts
 var DEFAULT_BASE = "https://app.asana.com/api/1.0";
-var MAX_PAGES = 50;
+var MAX_PAGES2 = 50;
 var ASANA_TIMEOUT_MS = 5e3;
 var TASK_FIELDS = [
   "name",
@@ -36041,7 +36376,7 @@ var AsanaClient = class {
     const out = [];
     const seen = /* @__PURE__ */ new Set();
     let offset;
-    for (let page = 0; page < MAX_PAGES; page++) {
+    for (let page = 0; page < MAX_PAGES2; page++) {
       const res = await this.#get(path, offset ? { ...params, offset } : params);
       if (!Array.isArray(res.data)) throw new HubError("ASANA_HTTP", `Asana returned no list for ${path}`);
       out.push(...res.data);
@@ -36051,7 +36386,7 @@ var AsanaClient = class {
       seen.add(next);
       offset = next;
     }
-    throw new HubError("ASANA_PAGINATION", `Asana pagination for ${path} did not finish in ${MAX_PAGES} pages`);
+    throw new HubError("ASANA_PAGINATION", `Asana pagination for ${path} did not finish in ${MAX_PAGES2} pages`);
   }
   async getMe() {
     return this.#object(
@@ -36697,6 +37032,12 @@ function loadWorkflow(hubDir2, version2 = RIXFLOW_VERSION) {
     urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") }
   };
 }
+function jiraUrlChanged(wf, user) {
+  if (wf.tracker.type !== "jira") return false;
+  const base = jiraBaseUrl(wf.tracker.url);
+  if (base === null) return false;
+  return base !== user.jiraUrl;
+}
 
 // src/core/template.ts
 var HUB_GITIGNORE = [".obsidian/", ".trash/", ".DS_Store", "Thumbs.db", "*.tmp-*"];
@@ -36806,336 +37147,6 @@ function asanaSource(reader, opts) {
   };
 }
 
-// src/core/tickets/adf.ts
-var kids = (v) => Array.isArray(v) ? v : [];
-var text = (v) => typeof v === "string" ? v : "";
-var obj = (v) => typeof v === "object" && v !== null ? v : {};
-var isNode = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-function inline(node2) {
-  if (!isNode(node2)) return "";
-  if (node2.type === "text") return text(node2.text);
-  if (node2.type === "hardBreak") return "\n";
-  if (node2.type === "mention") return "@" + text(obj(node2.attrs).text).replace(/^@/, "");
-  if (node2.type === "emoji") return text(obj(node2.attrs).shortName);
-  if (node2.type === "inlineCard") return text(obj(node2.attrs).url);
-  if (typeof node2.text === "string") return node2.text;
-  return kids(node2.content).map(inline).join("");
-}
-function blocks(nodes, indent) {
-  const out = [];
-  for (const n of nodes) {
-    if (!isNode(n)) continue;
-    const sub = kids(n.content);
-    if (n.type === "bulletList" || n.type === "orderedList") {
-      sub.forEach((item, i) => {
-        const marker = n.type === "orderedList" ? `${i + 1}. ` : "- ";
-        const lines = blocks(isNode(item) ? kids(item.content) : [], indent + "  ");
-        if (lines.length === 0) return;
-        out.push(indent + marker + lines[0].trimStart(), ...lines.slice(1));
-      });
-    } else if (n.type === "paragraph" || n.type === "heading" || n.type === "codeBlock") {
-      out.push(...inline(n).split("\n").map((l) => indent + l));
-    } else if (sub.length > 0 && sub.some((k) => isNode(k) && k.type !== "text" && k.type !== "mention")) {
-      out.push(...blocks(sub, indent));
-    } else {
-      const t = inline(n);
-      if (t) out.push(indent + t);
-    }
-  }
-  return out;
-}
-function adfToText(doc) {
-  if (typeof doc === "string") return doc;
-  if (!isNode(doc)) return "";
-  return blocks(doc.type === "doc" ? kids(doc.content) : [doc], "").join("\n").trim();
-}
-
-// src/core/tickets/jira.ts
-var JIRA_TIMEOUT_MS = 5e3;
-var MAX_PAGES2 = 50;
-var PAGE_SIZE = 100;
-var SEARCH_FIELDS = "*all,-comment,-worklog,-attachment,-issuelinks,-subtasks";
-var clampLimit = (n) => Math.min(100, Math.max(1, Math.floor(Number(n)) || 1));
-var PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
-function parseBase(raw) {
-  const bad = () => new HubError("JIRA_BAD_URL", "Jira URL must be an https:// address without a login, query or #fragment.");
-  let u;
-  try {
-    u = new URL(String(raw).trim());
-  } catch {
-    throw bad();
-  }
-  if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) throw bad();
-  return (u.origin + u.pathname).replace(/\/+$/, "");
-}
-var obj2 = (v) => typeof v === "object" && v !== null && !Array.isArray(v) ? v : {};
-var str = (v) => typeof v === "string" && v ? v : null;
-var named = (v) => str(obj2(v).name);
-var JiraClient = class {
-  kind = "jira";
-  label = "Jira";
-  #base;
-  #auth;
-  #projects;
-  #fetchFn;
-  #timeoutMs;
-  #meta;
-  constructor(baseUrl, auth, opts = {}) {
-    this.#base = parseBase(baseUrl);
-    this.#auth = auth;
-    this.#projects = (opts.projects ?? []).map((p) => this.#projectKey(p));
-    this.#fetchFn = opts.fetchFn ?? fetch;
-    this.#timeoutMs = opts.timeoutMs ?? JIRA_TIMEOUT_MS;
-  }
-  get #api() {
-    return this.#auth.flavor === "cloud" ? "/rest/api/3" : "/rest/api/2";
-  }
-  #projectKey(k) {
-    if (!PROJECT_KEY.test(k)) throw new HubError("BAD_PROJECT", `invalid Jira project key: ${String(k)}`);
-    return k;
-  }
-  #authHeader() {
-    const a = this.#auth;
-    return a.flavor === "cloud" ? "Basic " + Buffer.from(`${a.email}:${a.token}`).toString("base64") : `Bearer ${a.token}`;
-  }
-  async #get(path, params = {}) {
-    const url2 = new URL(this.#base + path);
-    for (const [k, v] of Object.entries(params)) url2.searchParams.set(k, v);
-    const signal = AbortSignal.timeout(this.#timeoutMs);
-    const unreachable = () => new HubError("JIRA_NETWORK", `Could not reach Jira at ${this.#base}. Check the URL and your network.`);
-    let res;
-    try {
-      res = await this.#fetchFn(url2, {
-        method: "GET",
-        headers: { Authorization: this.#authHeader(), Accept: "application/json" },
-        redirect: "error",
-        signal
-      });
-    } catch {
-      throw unreachable();
-    }
-    if (res.status === 401 || res.status === 403) {
-      throw new HubError("JIRA_AUTH", "Jira rejected your login. Check the email and API token (Cloud) or personal access token (self-hosted).");
-    }
-    if (!res.ok) throw new HubError("JIRA_HTTP", `Jira returned ${res.status} for ${path}`);
-    try {
-      return await res.json();
-    } catch {
-      if (signal.aborted) throw unreachable();
-      throw new HubError("JIRA_HTTP", `Jira returned an unreadable response for ${path}`);
-    }
-  }
-  #scopeJql(scope) {
-    return scope.length ? `project in (${scope.map((k) => this.#projectKey(k)).join(", ")})` : "";
-  }
-  normalizeId(raw) {
-    let id;
-    try {
-      id = normalizeTicketId(raw);
-    } catch {
-      throw new HubError("BAD_TICKET", `invalid ticket id: ${String(raw)}`);
-    }
-    if (/^\d+$/.test(id)) throw new HubError("BAD_TICKET", `invalid Jira ticket id: ${id} (expected a key like WEB-123)`);
-    return id;
-  }
-  async whoAmI() {
-    const me = obj2(await this.#get(`${this.#api}/myself`));
-    const id = str(me.accountId) ?? str(me.name) ?? str(me.key) ?? "";
-    if (!id) throw new HubError("JIRA_HTTP", "Jira returned no user id for /myself");
-    return { id, name: str(me.displayName) ?? id };
-  }
-  // Field metadata is fetched once per client so every search page requests the same field list.
-  #fieldMeta() {
-    this.#meta ??= this.#loadMeta().catch((e) => {
-      this.#meta = void 0;
-      throw e;
-    });
-    return this.#meta;
-  }
-  async #loadMeta() {
-    const res = await this.#get(`${this.#api}/field`);
-    if (!Array.isArray(res)) throw new HubError("JIRA_HTTP", `Jira returned no field list for ${this.#api}/field`);
-    const names = {};
-    const custom2 = [];
-    let bySchema = null;
-    let byName = null;
-    for (const f of res) {
-      const o = obj2(f);
-      const id = str(o.id);
-      if (!id) continue;
-      const name = str(o.name);
-      if (name) names[id] = name;
-      if (id.startsWith("customfield_")) custom2.push(id);
-      if (obj2(o.schema).custom === "com.pyxis.greenhopper.jira:gh-sprint") bySchema ??= id;
-      if (name === "Sprint") byName ??= id;
-    }
-    return { sprint: bySchema ?? byName, names, custom: custom2 };
-  }
-  async #search(jql, max) {
-    const meta3 = await this.#fieldMeta();
-    const fields = SEARCH_FIELDS;
-    const cloud = this.#auth.flavor === "cloud";
-    const path = `${this.#api}${cloud ? "/search/jql" : "/search"}`;
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    let token;
-    let startAt = 0;
-    for (let page = 0; page < MAX_PAGES2; page++) {
-      const params = { jql, fields, maxResults: String(Math.min(PAGE_SIZE, max - out.length)) };
-      if (cloud && token) params.nextPageToken = token;
-      if (!cloud) params.startAt = String(startAt);
-      const res = obj2(await this.#get(path, params));
-      if (!Array.isArray(res.issues)) throw new HubError("JIRA_HTTP", `Jira returned no issue list for ${path}`);
-      const issues = res.issues;
-      out.push(...issues.filter((i) => typeof obj2(i).key === "string" && JIRA_KEY.test(i.key)));
-      if (out.length >= max) return out.slice(0, max);
-      if (cloud) {
-        const next = str(res.nextPageToken);
-        if (!next || res.isLast === true) return out;
-        if (seen.has(next)) throw new HubError("JIRA_PAGINATION", `Jira repeated a page token for ${path}`);
-        seen.add(next);
-        token = next;
-      } else {
-        startAt += issues.length;
-        const total = typeof res.total === "number" ? res.total : 0;
-        if (issues.length === 0 || startAt >= total) return out;
-      }
-    }
-    throw new HubError("JIRA_PAGINATION", `Jira pagination for ${path} did not finish in ${MAX_PAGES2} pages`);
-  }
-  #text(v) {
-    return this.#auth.flavor === "cloud" ? adfToText(v) : str(v) ?? "";
-  }
-  #toTicket(issue2, meta3) {
-    const f = issue2.fields ?? {};
-    const names = meta3.names;
-    const sprintId = meta3.sprint;
-    const listNames = (v) => Array.isArray(v) ? v.map(named).filter((n) => !!n) : [];
-    const components = listNames(f.components);
-    const labels = Array.isArray(f.labels) ? f.labels.filter((l) => typeof l === "string") : [];
-    const fields = [];
-    if (components.length) fields.push({ name: "Components", value: components.join(", ") });
-    if (labels.length) fields.push({ name: "Labels", value: labels.join(", ") });
-    for (const [key, value] of Object.entries(f)) {
-      if (!key.startsWith("customfield_") || key === sprintId || !names[key]) continue;
-      const v = str(value) ?? str(obj2(value).value);
-      if (v) fields.push({ name: names[key], value: v });
-    }
-    const parent = obj2(f.parent);
-    const projectKey = str(obj2(f.project).key);
-    return {
-      id: issue2.key,
-      title: str(f.summary) ?? "",
-      notes: this.#text(f.description),
-      modifiedAt: str(f.updated) ?? "",
-      due: str(f.duedate),
-      url: `${this.#base}/browse/${issue2.key}`,
-      parent: str(parent.key) ? { id: parent.key, title: str(obj2(parent.fields).summary) ?? "" } : null,
-      status: named(f.status),
-      priority: named(f.priority),
-      fields,
-      components,
-      labels,
-      containers: projectKey ? [projectKey] : [],
-      sections: [],
-      sprints: sprintId ? this.#sprints(f[sprintId]) : [],
-      restricted: f.security != null
-    };
-  }
-  #sprints(v) {
-    if (!Array.isArray(v)) return [];
-    return v.flatMap((s) => {
-      if (typeof s === "string") {
-        const name2 = /name=([^,\]]*)/.exec(s)?.[1];
-        if (!name2) return [];
-        const board = /rapidViewId=(\d+)/.exec(s)?.[1];
-        return [{ name: name2, active: /state=ACTIVE/i.test(s), boardId: board ? Number(board) : null }];
-      }
-      const o = obj2(s);
-      const name = str(o.name);
-      if (!name) return [];
-      return [{ name, active: String(o.state).toLowerCase() === "active", boardId: typeof o.boardId === "number" ? o.boardId : null }];
-    });
-  }
-  async myTickets() {
-    const scope = this.#scopeJql(this.#projects);
-    const jql = "assignee = currentUser() AND statusCategory != Done" + (scope ? ` AND ${scope}` : "");
-    const issues = await this.#search(jql, 1e3);
-    const meta3 = await this.#fieldMeta();
-    return issues.map((i) => this.#toTicket(i, meta3));
-  }
-  async ticket(id) {
-    const key = this.normalizeId(id);
-    const meta3 = await this.#fieldMeta();
-    const issue2 = obj2(await this.#get(`${this.#api}/issue/${key}`));
-    if (typeof issue2.key !== "string" || !JIRA_KEY.test(issue2.key)) throw new HubError("JIRA_HTTP", `Jira returned no issue for /issue/${key}`);
-    return this.#toTicket(issue2, meta3);
-  }
-  async comments(id, limit = 10) {
-    const key = this.normalizeId(id);
-    if (limit <= 0) return [];
-    const res = obj2(await this.#get(`${this.#api}/issue/${key}/comment`, { orderBy: "-created", maxResults: String(clampLimit(limit)) }));
-    if (!Array.isArray(res.comments)) throw new HubError("JIRA_HTTP", `Jira returned no comment list for /issue/${key}/comment`);
-    return res.comments.map((c) => ({ createdAt: str(c.created) ?? "", author: str(obj2(c.author).displayName) ?? "unknown", text: this.#text(c.body) })).reverse();
-  }
-  async scopes() {
-    let projects;
-    if (this.#auth.flavor === "cloud") {
-      projects = [];
-      for (let startAt = 0, page = 0; page < MAX_PAGES2; page++) {
-        const res = obj2(await this.#get(`${this.#api}/project/search`, { startAt: String(startAt), maxResults: String(PAGE_SIZE) }));
-        const values = Array.isArray(res.values) ? res.values : [];
-        projects.push(...values);
-        startAt += values.length;
-        if (res.isLast !== false || values.length === 0) break;
-      }
-    } else {
-      const res = await this.#get(`${this.#api}/project`);
-      projects = Array.isArray(res) ? res : [];
-    }
-    return projects.flatMap((p) => {
-      const o = obj2(p);
-      const key = str(o.key);
-      return key ? [{ id: key, name: str(o.name) ?? key }] : [];
-    });
-  }
-  async sample(scope, limit) {
-    if (scope.length === 0) return [];
-    const max = clampLimit(limit);
-    const issues = await this.#search(`${this.#scopeJql(scope)} ORDER BY updated DESC`, max);
-    const meta3 = await this.#fieldMeta();
-    return issues.map((i) => this.#toTicket(i, meta3));
-  }
-  async statuses(scope) {
-    const out = /* @__PURE__ */ new Set();
-    for (const key of scope) {
-      const res = await this.#get(`${this.#api}/project/${this.#projectKey(key)}/statuses`);
-      for (const type of Array.isArray(res) ? res : []) {
-        const list = obj2(type).statuses;
-        for (const s of Array.isArray(list) ? list : []) {
-          const n = named(s);
-          if (n) out.add(n);
-        }
-      }
-    }
-    return [...out];
-  }
-  async priorities() {
-    const res = await this.#get(`${this.#api}/priority`);
-    return (Array.isArray(res) ? res : []).map(named).filter((n) => !!n);
-  }
-  async boards(scope) {
-    const out = [];
-    for (const key of scope) {
-      const res = obj2(await this.#get("/rest/agile/1.0/board", { projectKeyOrId: this.#projectKey(key) }));
-      for (const b of Array.isArray(res.values) ? res.values : []) {
-        if (typeof b.id === "number" && str(b.name) && !out.some((o) => o.id === b.id)) out.push({ id: b.id, name: b.name });
-      }
-    }
-    return out;
-  }
-};
-
 // src/core/token.ts
 var import_node_child_process2 = require("node:child_process");
 var import_node_fs9 = require("node:fs");
@@ -37172,6 +37183,7 @@ function getToken(configDir2, env = process.env, exec = defaultExec, user, kind 
 function makeSource(ctx, env = process.env, wf = loadWorkflow(ctx.hubDir)) {
   if (wf.tracker.type === "jira") {
     const { url: url2, flavor, projects } = wf.tracker;
+    if (jiraUrlChanged(wf, ctx.user)) return null;
     const token2 = getToken(ctx.configDir, env, void 0, ctx.user.name, "jira");
     if (!token2) return null;
     if (flavor === "server") return new JiraClient(url2, { flavor, token: token2 }, { projects });

@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import YAML from 'yaml';
 import { hubCommand } from './command';
+import { jiraBaseUrl } from './tickets/jira';
 import { HubError, assertName, type CheckState, type Ctx, type UserConfig } from './types';
 
 type Env = Record<string, string | undefined>;
@@ -57,6 +58,7 @@ export function loadUserConfig(dir: string, env: Env = process.env): UserConfig 
     projectsRoot,
     asanaWorkspace: raw.asanaWorkspace === undefined ? undefined : String(raw.asanaWorkspace),
     jiraEmail: typeof raw.jiraEmail === 'string' && raw.jiraEmail.trim() ? raw.jiraEmail.trim() : undefined,
+    jiraUrl: typeof raw.jiraUrl === 'string' ? jiraBaseUrl(raw.jiraUrl) ?? undefined : undefined,
     siteFolders: normalizeFolders(raw.siteFolders, env, projectsRoot),
     taskSites: raw.taskSites ?? {},
   };

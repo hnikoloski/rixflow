@@ -25,13 +25,27 @@ describe('runtime helpers', () => {
     const ctx = makeCtx();
     const base: Workflow = { ...structuredClone(LEGACY_WORKFLOW), legacy: false };
     const cloud: Workflow = { ...base, tracker: { type: 'jira', url: 'https://acme.example.com', flavor: 'cloud', projects: ['WEB'] } };
-    const withEmail = { ...ctx, user: { ...ctx.user, jiraEmail: 'dev@acme.example.com' } };
+    const pinned = { ...ctx, user: { ...ctx.user, jiraUrl: 'https://acme.example.com' } };
+    const withEmail = { ...pinned, user: { ...pinned.user, jiraEmail: 'dev@acme.example.com' } };
     expect(makeSource(withEmail, { JIRA_TOKEN: 'tok' }, cloud)).toBeInstanceOf(JiraClient);
-    expect(makeSource(ctx, { JIRA_TOKEN: 'tok' }, cloud)).toBeNull();
+    expect(makeSource(pinned, { JIRA_TOKEN: 'tok' }, cloud)).toBeNull();
     expect(makeSource(withEmail, { ASANA_TOKEN: 'tok' }, cloud)).toBeNull();
     const server: Workflow = { ...base, tracker: { type: 'jira', url: 'https://jira.globex.example.com/jira/', flavor: 'server', projects: [] } };
-    expect(makeSource(ctx, { JIRA_TOKEN: 'tok' }, server)?.kind).toBe('jira');
-    expect(makeSource(ctx, {}, server)).toBeNull();
+    const serverCtx = { ...ctx, user: { ...ctx.user, jiraUrl: 'https://jira.globex.example.com/jira' } };
+    expect(makeSource(serverCtx, { JIRA_TOKEN: 'tok' }, server)?.kind).toBe('jira');
+    expect(makeSource(serverCtx, {}, server)).toBeNull();
+  });
+  it('makeSource sends the Jira token only to the address pinned on this machine', () => {
+    const ctx = makeCtx();
+    const base: Workflow = { ...structuredClone(LEGACY_WORKFLOW), legacy: false };
+    const moved: Workflow = { ...base, tracker: { type: 'jira', url: 'https://globex.example.com', flavor: 'server', projects: [] } };
+    const pinned = { ...ctx, user: { ...ctx.user, jiraUrl: 'https://acme.example.com' } };
+    expect(makeSource(pinned, { JIRA_TOKEN: 'tok' }, moved)).toBeNull();
+    // A Jira machine with no pin at all counts as changed.
+    expect(makeSource(ctx, { JIRA_TOKEN: 'tok' }, moved)).toBeNull();
+    // The same address in another spelling (trailing slash) still matches.
+    const same: Workflow = { ...base, tracker: { type: 'jira', url: 'https://acme.example.com/', flavor: 'server', projects: [] } };
+    expect(makeSource(pinned, { JIRA_TOKEN: 'tok' }, same)?.kind).toBe('jira');
   });
   it('makeSource throws BAD_CONFIG for an invalid workflow.yml', () => {
     const ctx = makeCtx();

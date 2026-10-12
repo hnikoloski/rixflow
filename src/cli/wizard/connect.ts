@@ -2,11 +2,11 @@ import { AsanaClient, type AsanaReader } from '../../core/asana';
 import { BUCKET_LABEL, needsParents, mapTicket } from '../../core/mapping';
 import type { Gh, RunGit } from '../../core/repo';
 import { asanaSource } from '../../core/tickets/asana';
-import { JiraClient, type JiraAuth } from '../../core/tickets/jira';
+import { JiraClient, jiraBaseUrl, type JiraAuth } from '../../core/tickets/jira';
 import { parentChain, type Discovery, type Ticket, type TicketSource } from '../../core/tickets/types';
 import { getToken, setToken, type Exec } from '../../core/token';
 import { HubError } from '../../core/types';
-import type { Workflow } from '../../core/workflow';
+import { jiraUrlChanged, type Workflow } from '../../core/workflow';
 import type { InitIo } from '../init';
 import { askValid, choose } from './prompts';
 
@@ -28,6 +28,8 @@ export interface Connection {
   source: TicketSource;
   // Machine facts for config.yml. Never written to the progress file (an email is personal).
   jiraEmail?: string;
+  // The Jira address this machine connected to, pinned in config.yml (the token goes only there).
+  jiraUrl?: string;
   asanaWorkspace?: string;
 }
 
@@ -89,7 +91,8 @@ export async function connect(io: InitIo, deps: WizardDeps, wf: Workflow, user: 
         const auth: JiraAuth = t.flavor === 'cloud' ? { flavor: 'cloud', email: email as string, token } : { flavor: 'server', token };
         const source = makeJira(deps, t.url, auth, t.projects);
         await source.whoAmI();
-        conn = t.flavor === 'cloud' ? { source, jiraEmail: email } : { source };
+        const jiraUrl = jiraBaseUrl(t.url) ?? undefined;
+        conn = t.flavor === 'cloud' ? { source, jiraEmail: email, jiraUrl } : { source, jiraUrl };
       } else {
         token = await askToken(io, 'Asana personal access token (input masked): ');
         if (!token) { io.log('No token entered.'); continue; }
@@ -123,11 +126,13 @@ export async function connect(io: InitIo, deps: WizardDeps, wf: Workflow, user: 
 }
 
 // Rebuilds the source from what connect stored (config facts + token), for a resumed wizard.
+// Null when the hub names a Jira address other than the one pinned on this machine.
 export function storedSource(
-  deps: WizardDeps, wf: Workflow, user: { name: string; configDir: string; jiraEmail?: string; asanaWorkspace?: string },
+  deps: WizardDeps, wf: Workflow, user: { name: string; configDir: string; jiraEmail?: string; jiraUrl?: string; asanaWorkspace?: string },
   env: Record<string, string | undefined> = process.env,
 ): TicketSource | null {
   const t = wf.tracker;
+  if (jiraUrlChanged(wf, user)) return null;
   const token = getToken(user.configDir, env, deps.tokenExec, user.name, t.type);
   if (!token) return null;
   if (t.type === 'jira') {

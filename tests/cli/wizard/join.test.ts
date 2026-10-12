@@ -130,6 +130,7 @@ describe('runJoin', () => {
     await runJoin(io, deps({ makeJira: j.makeJira }), m.env);
     const cfg = YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8'));
     expect(cfg.jiraEmail).toBe('me@example.com');
+    expect(cfg.jiraUrl).toBe('https://acme.atlassian.net'); // the machine's pin: the token goes only there
     expect(cfg.asanaWorkspace).toBeUndefined();
     expect(readFileSync(join(m.cfg, 'jira-token'), 'utf8')).toBe('jira-tok-1');
     expect(existsSync(join(m.cfg, 'asana-token'))).toBe(false);
@@ -150,10 +151,13 @@ describe('runJoin', () => {
       await runJoin(scriptedIo([h.remote, n, join(m.home, 'p'), `${who}@example.com`, `tok-${who}`, 'y', 'n']), deps({ makeJira: j.makeJira }), m.env);
       const text = readFileSync(join(m.cfg, 'config.yml'), 'utf8');
       const cfg = YAML.parse(text);
-      expect(Object.keys(cfg).sort()).toEqual(['jiraEmail', 'name', 'projectsRoot', 'role', 'siteFolders', 'taskSites']);
+      expect(Object.keys(cfg).sort()).toEqual(['jiraEmail', 'jiraUrl', 'name', 'projectsRoot', 'role', 'siteFolders', 'taskSites']);
       expect(cfg.siteFolders).toEqual({});
       expect(cfg.taskSites).toEqual({});
-      for (const team of ['atlassian', 'WEB', 'OPS', 'In Progress', 'Highest', 'tracker', 'workflow']) expect(text).not.toContain(team);
+      // jiraUrl is this machine's pin of where its token may go (ruling R17), not a team answer.
+      expect(cfg.jiraUrl).toBe('https://acme.atlassian.net');
+      const rest = text.split('\n').filter((l) => !l.startsWith('jiraUrl:')).join('\n');
+      for (const team of ['atlassian', 'WEB', 'OPS', 'In Progress', 'Highest', 'tracker', 'workflow']) expect(rest).not.toContain(team);
       results.push(loadWorkflow(m.hub));
     }
     expect(results[0]).toEqual(results[1]);

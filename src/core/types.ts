@@ -7,6 +7,8 @@ export interface UserConfig {
   asanaWorkspace?: string;
   // Jira Cloud login. It identifies the account, not the team, so it lives on the machine.
   jiraEmail?: string;
+  // The Jira base address this machine connected to (normalized). The token is sent only there.
+  jiraUrl?: string;
   siteFolders: Record<string, string>;
   taskSites: Record<string, string>;
 }

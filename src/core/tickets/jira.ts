@@ -23,16 +23,24 @@ interface FieldMeta {
   custom: string[];
 }
 
-function parseBase(raw: string): string {
-  const bad = () => new HubError('JIRA_BAD_URL', 'Jira URL must be an https:// address without a login, query or #fragment.');
+// The one Jira base-URL normalizer: an https:// address without a login, query or #fragment, as
+// origin + path without trailing slashes. Null for anything else. The client, the wizard and the
+// per-machine Jira address pin all compare addresses in this form.
+export function jiraBaseUrl(raw: unknown): string | null {
   let u: URL;
   try {
     u = new URL(String(raw).trim());
   } catch {
-    throw bad();
+    return null;
   }
-  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) throw bad();
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return null;
   return (u.origin + u.pathname).replace(/\/+$/, '');
+}
+
+function parseBase(raw: string): string {
+  const base = jiraBaseUrl(raw);
+  if (base === null) throw new HubError('JIRA_BAD_URL', 'Jira URL must be an https:// address without a login, query or #fragment.');
+  return base;
 }
 
 const obj = (v: unknown): Obj => (typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Obj) : {});

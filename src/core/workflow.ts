@@ -4,6 +4,7 @@ import YAML from 'yaml';
 import { writeGuarded } from './hubfs';
 import { scrub } from './scrub';
 import { isMapping, readYaml } from './team';
+import { jiraBaseUrl } from './tickets/jira';
 import { HubError, assertSiteCode } from './types';
 import { RIXFLOW_VERSION } from './version';
 
@@ -193,4 +194,16 @@ export function workflowToYaml(wf: Workflow): string {
 
 export function writeWorkflow(hubDir: string, wf: Workflow): void {
   writeGuarded(join(hubDir, FILE), scrub(workflowToYaml(wf)));
+}
+
+// True when the hub's workflow names a Jira address other than the one this machine connected to
+// (config.yml jiraUrl). Anyone who can push to the hub can edit workflow.yml, so the stored Jira
+// token is only ever sent to the address pinned on this machine. A Jira machine with no pin counts
+// as changed. Always false for Asana.
+export function jiraUrlChanged(wf: Workflow, user: { jiraUrl?: string }): boolean {
+  if (wf.tracker.type !== 'jira') return false;
+  const base = jiraBaseUrl(wf.tracker.url);
+  // An address that is not valid at all is the client's JIRA_BAD_URL, refused before any request.
+  if (base === null) return false;
+  return base !== user.jiraUrl;
 }

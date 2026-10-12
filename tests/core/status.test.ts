@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AsanaClient } from '../../src/core/asana';
 import { buildStatus, emptyStatus, STATUS_VERSION, type StatusDeps, type StatusOptions } from '../../src/core/status';
 import { sendMessage } from '../../src/core/messages';
@@ -338,6 +338,21 @@ describe('buildStatus', () => {
     const s = await buildStatus(opts({ asana: true }), deps(ctx, { workflow: () => jira, source: (c, wf) => makeSource(c, { JIRA_TOKEN: 't' }, wf) }));
     expect(s.problems).toEqual(['tickets: jira url invalid']);
     expect(s.initialized).toBe(true);
+  });
+
+  it('reports a Jira address that differs from the machine pin as a tickets problem, and never fetches', async () => {
+    const ctx = makeCtx();
+    const pinned = { ...ctx, user: { ...ctx.user, jiraUrl: 'https://acme.atlassian.net' } };
+    const moved = { ...structuredClone(LEGACY_WORKFLOW), legacy: false, tracker: { type: 'jira' as const, url: 'https://globex.example.com', flavor: 'server' as const, projects: [] } };
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const s = await buildStatus(opts({ asana: true }), deps(pinned, { workflow: () => moved, source: (c, wf) => makeSource(c, { JIRA_TOKEN: 'tok-secret' }, wf) }));
+      expect(s.problems).toEqual(['tickets: jira url changed']);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('reports any *_AUTH error as a rejected token', async () => {

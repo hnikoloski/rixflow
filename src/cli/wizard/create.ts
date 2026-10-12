@@ -8,6 +8,7 @@ import { findSecrets } from '../../core/scrub';
 import { isCurrentSprint, parseSprintSection } from '../../core/sprint';
 import type { TeamMember } from '../../core/team';
 import { bootstrapHub, isSafeFolder } from '../../core/template';
+import { jiraBaseUrl } from '../../core/tickets/jira';
 import type { Discovery, Ticket, TicketSource } from '../../core/tickets/types';
 import { HubError, assertName, type Role, type UserConfig } from '../../core/types';
 import { RIXFLOW_VERSION } from '../../core/version';
@@ -59,16 +60,6 @@ export function workflowOf(a: Answers): Workflow {
     sprints: (a.sprints as Workflow['sprints'] | undefined) ?? { mode: 'none' },
     urgent: { field: jira ? null : 'Priority', values: (a.urgentValues as string[] | undefined) ?? [] },
   };
-}
-
-function jiraUrl(s: string): string | null {
-  try {
-    const u = new URL(s);
-    if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return null;
-    return `${u.origin}${u.pathname}`.replace(/\/+$/, '');
-  } catch {
-    return null;
-  }
 }
 
 function validMember(line: string, taken: TeamMember[]): string | null {
@@ -293,6 +284,11 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
   // Kept in memory only: an email never goes in the progress file.
   let jiraEmail: string | undefined;
   const isCloud = (a: Answers) => (a.tracker as { flavor?: string } | undefined)?.flavor === 'cloud';
+  // The Jira address this person typed is the one this machine is pinned to.
+  const pinnedUrl = (a: Answers): string | undefined => {
+    const t = a.tracker as { type?: string; url?: string } | undefined;
+    return t?.type === 'jira' ? jiraBaseUrl(t.url) ?? undefined : undefined;
+  };
   // A resumed wizard has no email in memory; it is asked again (the token stays stored, never re-asked).
   const emailFor = async (a: Answers): Promise<string | undefined> => {
     if (!isCloud(a)) return undefined;
@@ -306,6 +302,7 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
     const cfg: UserConfig = {
       name: String(a.name), role: a.role as Role, projectsRoot,
       ...(jiraEmail ? { jiraEmail } : {}),
+      ...(pinnedUrl(a) ? { jiraUrl: pinnedUrl(a) } : {}),
       siteFolders: {}, taskSites: {},
     };
     saveUserConfig(configDir, cfg);
@@ -320,7 +317,7 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
   const source = async (a: Answers): Promise<Source> => {
     if (connection) return connection.source as Source;
     const name = String(a.name);
-    const stored = storedSource(deps, workflowOf(a), { name, configDir, jiraEmail: await emailFor(a) }, env);
+    const stored = storedSource(deps, workflowOf(a), { name, configDir, jiraEmail: await emailFor(a), jiraUrl: pinnedUrl(a) }, env);
     if (stored) return stored as Source;
     io.log('Your ticket login was not found on this machine; please sign in again.');
     return (await doConnect(a)).source as Source;
@@ -355,8 +352,8 @@ export async function runCreate(io: InitIo, deps: WizardDeps, env: NodeJS.Proces
         ]);
         if (kind === 'asana') return { name, role, tracker: { type: 'asana' } };
         const raw = await askValid(io, kind === 'cloud' ? 'Jira address (e.g. https://acme.atlassian.net):' : 'Jira address (e.g. https://jira.example.com):',
-          (s) => (jiraUrl(s) ? null : 'Please enter the https:// address you open Jira at, without anything after a ? or #.'));
-        return { name, role, tracker: { type: 'jira', url: jiraUrl(raw), flavor: kind } };
+          (s) => (jiraBaseUrl(s) ? null : 'Please enter the https:// address you open Jira at, without anything after a ? or #.'));
+        return { name, role, tracker: { type: 'jira', url: jiraBaseUrl(raw), flavor: kind } };
       },
     },
     {

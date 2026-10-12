@@ -133,7 +133,7 @@ describe('runCreate', () => {
     expect(loadSites(m.hub)).toEqual({ AS: { folder: 'acme-site' }, GL: { folder: 'globex-web' } });
 
     expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8'))).toEqual({
-      name: 'me', role: 'dev', projectsRoot: join(m.home, 'projects'), jiraEmail: 'me@example.com', siteFolders: {}, taskSites: {},
+      name: 'me', role: 'dev', projectsRoot: join(m.home, 'projects'), jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net', siteFolders: {}, taskSites: {},
     });
     expect(readFileSync(join(m.cfg, 'jira-token'), 'utf8')).toBe('jira-tok-1');
     expect(existsSync(join(m.hub, '.git', 'hooks', 'pre-commit'))).toBe(true);
@@ -198,7 +198,7 @@ describe('runCreate', () => {
     await runCreate(io, deps({ makeJira: j.makeJira }), m.env);
     expect(io.asked.some((q) => /token/i.test(q))).toBe(false);
     expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8'))).toEqual({
-      name: 'me', role: 'dev', projectsRoot: join(m.home, 'projects'), jiraEmail: 'me@example.com', siteFolders: {}, taskSites: {},
+      name: 'me', role: 'dev', projectsRoot: join(m.home, 'projects'), jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net', siteFolders: {}, taskSites: {},
     });
   });
 
