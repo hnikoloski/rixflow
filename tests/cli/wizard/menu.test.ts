@@ -8,6 +8,7 @@ import { runMenu } from '../../../src/cli/wizard/menu';
 import { storedSource } from '../../../src/cli/wizard/connect';
 import type { AsanaTask } from '../../../src/core/asana';
 import { loadSites, loadTeam } from '../../../src/core/team';
+import { getToken } from '../../../src/core/token';
 import type { Discovery, Ticket, TicketSource } from '../../../src/core/tickets/types';
 import type { Ctx } from '../../../src/core/types';
 import { RIXFLOW_VERSION } from '../../../src/core/version';
@@ -266,6 +267,31 @@ describe('runMenu', () => {
     expect(s.inHub('rev-parse', 'HEAD')).toBe(before.head);
     expect(readdirSync(s.ctx.hubDir, { recursive: true }).sort()).toEqual(before.files);
     expect(io.left()).toBe(0);
+  });
+
+  it('start over also removes the legacy shared Asana login 0.2.0 stored, so no Asana token is left', async () => {
+    const s = await setUp();
+    const cfg = s.ctx.configDir;
+    writeFileSync(join(cfg, 'asana-token'), 'legacy-file-tok', { mode: 0o600 });
+    // A fake keychain (secret-tool / security style): account -> token.
+    const items = new Map<string, string>([['asana', 'legacy-tok'], ['asana:me', 'own-tok']]);
+    const exec = (cmd: string, args: string[]) => {
+      const account = args[args.indexOf(cmd === 'security' ? '-a' : 'account') + 1];
+      const op = args[0];
+      if (op === 'lookup' || op === 'find-generic-password') {
+        const v = items.get(account);
+        if (v === undefined) throw new Error('not found');
+        return v;
+      }
+      if (op === 'clear' || op === 'delete-generic-password') { items.delete(account); return ''; }
+      throw new Error(`unexpected ${op}`);
+    };
+    expect(getToken(cfg, {}, exec, 'me', 'asana')).toBe('own-tok');
+    const io = scriptedIo([MENU.startOver, 'y']);
+    await runMenu(io, deps({ tokenExec: exec }), s.ctx, s.env);
+    expect([...items.keys()]).toEqual([]);
+    expect(existsSync(join(cfg, 'asana-token'))).toBe(false);
+    expect(getToken(cfg, {}, exec, 'me', 'asana')).toBeNull();
   });
 
   it('start over asks first and does nothing when declined', async () => {

@@ -89,14 +89,24 @@ export function setToken(configDir: string, token: string, exec: Exec = defaultE
 // "Start over": forgets this user's token for one system (keychain item `<kind>:<user>` and the
 // 0600 file). A token in ASANA_TOKEN / JIRA_TOKEN is the user's own environment and is left alone.
 export function deleteToken(configDir: string, exec: Exec = defaultExec, user?: string, kind: TrackerKind = 'asana'): void {
-  const account = accountFor(kind, user);
+  keychainDelete(exec, accountFor(kind, user));
+  rmSync(tokenFile(configDir, kind), { force: true });
+}
+
+// "Start over" also forgets the shared login 0.2.0 stored (keychain account `asana`, file asana-token),
+// which getToken still falls back to for Asana.
+export function deleteLegacyToken(configDir: string, exec: Exec = defaultExec): void {
+  keychainDelete(exec, LEGACY_ACCOUNT);
+  rmSync(tokenFile(configDir, 'asana'), { force: true });
+}
+
+function keychainDelete(exec: Exec, account: string): void {
   try {
     if (process.platform === 'darwin') exec('security', ['delete-generic-password', '-s', 'rixflow', '-a', account]);
     else exec('secret-tool', ['clear', 'service', 'rixflow', 'account', account]);
   } catch {
     // no keychain, or no such item
   }
-  rmSync(tokenFile(configDir, kind), { force: true });
 }
 
 export const tokenEnvVar = (kind: TrackerKind): string => ENV_VAR[kind];

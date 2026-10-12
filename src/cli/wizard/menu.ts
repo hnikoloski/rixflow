@@ -5,7 +5,7 @@ import { isMapping, loadSites, loadTeam, saveSites, saveTeam } from '../../core/
 import { describeSync, persistConfig } from '../../core/runtime';
 import { isSafeFolder } from '../../core/template';
 import type { Discovery, Ticket, TicketSource, TrackerKind } from '../../core/tickets/types';
-import { deleteToken, tokenEnvVar } from '../../core/token';
+import { deleteLegacyToken, deleteToken, tokenEnvVar } from '../../core/token';
 import { HubError, assertName, type Ctx, type Role } from '../../core/types';
 import { RIXFLOW_VERSION } from '../../core/version';
 import { jiraUrlChanged, loadWorkflow, writeWorkflow, type Workflow } from '../../core/workflow';
@@ -201,12 +201,14 @@ function updateMachineConfig(configDir: string, patch: Record<string, string>): 
   writeFileSync(path, YAML.stringify({ ...(isMapping(raw) ? raw : {}), ...patch }));
 }
 
-// Resets this machine only: config.yml, this user's tokens for every system, the progress file
+// Resets this machine only: config.yml, this user's tokens for every system (and 0.2.0's shared
+// Asana login, which would otherwise still be found), the progress file
 // and the status cache. The hub clone is never touched. Returns true when it ran.
 async function startOver(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJS.ProcessEnv): Promise<boolean> {
   io.log('Starting over removes RixFlow\'s setup from this machine: your settings and your stored ticket logins. The team hub is not changed.');
   if (!(await confirm(io, 'Start over on this machine?', false))) return false;
   for (const kind of KINDS) deleteToken(ctx.configDir, deps.tokenExec, ctx.user.name, kind);
+  deleteLegacyToken(ctx.configDir, deps.tokenExec);
   for (const f of MACHINE_FILES) rmSync(join(ctx.configDir, f), { force: true });
   for (const kind of KINDS) {
     const v = tokenEnvVar(kind);

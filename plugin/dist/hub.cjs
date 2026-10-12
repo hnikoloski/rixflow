@@ -12622,13 +12622,19 @@ function setToken(configDir2, token, exec = defaultExec, user, kind = "asana") {
   return "file";
 }
 function deleteToken(configDir2, exec = defaultExec, user, kind = "asana") {
-  const account = accountFor(kind, user);
+  keychainDelete(exec, accountFor(kind, user));
+  (0, import_node_fs10.rmSync)(tokenFile(configDir2, kind), { force: true });
+}
+function deleteLegacyToken(configDir2, exec = defaultExec) {
+  keychainDelete(exec, LEGACY_ACCOUNT);
+  (0, import_node_fs10.rmSync)(tokenFile(configDir2, "asana"), { force: true });
+}
+function keychainDelete(exec, account) {
   try {
     if (process.platform === "darwin") exec("security", ["delete-generic-password", "-s", "rixflow", "-a", account]);
     else exec("secret-tool", ["clear", "service", "rixflow", "account", account]);
   } catch {
   }
-  (0, import_node_fs10.rmSync)(tokenFile(configDir2, kind), { force: true });
 }
 var tokenEnvVar = (kind) => ENV_VAR[kind];
 
@@ -14614,6 +14620,7 @@ async function startOver(io, deps, ctx, env) {
   io.log("Starting over removes RixFlow's setup from this machine: your settings and your stored ticket logins. The team hub is not changed.");
   if (!await confirm(io, "Start over on this machine?", false)) return false;
   for (const kind of KINDS) deleteToken(ctx.configDir, deps.tokenExec, ctx.user.name, kind);
+  deleteLegacyToken(ctx.configDir, deps.tokenExec);
   for (const f of MACHINE_FILES) (0, import_node_fs18.rmSync)((0, import_node_path21.join)(ctx.configDir, f), { force: true });
   for (const kind of KINDS) {
     const v = tokenEnvVar(kind);
