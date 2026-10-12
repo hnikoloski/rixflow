@@ -335,6 +335,44 @@ describe('runInit on a set-up machine', () => {
     expect(YAML.parse(readFileSync(join(s.ctx.configDir, 'config.yml'), 'utf8')).jiraUrl).toBe('https://acme.atlassian.net');
   });
 
+  it('a config.yml that cannot be read offers start over or exit, naming the file and the reason', async () => {
+    const s = await setUp();
+    const path = join(s.ctx.configDir, 'config.yml');
+    writeFileSync(path, 'name: me\nrole: [dev\n');
+    writeFileSync(join(s.ctx.configDir, 'jira-token'), 'tok', { mode: 0o600 });
+    const calls: string[] = [];
+    const exec = (_cmd: string, args: string[]) => { calls.push(args.join(' ')); return ''; };
+    // Exit leaves everything as it was.
+    const out = scriptedIo(['yes', '2']);
+    await runInit(out, '/x/hub.cjs', s.env, { tokenExec: exec });
+    const shown = out.logs.join('\n');
+    expect(shown).toContain(path);
+    expect(shown).toMatch(/not valid YAML/);
+    expect(shown).toContain('Start over on this machine');
+    expect(shown).not.toContain('Add a teammate');
+    expect(existsSync(path)).toBe(true);
+    // Start over resets the machine, using the name it can still read from the file.
+    const io = scriptedIo(['yes', '1', 'y']);
+    await runInit(io, '/x/hub.cjs', s.env, { tokenExec: exec });
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(join(s.ctx.configDir, 'jira-token'))).toBe(false);
+    expect(calls.some((c) => c.endsWith('jira:me'))).toBe(true);
+    expect(s.inHub('status', '--porcelain')).toBe('');
+    expect(io.left()).toBe(0);
+  });
+
+  it('a config.yml with no readable name still starts over, and says a keychain token may remain', async () => {
+    const s = await setUp();
+    writeFileSync(join(s.ctx.configDir, 'config.yml'), '- just\n- a list\n');
+    writeFileSync(join(s.ctx.configDir, 'asana-token'), 'tok', { mode: 0o600 });
+    const io = scriptedIo(['yes', '1', 'y']);
+    await runInit(io, '/x/hub.cjs', s.env, { tokenExec: noKeychain });
+    expect(io.logs.join('\n')).toMatch(/not a mapping of settings/);
+    expect(io.logs.join('\n')).toMatch(/token stored in your keychain may remain/);
+    expect(existsSync(join(s.ctx.configDir, 'config.yml'))).toBe(false);
+    expect(existsSync(join(s.ctx.configDir, 'asana-token'))).toBe(false);
+  });
+
   const jiraWorkflow = (url: string): Workflow => ({
     requires: RIXFLOW_VERSION, legacy: false,
     tracker: { type: 'jira', url, flavor: 'cloud', projects: ['WEB'] },

@@ -36282,10 +36282,21 @@ function normalizeFolders(v, env, projectsRoot) {
 function loadUserConfig(dir, env = process.env) {
   const path = (0, import_node_path3.join)(dir, "config.yml");
   if (!(0, import_node_fs2.existsSync)(path)) throw new HubError("NOT_INITIALIZED", `No ${path}. Run in a terminal: ${hubCommand("init")}`);
-  const raw = import_yaml.default.parse((0, import_node_fs2.readFileSync)(path, "utf8")) ?? {};
-  assertName(raw.name);
-  if (raw.role !== "dev" && raw.role !== "pm") throw new HubError("BAD_CONFIG", "role must be dev or pm");
-  if (typeof raw.projectsRoot !== "string") throw new HubError("BAD_CONFIG", "projectsRoot is missing");
+  const bad = (reason) => new HubError("BAD_CONFIG", `${path}: ${reason}`);
+  let raw;
+  try {
+    raw = import_yaml.default.parse((0, import_node_fs2.readFileSync)(path, "utf8")) ?? {};
+  } catch (e) {
+    throw bad(`not valid YAML (${String(e instanceof Error ? e.message : e).split("\n")[0].replace(/:\s*$/, "")})`);
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw bad("not a mapping of settings");
+  try {
+    assertName(raw.name);
+  } catch (e) {
+    throw bad(e instanceof Error ? e.message : String(e));
+  }
+  if (raw.role !== "dev" && raw.role !== "pm") throw bad("role must be dev or pm");
+  if (typeof raw.projectsRoot !== "string") throw bad("projectsRoot is missing");
   const projectsRoot = normalizeDir(raw.projectsRoot, env);
   return {
     name: raw.name,

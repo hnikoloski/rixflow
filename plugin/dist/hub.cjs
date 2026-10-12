@@ -11227,10 +11227,21 @@ function normalizeFolders(v, env, projectsRoot) {
 function loadUserConfig(dir, env = process.env) {
   const path = (0, import_node_path2.join)(dir, "config.yml");
   if (!(0, import_node_fs.existsSync)(path)) throw new HubError("NOT_INITIALIZED", `No ${path}. Run in a terminal: ${hubCommand("init")}`);
-  const raw = import_yaml.default.parse((0, import_node_fs.readFileSync)(path, "utf8")) ?? {};
-  assertName(raw.name);
-  if (raw.role !== "dev" && raw.role !== "pm") throw new HubError("BAD_CONFIG", "role must be dev or pm");
-  if (typeof raw.projectsRoot !== "string") throw new HubError("BAD_CONFIG", "projectsRoot is missing");
+  const bad = (reason) => new HubError("BAD_CONFIG", `${path}: ${reason}`);
+  let raw;
+  try {
+    raw = import_yaml.default.parse((0, import_node_fs.readFileSync)(path, "utf8")) ?? {};
+  } catch (e) {
+    throw bad(`not valid YAML (${String(e instanceof Error ? e.message : e).split("\n")[0].replace(/:\s*$/, "")})`);
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw bad("not a mapping of settings");
+  try {
+    assertName(raw.name);
+  } catch (e) {
+    throw bad(e instanceof Error ? e.message : String(e));
+  }
+  if (raw.role !== "dev" && raw.role !== "pm") throw bad("role must be dev or pm");
+  if (typeof raw.projectsRoot !== "string") throw bad("projectsRoot is missing");
   const projectsRoot = normalizeDir(raw.projectsRoot, env);
   return {
     name: raw.name,
@@ -14564,7 +14575,7 @@ async function runMenu(io, deps, ctx, env = process.env) {
     const action = await choose(io, "What would you like to do?", hub ? ACTIONS : NO_HUB_ACTIONS);
     if (action === "exit") return;
     if (action === "start-over") {
-      if (await startOver(io, deps, ctx, env)) return;
+      if (await startOver(io, deps, ctx.configDir, ctx.user.name, env)) return;
       continue;
     }
     try {
@@ -14621,12 +14632,35 @@ function updateMachineConfig(configDir2, patch) {
   const raw = import_yaml6.default.parse((0, import_node_fs18.readFileSync)(path, "utf8"));
   (0, import_node_fs18.writeFileSync)(path, import_yaml6.default.stringify({ ...isMapping(raw) ? raw : {}, ...patch }));
 }
-async function startOver(io, deps, ctx, env) {
+async function runBrokenConfigMenu(io, deps, configDir2, reason, env = process.env) {
+  io.log(`RixFlow can't read this machine's settings: ${clean4(reason)}`);
+  io.log("Fix the file by hand and run setup again, or start over on this machine.");
+  for (; ; ) {
+    const action = await choose(io, "What would you like to do?", NO_HUB_ACTIONS);
+    if (action === "exit") return;
+    if (await startOver(io, deps, configDir2, nameIn(configDir2), env)) return;
+  }
+}
+function nameIn(configDir2) {
+  try {
+    const m = /^name:\s*['"]?([^'"\s]+)['"]?\s*$/m.exec((0, import_node_fs18.readFileSync)((0, import_node_path21.join)(configDir2, "config.yml"), "utf8"));
+    if (!m) return void 0;
+    assertName(m[1]);
+    return m[1];
+  } catch {
+    return void 0;
+  }
+}
+async function startOver(io, deps, configDir2, user, env) {
   io.log("Starting over removes RixFlow's setup from this machine: your settings and your stored ticket logins. The team hub is not changed.");
   if (!await confirm(io, "Start over on this machine?", false)) return false;
-  for (const kind of KINDS) deleteToken(ctx.configDir, deps.tokenExec, ctx.user.name, kind);
-  deleteLegacyToken(ctx.configDir, deps.tokenExec);
-  for (const f of MACHINE_FILES) (0, import_node_fs18.rmSync)((0, import_node_path21.join)(ctx.configDir, f), { force: true });
+  if (user) for (const kind of KINDS) deleteToken(configDir2, deps.tokenExec, user, kind);
+  else {
+    for (const kind of KINDS) (0, import_node_fs18.rmSync)((0, import_node_path21.join)(configDir2, `${kind}-token`), { force: true });
+    io.log('Your name could not be read from the settings, so a token stored in your keychain may remain. Remove the "rixflow" items from your keychain by hand if you want them gone.');
+  }
+  deleteLegacyToken(configDir2, deps.tokenExec);
+  for (const f of MACHINE_FILES) (0, import_node_fs18.rmSync)((0, import_node_path21.join)(configDir2, f), { force: true });
   for (const kind of KINDS) {
     const v = tokenEnvVar(kind);
     if (env[v]) io.log(`${v} is set in your environment; RixFlow still uses it until you unset it.`);
@@ -14838,7 +14872,16 @@ async function runInit(io, cliPath2, env = process.env, deps = {}) {
   if ((await io.ask('Type "yes" to continue: ')).toLowerCase() !== "yes") throw new HubError("ABORTED", "init cancelled");
   const all = { ...deps, cliPath: cliPath2 };
   const progress = loadProgress(configDir2);
-  if (!progress && (0, import_node_fs20.existsSync)((0, import_node_path23.join)(configDir2, "config.yml"))) return runMenu(io, all, loadCtx(env), env);
+  if (!progress && (0, import_node_fs20.existsSync)((0, import_node_path23.join)(configDir2, "config.yml"))) {
+    let ctx;
+    try {
+      ctx = loadCtx(env);
+    } catch (e) {
+      if (e instanceof HubError && e.code === "BAD_CONFIG") return runBrokenConfigMenu(io, all, configDir2, e.message, env);
+      throw e;
+    }
+    return runMenu(io, all, ctx, env);
+  }
   const flow = progress?.flow ?? await choose(io, "Join an existing team, or create a new one?", [
     { value: "join", label: "Join an existing team" },
     { value: "create", label: "Create a new team" }

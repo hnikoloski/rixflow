@@ -10,7 +10,7 @@ import { HubError } from '../core/types';
 import type { WizardDeps } from './wizard/connect';
 import { runCreate } from './wizard/create';
 import { runJoin } from './wizard/join';
-import { runMenu } from './wizard/menu';
+import { runBrokenConfigMenu, runMenu } from './wizard/menu';
 import { loadProgress } from './wizard/progress';
 import { choose } from './wizard/prompts';
 
@@ -212,7 +212,17 @@ export async function runInit(
 
   const all: WizardDeps = { ...deps, cliPath };
   const progress = loadProgress(configDir);
-  if (!progress && existsSync(join(configDir, 'config.yml'))) return runMenu(io, all, loadCtx(env), env);
+  if (!progress && existsSync(join(configDir, 'config.yml'))) {
+    let ctx;
+    try {
+      ctx = loadCtx(env);
+    } catch (e) {
+      // An unreadable config.yml would otherwise lock the person out of setup: offer to start over.
+      if (e instanceof HubError && e.code === 'BAD_CONFIG') return runBrokenConfigMenu(io, all, configDir, e.message, env);
+      throw e;
+    }
+    return runMenu(io, all, ctx, env);
+  }
   const flow = progress?.flow ?? await choose(io, 'Join an existing team, or create a new one?', [
     { value: 'join', label: 'Join an existing team' },
     { value: 'create', label: 'Create a new team' },

@@ -47,10 +47,22 @@ function normalizeFolders(v: unknown, env: Env, projectsRoot: string): Record<st
 export function loadUserConfig(dir: string, env: Env = process.env): UserConfig {
   const path = join(dir, 'config.yml');
   if (!existsSync(path)) throw new HubError('NOT_INITIALIZED', `No ${path}. Run in a terminal: ${hubCommand('init')}`);
-  const raw = YAML.parse(readFileSync(path, 'utf8')) ?? {};
-  assertName(raw.name);
-  if (raw.role !== 'dev' && raw.role !== 'pm') throw new HubError('BAD_CONFIG', 'role must be dev or pm');
-  if (typeof raw.projectsRoot !== 'string') throw new HubError('BAD_CONFIG', 'projectsRoot is missing');
+  // Every problem with the file is BAD_CONFIG naming the file, so setup can offer to start over.
+  const bad = (reason: string) => new HubError('BAD_CONFIG', `${path}: ${reason}`);
+  let raw: Record<string, unknown>;
+  try {
+    raw = YAML.parse(readFileSync(path, 'utf8')) ?? {};
+  } catch (e) {
+    throw bad(`not valid YAML (${String(e instanceof Error ? e.message : e).split('\n')[0].replace(/:\s*$/, '')})`);
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw bad('not a mapping of settings');
+  try {
+    assertName(raw.name);
+  } catch (e) {
+    throw bad(e instanceof Error ? e.message : String(e));
+  }
+  if (raw.role !== 'dev' && raw.role !== 'pm') throw bad('role must be dev or pm');
+  if (typeof raw.projectsRoot !== 'string') throw bad('projectsRoot is missing');
   const projectsRoot = normalizeDir(raw.projectsRoot, env);
   return {
     name: raw.name,
@@ -60,7 +72,7 @@ export function loadUserConfig(dir: string, env: Env = process.env): UserConfig 
     jiraEmail: typeof raw.jiraEmail === 'string' && raw.jiraEmail.trim() ? raw.jiraEmail.trim() : undefined,
     jiraUrl: typeof raw.jiraUrl === 'string' ? jiraBaseUrl(raw.jiraUrl) ?? undefined : undefined,
     siteFolders: normalizeFolders(raw.siteFolders, env, projectsRoot),
-    taskSites: raw.taskSites ?? {},
+    taskSites: (raw.taskSites ?? {}) as Record<string, string>,
   };
 }
 

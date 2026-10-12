@@ -139,7 +139,7 @@ export async function runMenu(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJ
     const action = await choose(io, 'What would you like to do?', hub ? ACTIONS : NO_HUB_ACTIONS);
     if (action === 'exit') return;
     if (action === 'start-over') {
-      if (await startOver(io, deps, ctx, env)) return;
+      if (await startOver(io, deps, ctx.configDir, ctx.user.name, env)) return;
       continue;
     }
     try {
@@ -201,15 +201,46 @@ function updateMachineConfig(configDir: string, patch: Record<string, string>): 
   writeFileSync(path, YAML.stringify({ ...(isMapping(raw) ? raw : {}), ...patch }));
 }
 
+// Setup on a machine whose config.yml cannot be read: say which file and why, then offer only
+// "Start over on this machine" or "Exit".
+export async function runBrokenConfigMenu(
+  io: InitIo, deps: WizardDeps, configDir: string, reason: string, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  io.log(`RixFlow can't read this machine's settings: ${clean(reason)}`);
+  io.log('Fix the file by hand and run setup again, or start over on this machine.');
+  for (;;) {
+    const action = await choose(io, 'What would you like to do?', NO_HUB_ACTIONS);
+    if (action === 'exit') return;
+    if (await startOver(io, deps, configDir, nameIn(configDir), env)) return;
+  }
+}
+
+// The person's name from a config.yml that does not parse, when a plain `name:` line still holds a
+// valid one, so start over can remove that person's stored logins too.
+function nameIn(configDir: string): string | undefined {
+  try {
+    const m = /^name:\s*['"]?([^'"\s]+)['"]?\s*$/m.exec(readFileSync(join(configDir, 'config.yml'), 'utf8'));
+    if (!m) return undefined;
+    assertName(m[1]);
+    return m[1];
+  } catch {
+    return undefined;
+  }
+}
+
 // Resets this machine only: config.yml, this user's tokens for every system (and 0.2.0's shared
 // Asana login, which would otherwise still be found), the progress file
 // and the status cache. The hub clone is never touched. Returns true when it ran.
-async function startOver(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJS.ProcessEnv): Promise<boolean> {
+async function startOver(io: InitIo, deps: WizardDeps, configDir: string, user: string | undefined, env: NodeJS.ProcessEnv): Promise<boolean> {
   io.log('Starting over removes RixFlow\'s setup from this machine: your settings and your stored ticket logins. The team hub is not changed.');
   if (!(await confirm(io, 'Start over on this machine?', false))) return false;
-  for (const kind of KINDS) deleteToken(ctx.configDir, deps.tokenExec, ctx.user.name, kind);
-  deleteLegacyToken(ctx.configDir, deps.tokenExec);
-  for (const f of MACHINE_FILES) rmSync(join(ctx.configDir, f), { force: true });
+  if (user) for (const kind of KINDS) deleteToken(configDir, deps.tokenExec, user, kind);
+  else {
+    for (const kind of KINDS) rmSync(join(configDir, `${kind}-token`), { force: true });
+    io.log('Your name could not be read from the settings, so a token stored in your keychain may remain. Remove the "rixflow" items from your keychain by hand if you want them gone.');
+  }
+  deleteLegacyToken(configDir, deps.tokenExec);
+  for (const f of MACHINE_FILES) rmSync(join(configDir, f), { force: true });
   for (const kind of KINDS) {
     const v = tokenEnvVar(kind);
     if (env[v]) io.log(`${v} is set in your environment; RixFlow still uses it until you unset it.`);
