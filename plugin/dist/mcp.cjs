@@ -36459,13 +36459,243 @@ async function acquireLock(hubDir2, waitMs, sleep = (ms) => new Promise((r) => s
 }
 
 // src/core/template.ts
+var import_node_fs8 = require("node:fs");
+var import_node_path9 = require("node:path");
+var import_yaml5 = __toESM(require_dist(), 1);
+
+// src/core/workflow.ts
+var import_node_fs7 = require("node:fs");
+var import_node_path8 = require("node:path");
+var import_yaml4 = __toESM(require_dist(), 1);
+
+// src/core/team.ts
 var import_node_fs6 = require("node:fs");
 var import_node_path7 = require("node:path");
 var import_yaml3 = __toESM(require_dist(), 1);
+var FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+function fail(file2, reason) {
+  throw new HubError("BAD_CONFIG", `${file2}: ${reason}`);
+}
+var isMapping = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+function readYaml(path, label = path) {
+  if (!(0, import_node_fs6.existsSync)(path)) return {};
+  let parsed;
+  try {
+    parsed = import_yaml3.default.parse((0, import_node_fs6.readFileSync)(path, "utf8"));
+  } catch (err) {
+    fail(label, `invalid YAML (${err.message})`);
+  }
+  if (parsed === null || parsed === void 0) return {};
+  if (!isMapping(parsed)) fail(label, "top level must be a mapping");
+  return parsed;
+}
+function loadTeam(hubDir2) {
+  const file2 = (0, import_node_path7.join)(hubDir2, "config", "team.yml");
+  const raw = readYaml(file2);
+  if (raw.members === void 0 || raw.members === null) return [];
+  if (!Array.isArray(raw.members)) fail(file2, "members must be a list");
+  return raw.members.map((m, i) => {
+    if (!isMapping(m)) fail(file2, `member ${i} must be a mapping`);
+    try {
+      assertName(m.name);
+    } catch {
+      fail(file2, `member ${i} has an invalid name: ${String(m.name)}`);
+    }
+    if (m.role !== "dev" && m.role !== "pm") fail(file2, `member ${m.name}: role must be dev or pm`);
+    const member = { name: m.name, role: m.role };
+    if (m.asanaGid !== void 0 && m.asanaGid !== null) {
+      const gid = String(m.asanaGid);
+      try {
+        assertGid(gid);
+      } catch {
+        fail(file2, `member ${m.name}: invalid asanaGid`);
+      }
+      member.asanaGid = gid;
+    }
+    return member;
+  });
+}
+function loadSites(hubDir2) {
+  const file2 = (0, import_node_path7.join)(hubDir2, "config", "sites.yml");
+  const raw = readYaml(file2);
+  if (raw.sites === void 0 || raw.sites === null) return {};
+  if (!isMapping(raw.sites)) fail(file2, "sites must be a mapping");
+  const out = {};
+  for (const [code, def] of Object.entries(raw.sites)) {
+    try {
+      assertSiteCode(code);
+    } catch {
+      fail(file2, `invalid site code: ${code}`);
+    }
+    if (!isMapping(def)) fail(file2, `site ${code} must be a mapping`);
+    const { folder, aliases } = def;
+    if (typeof folder !== "string" || !FOLDER.test(folder) || folder.includes("..")) {
+      fail(file2, `site ${code}: invalid folder`);
+    }
+    if (aliases !== void 0 && (!Array.isArray(aliases) || !aliases.every((a) => typeof a === "string"))) {
+      fail(file2, `site ${code}: aliases must be a list of strings`);
+    }
+    out[code] = aliases === void 0 ? { folder } : { folder, aliases };
+  }
+  return out;
+}
+
+// src/core/version.ts
+var RIXFLOW_VERSION = "0.2.0";
+
+// src/core/workflow.ts
+var LEGACY = {
+  requires: null,
+  legacy: true,
+  tracker: { type: "asana", workspace: null },
+  project: { from: "custom-field", field: "Website", values: "codes" },
+  status: { field: "Status", todo: [], in_progress: ["in progress"], waiting: [], done: [] },
+  sprints: { mode: "asana-sections" },
+  urgent: { field: "Priority", values: ["urgent", "critical", "p0", "highest"] }
+};
+function deepFreeze(v) {
+  if (v !== null && typeof v === "object") Object.values(v).forEach(deepFreeze);
+  return Object.freeze(v);
+}
+var LEGACY_WORKFLOW = deepFreeze(structuredClone(LEGACY));
+var FILE = "config/workflow.yml";
+var SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+var FROMS = ["custom-field", "asana-project", "component", "label", "jira-project"];
+var BUCKETS = ["todo", "in_progress", "waiting", "done"];
+function fail2(reason) {
+  throw new HubError("BAD_CONFIG", `${FILE}: ${reason}`);
+}
+function compareVersions(a, b) {
+  const pa = SEMVER.exec(a);
+  const pb = SEMVER.exec(b);
+  if (!pa || !pb) throw new HubError("BAD_CONFIG", `invalid version: ${!pa ? a : b}`);
+  for (let i = 1; i <= 3; i++) {
+    const d = Number(pa[i]) - Number(pb[i]);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+function optString(v, what) {
+  if (v === void 0 || v === null) return null;
+  if (typeof v !== "string" && typeof v !== "number") fail2(`${what} must be a string`);
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+function stringList(v, what) {
+  if (v === void 0 || v === null) return [];
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" || typeof x === "number")) {
+    fail2(`${what} must be a list of strings`);
+  }
+  return v.map((x) => String(x));
+}
+function section(raw, key) {
+  const v = raw[key];
+  if (v === void 0 || v === null) return {};
+  if (!isMapping(v)) fail2(`${key} must be a mapping`);
+  return v;
+}
+function parseTracker(raw) {
+  const t = section(raw, "tracker");
+  if (t.type === "asana") return { type: "asana", workspace: optString(t.workspace, "tracker.workspace") };
+  if (t.type === "jira") {
+    const rawUrl = optString(t.url, "tracker.url");
+    if (!rawUrl) fail2("jira tracker needs a url");
+    if (t.flavor !== "cloud" && t.flavor !== "server") fail2("jira tracker needs flavor: cloud or server");
+    let u;
+    try {
+      u = new URL(rawUrl);
+    } catch {
+      fail2(`jira url is not a valid URL: ${rawUrl}`);
+    }
+    if (u.protocol !== "https:") fail2("jira url must use https");
+    const url2 = `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+    return { type: "jira", url: url2, flavor: t.flavor, projects: stringList(t.projects, "tracker.projects") };
+  }
+  return fail2(`unknown tracker type: ${String(t.type)}`);
+}
+function parseProject(raw) {
+  const p = section(raw, "project");
+  const from = p.from;
+  if (!FROMS.includes(from)) fail2(`unknown project source: ${String(from)}`);
+  const field = optString(p.field, "project.field");
+  if (from === "custom-field" && !field) fail2("project source custom-field needs a field");
+  let values;
+  if (p.values === void 0 || p.values === null || p.values === "codes") {
+    values = "codes";
+  } else if (isMapping(p.values)) {
+    values = {};
+    for (const [k, code] of Object.entries(p.values)) {
+      try {
+        assertSiteCode(code);
+      } catch {
+        fail2(`invalid project code for "${k}": ${String(code)}`);
+      }
+      values[k] = code;
+    }
+  } else {
+    fail2("project.values must be a mapping or 'codes'");
+  }
+  return { from, field, values };
+}
+function parseStatus(raw) {
+  const s = section(raw, "status");
+  const out = { field: optString(s.field, "status.field"), todo: [], in_progress: [], waiting: [], done: [] };
+  const seen = /* @__PURE__ */ new Map();
+  for (const b of BUCKETS) {
+    out[b] = stringList(s[b], `status.${b}`);
+    for (const name of out[b]) {
+      const key = name.toLowerCase();
+      const prev = seen.get(key);
+      if (prev !== void 0) fail2(`status "${name}" is listed in both ${prev} and ${b}`);
+      seen.set(key, b);
+    }
+  }
+  return out;
+}
+function parseSprints(raw) {
+  const s = section(raw, "sprints");
+  const mode = s.mode === void 0 || s.mode === null ? "none" : s.mode;
+  if (mode === "none") return { mode: "none" };
+  if (mode === "asana-sections") return { mode: "asana-sections" };
+  if (mode === "jira-sprints") {
+    if (s.board === void 0 || s.board === null) return { mode: "jira-sprints", board: null };
+    if (typeof s.board !== "number" || !Number.isInteger(s.board) || s.board < 0) fail2("sprints.board must be a whole number");
+    return { mode: "jira-sprints", board: s.board };
+  }
+  return fail2(`unknown sprints mode: ${String(mode)}`);
+}
+function loadWorkflow(hubDir2, version2 = RIXFLOW_VERSION) {
+  const path = (0, import_node_path8.join)(hubDir2, FILE);
+  if (!(0, import_node_fs7.existsSync)(path)) return structuredClone(LEGACY);
+  const raw = readYaml(path, FILE);
+  let requires = null;
+  if (raw.requires !== void 0 && raw.requires !== null && raw.requires !== "") {
+    if (typeof raw.requires !== "string" || !SEMVER.test(raw.requires)) fail2("requires must be a version like 0.3.0");
+    requires = raw.requires;
+    if (compareVersions(requires, version2) > 0) {
+      throw new HubError(
+        "WORKFLOW_TOO_NEW",
+        `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`
+      );
+    }
+  }
+  const urgent = section(raw, "urgent");
+  return {
+    requires,
+    legacy: false,
+    tracker: parseTracker(raw),
+    project: parseProject(raw),
+    status: parseStatus(raw),
+    sprints: parseSprints(raw),
+    urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") }
+  };
+}
+
+// src/core/template.ts
 var HUB_GITIGNORE = [".obsidian/", ".trash/", ".DS_Store", "Thumbs.db", "*.tmp-*"];
 function mergeHubGitignore(dir) {
-  const path = (0, import_node_path7.join)(dir, ".gitignore");
-  const current = (0, import_node_fs6.existsSync)(path) ? (0, import_node_fs6.readFileSync)(path, "utf8") : "";
+  const path = (0, import_node_path9.join)(dir, ".gitignore");
+  const current = (0, import_node_fs8.existsSync)(path) ? (0, import_node_fs8.readFileSync)(path, "utf8") : "";
   const have = new Set(current.split(/\r?\n/).map((l) => l.trim()));
   const missing = HUB_GITIGNORE.filter((e) => !have.has(e));
   if (missing.length === 0) return false;
@@ -36901,11 +37131,11 @@ var JiraClient = class {
 
 // src/core/token.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs7 = require("node:fs");
-var import_node_path8 = require("node:path");
+var import_node_fs9 = require("node:fs");
+var import_node_path10 = require("node:path");
 var KEYCHAIN_TIMEOUT_MS = 5e3;
 var defaultExec = (cmd, args, input2) => (0, import_node_child_process2.execFileSync)(cmd, args, { input: input2, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: KEYCHAIN_TIMEOUT_MS });
-var tokenFile = (configDir2, kind) => (0, import_node_path8.join)(configDir2, `${kind}-token`);
+var tokenFile = (configDir2, kind) => (0, import_node_path10.join)(configDir2, `${kind}-token`);
 var LEGACY_ACCOUNT = "asana";
 var accountFor = (kind, user) => user ? `${kind}:${user}` : kind;
 var ENV_VAR = { asana: "ASANA_TOKEN", jira: "JIRA_TOKEN" };
@@ -36928,235 +37158,7 @@ function getToken(configDir2, env = process.env, exec = defaultExec, user, kind 
   const fromKeychain = keychainGet(exec, kind, user);
   if (fromKeychain) return fromKeychain;
   const file2 = tokenFile(configDir2, kind);
-  return (0, import_node_fs7.existsSync)(file2) ? (0, import_node_fs7.readFileSync)(file2, "utf8").trim() || null : null;
-}
-
-// src/core/workflow.ts
-var import_node_fs9 = require("node:fs");
-var import_node_path10 = require("node:path");
-var import_yaml5 = __toESM(require_dist(), 1);
-
-// src/core/team.ts
-var import_node_fs8 = require("node:fs");
-var import_node_path9 = require("node:path");
-var import_yaml4 = __toESM(require_dist(), 1);
-var FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-function fail(file2, reason) {
-  throw new HubError("BAD_CONFIG", `${file2}: ${reason}`);
-}
-var isMapping = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-function readYaml(path, label = path) {
-  if (!(0, import_node_fs8.existsSync)(path)) return {};
-  let parsed;
-  try {
-    parsed = import_yaml4.default.parse((0, import_node_fs8.readFileSync)(path, "utf8"));
-  } catch (err) {
-    fail(label, `invalid YAML (${err.message})`);
-  }
-  if (parsed === null || parsed === void 0) return {};
-  if (!isMapping(parsed)) fail(label, "top level must be a mapping");
-  return parsed;
-}
-function loadTeam(hubDir2) {
-  const file2 = (0, import_node_path9.join)(hubDir2, "config", "team.yml");
-  const raw = readYaml(file2);
-  if (raw.members === void 0 || raw.members === null) return [];
-  if (!Array.isArray(raw.members)) fail(file2, "members must be a list");
-  return raw.members.map((m, i) => {
-    if (!isMapping(m)) fail(file2, `member ${i} must be a mapping`);
-    try {
-      assertName(m.name);
-    } catch {
-      fail(file2, `member ${i} has an invalid name: ${String(m.name)}`);
-    }
-    if (m.role !== "dev" && m.role !== "pm") fail(file2, `member ${m.name}: role must be dev or pm`);
-    const member = { name: m.name, role: m.role };
-    if (m.asanaGid !== void 0 && m.asanaGid !== null) {
-      const gid = String(m.asanaGid);
-      try {
-        assertGid(gid);
-      } catch {
-        fail(file2, `member ${m.name}: invalid asanaGid`);
-      }
-      member.asanaGid = gid;
-    }
-    return member;
-  });
-}
-function loadSites(hubDir2) {
-  const file2 = (0, import_node_path9.join)(hubDir2, "config", "sites.yml");
-  const raw = readYaml(file2);
-  if (raw.sites === void 0 || raw.sites === null) return {};
-  if (!isMapping(raw.sites)) fail(file2, "sites must be a mapping");
-  const out = {};
-  for (const [code, def] of Object.entries(raw.sites)) {
-    try {
-      assertSiteCode(code);
-    } catch {
-      fail(file2, `invalid site code: ${code}`);
-    }
-    if (!isMapping(def)) fail(file2, `site ${code} must be a mapping`);
-    const { folder, aliases } = def;
-    if (typeof folder !== "string" || !FOLDER.test(folder) || folder.includes("..")) {
-      fail(file2, `site ${code}: invalid folder`);
-    }
-    if (aliases !== void 0 && (!Array.isArray(aliases) || !aliases.every((a) => typeof a === "string"))) {
-      fail(file2, `site ${code}: aliases must be a list of strings`);
-    }
-    out[code] = aliases === void 0 ? { folder } : { folder, aliases };
-  }
-  return out;
-}
-
-// src/core/version.ts
-var RIXFLOW_VERSION = "0.2.0";
-
-// src/core/workflow.ts
-var LEGACY = {
-  requires: null,
-  legacy: true,
-  tracker: { type: "asana", workspace: null },
-  project: { from: "custom-field", field: "Website", values: "codes" },
-  status: { field: "Status", todo: [], in_progress: ["in progress"], waiting: [], done: [] },
-  sprints: { mode: "asana-sections" },
-  urgent: { field: "Priority", values: ["urgent", "critical", "p0", "highest"] }
-};
-function deepFreeze(v) {
-  if (v !== null && typeof v === "object") Object.values(v).forEach(deepFreeze);
-  return Object.freeze(v);
-}
-var LEGACY_WORKFLOW = deepFreeze(structuredClone(LEGACY));
-var FILE = "config/workflow.yml";
-var SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
-var FROMS = ["custom-field", "asana-project", "component", "label", "jira-project"];
-var BUCKETS = ["todo", "in_progress", "waiting", "done"];
-function fail2(reason) {
-  throw new HubError("BAD_CONFIG", `${FILE}: ${reason}`);
-}
-function compareVersions(a, b) {
-  const pa = SEMVER.exec(a);
-  const pb = SEMVER.exec(b);
-  if (!pa || !pb) throw new HubError("BAD_CONFIG", `invalid version: ${!pa ? a : b}`);
-  for (let i = 1; i <= 3; i++) {
-    const d = Number(pa[i]) - Number(pb[i]);
-    if (d !== 0) return d < 0 ? -1 : 1;
-  }
-  return 0;
-}
-function optString(v, what) {
-  if (v === void 0 || v === null) return null;
-  if (typeof v !== "string" && typeof v !== "number") fail2(`${what} must be a string`);
-  const s = String(v).trim();
-  return s === "" ? null : s;
-}
-function stringList(v, what) {
-  if (v === void 0 || v === null) return [];
-  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" || typeof x === "number")) {
-    fail2(`${what} must be a list of strings`);
-  }
-  return v.map((x) => String(x));
-}
-function section(raw, key) {
-  const v = raw[key];
-  if (v === void 0 || v === null) return {};
-  if (!isMapping(v)) fail2(`${key} must be a mapping`);
-  return v;
-}
-function parseTracker(raw) {
-  const t = section(raw, "tracker");
-  if (t.type === "asana") return { type: "asana", workspace: optString(t.workspace, "tracker.workspace") };
-  if (t.type === "jira") {
-    const rawUrl = optString(t.url, "tracker.url");
-    if (!rawUrl) fail2("jira tracker needs a url");
-    if (t.flavor !== "cloud" && t.flavor !== "server") fail2("jira tracker needs flavor: cloud or server");
-    let u;
-    try {
-      u = new URL(rawUrl);
-    } catch {
-      fail2(`jira url is not a valid URL: ${rawUrl}`);
-    }
-    if (u.protocol !== "https:") fail2("jira url must use https");
-    const url2 = `${u.origin}${u.pathname}`.replace(/\/+$/, "");
-    return { type: "jira", url: url2, flavor: t.flavor, projects: stringList(t.projects, "tracker.projects") };
-  }
-  return fail2(`unknown tracker type: ${String(t.type)}`);
-}
-function parseProject(raw) {
-  const p = section(raw, "project");
-  const from = p.from;
-  if (!FROMS.includes(from)) fail2(`unknown project source: ${String(from)}`);
-  const field = optString(p.field, "project.field");
-  if (from === "custom-field" && !field) fail2("project source custom-field needs a field");
-  let values;
-  if (p.values === void 0 || p.values === null || p.values === "codes") {
-    values = "codes";
-  } else if (isMapping(p.values)) {
-    values = {};
-    for (const [k, code] of Object.entries(p.values)) {
-      try {
-        assertSiteCode(code);
-      } catch {
-        fail2(`invalid project code for "${k}": ${String(code)}`);
-      }
-      values[k] = code;
-    }
-  } else {
-    fail2("project.values must be a mapping or 'codes'");
-  }
-  return { from, field, values };
-}
-function parseStatus(raw) {
-  const s = section(raw, "status");
-  const out = { field: optString(s.field, "status.field"), todo: [], in_progress: [], waiting: [], done: [] };
-  const seen = /* @__PURE__ */ new Map();
-  for (const b of BUCKETS) {
-    out[b] = stringList(s[b], `status.${b}`);
-    for (const name of out[b]) {
-      const key = name.toLowerCase();
-      const prev = seen.get(key);
-      if (prev !== void 0) fail2(`status "${name}" is listed in both ${prev} and ${b}`);
-      seen.set(key, b);
-    }
-  }
-  return out;
-}
-function parseSprints(raw) {
-  const s = section(raw, "sprints");
-  const mode = s.mode === void 0 || s.mode === null ? "none" : s.mode;
-  if (mode === "none") return { mode: "none" };
-  if (mode === "asana-sections") return { mode: "asana-sections" };
-  if (mode === "jira-sprints") {
-    if (s.board === void 0 || s.board === null) return { mode: "jira-sprints", board: null };
-    if (typeof s.board !== "number" || !Number.isInteger(s.board) || s.board < 0) fail2("sprints.board must be a whole number");
-    return { mode: "jira-sprints", board: s.board };
-  }
-  return fail2(`unknown sprints mode: ${String(mode)}`);
-}
-function loadWorkflow(hubDir2, version2 = RIXFLOW_VERSION) {
-  const path = (0, import_node_path10.join)(hubDir2, FILE);
-  if (!(0, import_node_fs9.existsSync)(path)) return structuredClone(LEGACY);
-  const raw = readYaml(path, FILE);
-  let requires = null;
-  if (raw.requires !== void 0 && raw.requires !== null && raw.requires !== "") {
-    if (typeof raw.requires !== "string" || !SEMVER.test(raw.requires)) fail2("requires must be a version like 0.3.0");
-    requires = raw.requires;
-    if (compareVersions(requires, version2) > 0) {
-      throw new HubError(
-        "WORKFLOW_TOO_NEW",
-        `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`
-      );
-    }
-  }
-  const urgent = section(raw, "urgent");
-  return {
-    requires,
-    legacy: false,
-    tracker: parseTracker(raw),
-    project: parseProject(raw),
-    status: parseStatus(raw),
-    sprints: parseSprints(raw),
-    urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") }
-  };
+  return (0, import_node_fs9.existsSync)(file2) ? (0, import_node_fs9.readFileSync)(file2, "utf8").trim() || null : null;
 }
 
 // src/core/runtime.ts
@@ -45724,11 +45726,10 @@ function isCurrentSprint(name, now) {
 // src/core/mapping.ts
 var BUCKETS2 = ["todo", "in_progress", "waiting", "done"];
 var URGENT_TITLE = /hotfix|urgent|\bp0\b/i;
-function projectValues(t, wf) {
-  const p = wf.project;
-  switch (p.from) {
+function valuesFrom(t, from, field) {
+  switch (from) {
     case "custom-field": {
-      const v = p.field ? fieldValue(t, p.field) : null;
+      const v = field ? fieldValue(t, field) : null;
       return v ? [v] : [];
     }
     case "component":
@@ -45739,6 +45740,9 @@ function projectValues(t, wf) {
     case "jira-project":
       return t.containers;
   }
+}
+function projectValues(t, wf) {
+  return valuesFrom(t, wf.project.from, wf.project.field);
 }
 function codesOf(t, wf) {
   const raw = projectValues(t, wf);

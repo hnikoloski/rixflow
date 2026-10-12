@@ -202,13 +202,12 @@ describe('runInit clone failure', () => {
 
 describe('runInit dispatcher', () => {
   const envFor = (root: string) => ({ ...process.env, HOME: root, RIXFLOW_DIR: join(root, 'hub'), RIXFLOW_CONFIG_DIR: join(root, 'cfg') });
-  it('asks join or create on a machine that is not set up; create is not ready yet', async () => {
+  it('asks join or create on a machine that is not set up; create starts the create wizard', async () => {
     const root = tmp();
     const i = io(['yes', '2']);
-    await expect(runInit(i, '/x/hub.cjs', envFor(root))).rejects.toMatchObject({
-      code: 'NOT_READY', message: 'Creating a team arrives in the next update.',
-    });
+    await expect(runInit(i, '/x/hub.cjs', envFor(root))).rejects.toMatchObject({ code: 'ABORTED' });
     expect(i.logs.join('\n')).toContain('Join an existing team, or create a new one?');
+    expect(i.asked[2]).toMatch(/^Your name on the team/);
   });
   it('stops before anything else without consent', async () => {
     const i = io(['no']);

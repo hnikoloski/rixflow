@@ -1,5 +1,5 @@
 import { AsanaClient, type AsanaReader } from '../../core/asana';
-import { needsParents, mapTicket, type Bucket } from '../../core/mapping';
+import { BUCKET_LABEL, needsParents, mapTicket } from '../../core/mapping';
 import type { Gh, RunGit } from '../../core/repo';
 import { asanaSource } from '../../core/tickets/asana';
 import { JiraClient, type JiraAuth } from '../../core/tickets/jira';
@@ -138,7 +138,6 @@ export function storedSource(
   return workspace ? asanaFrom(makeAsana(deps, token), wf, workspace) : null;
 }
 
-const BUCKET_LABEL: Record<Bucket, string> = { todo: 'to do', in_progress: 'in progress', waiting: 'waiting', done: 'done' };
 const PREVIEW_COUNT = 5;
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
 

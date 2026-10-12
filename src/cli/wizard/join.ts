@@ -44,6 +44,23 @@ export async function refusePublicHub(io: InitIo, url: string, deps: WizardDeps,
   io.log(PUBLIC_OVERRIDE);
 }
 
+export async function askProjectsRoot(io: InitIo, env: NodeJS.ProcessEnv): Promise<string> {
+  const fallback = join(homeDir(env), 'projects');
+  const dir = await askValid(io, 'Projects folder (where your project folders live):', (s) => (s ? null : 'Please enter a folder.'), fallback);
+  return normalizeDir(dir, env);
+}
+
+// The hub's pre-commit ownership gate, plus the .gitignore entries older hubs lack.
+export async function setUpHubHooks(io: InitIo, deps: WizardDeps, name: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const hubDir = getHubDir(env);
+  for (const msg of installPreCommit(hubDir, getConfigDir(env), deps.cliPath)) io.log(msg);
+  // Hubs bootstrapped before the .gitignore existed get it now, committed as this user.
+  if (mergeHubGitignore(hubDir)) {
+    const res = await persistHub(hubDir, name, `chore: ignore editor files in the hub (${name})`, {}, env);
+    io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
+  }
+}
+
 // Join an existing team: clone the hub, pick your name, connect your own ticket account and
 // preview your plate. Team answers (workflow, mapping, projects) are read from the hub only;
 // config.yml gets machine facts: name, role, projects folder, jiraEmail, workspace if legacy.
@@ -96,9 +113,7 @@ export async function runJoin(io: InitIo, deps: WizardDeps, env: NodeJS.ProcessE
     {
       id: 'projects-root',
       async run() {
-        const fallback = join(homeDir(env), 'projects');
-        const dir = await askValid(io, 'Projects folder (where your project folders live):', (s) => (s ? null : 'Please enter a folder.'), fallback);
-        return { projectsRoot: normalizeDir(dir, env) };
+        return { projectsRoot: await askProjectsRoot(io, env) };
       },
     },
     {
@@ -141,13 +156,7 @@ export async function runJoin(io: InitIo, deps: WizardDeps, env: NodeJS.ProcessE
     {
       id: 'hub-hooks',
       async run(a) {
-        const name = String(a.name);
-        for (const msg of installPreCommit(hubDir, configDir, deps.cliPath)) io.log(msg);
-        // Hubs bootstrapped before the .gitignore existed get it now, committed as this user.
-        if (mergeHubGitignore(hubDir)) {
-          const res = await persistHub(hubDir, name, `chore: ignore editor files in the hub (${name})`, {}, env);
-          io.log(`Added editor files (.obsidian/, .DS_Store, ...) to the hub .gitignore: ${describeSync(res)}.`);
-        }
+        await setUpHubHooks(io, deps, String(a.name), env);
         return {};
       },
     },

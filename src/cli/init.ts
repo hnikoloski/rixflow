@@ -14,6 +14,7 @@ import { loadTeam } from '../core/team';
 import { setToken } from '../core/token';
 import { HubError } from '../core/types';
 import type { WizardDeps } from './wizard/connect';
+import { runCreate } from './wizard/create';
 import { runJoin } from './wizard/join';
 import { loadProgress } from './wizard/progress';
 import { choose } from './wizard/prompts';
@@ -199,11 +200,6 @@ export async function withAccessHint(io: InitIo, work: () => Promise<unknown>): 
     io.log(ACCESS_HINT);
     throw e;
   }
-}
-
-// Task 11 replaces this with the guided create flow.
-export async function runCreate(_io: InitIo, _deps: WizardDeps, _env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  throw new HubError('NOT_READY', 'Creating a team arrives in the next update.');
 }
 
 // Consent first. A machine that is not set up yet (no config.yml, or an unfinished wizard) gets

@@ -56,3 +56,25 @@ export async function askValid(
   }
   throw aborted();
 }
+
+// Several numbers at once ("1,3"). Enter keeps the pre-filled picks; "-" picks none when min is 0.
+export async function chooseMany<T extends string>(
+  io: InitIo, question: string, options: Array<{ value: T; label: string }>, fallback: T[] = [], min = 0,
+): Promise<T[]> {
+  const pre = options.flatMap((o, i) => (fallback.includes(o.value) ? [i + 1] : []));
+  const lines = options.map((o, i) => `  ${i + 1}) ${o.label}`);
+  const hint = pre.length ? ` [${pre.join(',')}]` : min === 0 ? ' [none]' : '';
+  for (let i = 0; i < MAX_TRIES; i++) {
+    io.log(`${question}\n${lines.join('\n')}`);
+    const a = await ask(io, `Numbers separated by commas, e.g. 1,3${min === 0 ? ', or - for none' : ''}${hint}: `);
+    let picks: number[] | null = null;
+    if (a === '') picks = pre;
+    else if (a === '-' && min === 0) picks = [];
+    else if (/^\d+(\s*,\s*\d+)*$/.test(a)) picks = [...new Set(a.split(',').map((x) => Number(x.trim())))];
+    if (picks && picks.length >= min && picks.every((n) => n >= 1 && n <= options.length)) return picks.map((n) => options[n - 1].value);
+    io.log(min > 0
+      ? `Please enter at least ${min === 1 ? 'one number' : `${min} numbers`} from 1 to ${options.length}, separated by commas.`
+      : `Please enter numbers from 1 to ${options.length}, separated by commas, or - for none.`);
+  }
+  throw aborted();
+}
