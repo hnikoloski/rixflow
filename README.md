@@ -62,6 +62,12 @@ To get the core without the UI:
 
 Then run [first-time setup](#first-time-setup).
 
+To update later, refresh the marketplace, then restart Claude Code:
+
+```
+/plugin marketplace update rixflow
+```
+
 ### From a local clone
 
 ```sh
@@ -92,7 +98,7 @@ It prints the exact `init` command for your machine. Run that command **in your 
 
 ### Join an existing team
 
-Choose "join". The wizard clones the team's hub, asks for your name and projects folder, then connects your own ticket account: a personal access token for Asana, your login email plus an API token for Jira Cloud, or a personal access token for self-hosted Jira. Tokens are read as hidden input and stored in the system keychain, or a `0600` file. The wizard then installs the hub's pre-commit check. A team whose setup needs a newer RixFlow tells you to update first.
+Choose "join". The wizard clones the team's hub, asks for your name and projects folder, then connects your own ticket account: a personal access token for Asana, your login email plus an API token for Jira Cloud, or a personal access token for self-hosted Jira. Tokens are typed as masked input (one `*` per character) and stored in the system keychain, or a `0600` file. The wizard then installs the hub's pre-commit check. A team whose setup needs a newer RixFlow tells you to update first.
 
 This machine remembers the Jira address it connected to and sends your Jira token only there. If the hub's `workflow.yml` later names another address, RixFlow stops using the token and the session brief says so. Run setup and choose "Reconnect my ticket account" if the change is expected.
 
