@@ -122,7 +122,9 @@ export async function runMenu(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJ
       }
       const current = loadWorkflow(ctx.hubDir);
       const wf = await redoMapping(io, deps, ctx, current, env);
+      const sites = await foldersForNewCodes(io, loadSites(ctx.hubDir), wf);
       writeWorkflow(ctx.hubDir, wf);
+      if (sites) saveSites(ctx.hubDir, sites);
       await save('redo the ticket mapping', 'Saved the ticket mapping');
     },
     async reconnect() {
@@ -182,6 +184,21 @@ async function redoMapping(io: InitIo, deps: WizardDeps, ctx: Ctx, current: Work
   };
   const now = () => (deps.now ?? (() => new Date()))();
   return workflowOf(await runStepsFrom(mappingSteps(io, { source, samples, now }), mappingAnswers(current)));
+}
+
+// A redo can give tickets codes the team has no project for yet. Each new code gets a folder,
+// as in Create, so its tickets open in a project folder and notes can name it. Codes no longer
+// mapped stay in sites.yml: saved notes and links still use them. Returns null when nothing is new.
+async function foldersForNewCodes(io: InitIo, sites: ReturnType<typeof loadSites>, wf: Workflow): Promise<ReturnType<typeof loadSites> | null> {
+  const fresh = new Map<string, string>();
+  for (const [value, code] of Object.entries(wf.project.values)) if (!Object.hasOwn(sites, code) && !fresh.has(code)) fresh.set(code, value);
+  if (fresh.size === 0) return null;
+  io.log("New projects need a folder inside each person's projects folder. Press Enter to keep the suggestion.");
+  const out = { ...sites };
+  for (const [code, value] of fresh) {
+    out[code] = { folder: await askValid(io, `Folder for project ${code} (${clean(value)}):`, validFolder, slug(value) || code.toLowerCase()) };
+  }
+  return out;
 }
 
 // The machine facts a connect produced (jiraEmail, jiraUrl, asanaWorkspace), for config.yml.

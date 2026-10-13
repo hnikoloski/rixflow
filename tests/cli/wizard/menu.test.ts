@@ -196,10 +196,13 @@ describe('runMenu', () => {
       priorities: async () => ['Highest', 'High'], boards: async () => [],
     });
     const statuses = ['', '', '']; // To Do, In Progress, Done keep their current buckets
-    const keep = scriptedIo([...keepRun(''), ...statuses, '', '', '', '1', MENU.exit]);
+    // GL is a code with no project yet: it gets a folder (the suggestion from its value).
+    const keep = scriptedIo([...keepRun(''), ...statuses, '', '', '', '1', '', MENU.exit]);
     await runMenu(keep, deps({ makeJira }), ctx, s.env);
     expect(keep.logs.join('\n')).toContain('Kept from before');
     expect(loadWorkflow(s.ctx.hubDir)).toEqual(wf);
+    expect(loadSites(s.ctx.hubDir)).toEqual({ AC: { folder: 'acme' }, GL: { folder: 'globex-web' } });
+    expect(keep.left()).toBe(0);
 
     const drop = scriptedIo([...keepRun('-'), ...statuses, '-', '', '-', '1', MENU.exit]);
     await runMenu(drop, deps({ makeJira }), ctx, s.env);
@@ -236,10 +239,13 @@ describe('runMenu', () => {
       scopes: async () => [], sample: async () => [ticket], statuses: async () => ['To Do', 'In Progress', 'Done'],
       priorities: async () => [], boards: async () => [],
     });
-    // Project source, Acme site, Great Wall (suggestion), kept Globex web, three statuses, preview.
-    const io = scriptedIo([MENU.redoMapping, '', '', '', '', '', '', '', '1', MENU.exit]);
+    // Project source, Acme site, Great Wall (suggestion), kept Globex web, three statuses, preview,
+    // then folders for the two codes with no project yet (GW2 typed, GW suggested).
+    const io = scriptedIo([MENU.redoMapping, '', '', '', '', '', '', '', '1', 'wall', '', MENU.exit]);
     await runMenu(io, deps({ makeJira }), ctx, s.env);
     expect(loadWorkflow(s.ctx.hubDir)?.project.values).toEqual({ 'Acme site': 'AC', 'Great Wall': 'GW2', 'Globex web': 'GW' });
+    expect(loadSites(s.ctx.hubDir)).toEqual({ AC: { folder: 'acme' }, GW2: { folder: 'wall' }, GW: { folder: 'globex-web' } });
+    expect(s.inHub('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['config/sites.yml', 'config/workflow.yml']);
     expect(io.left()).toBe(0);
   });
 
@@ -263,8 +269,9 @@ describe('runMenu', () => {
       getMe: async () => ({ gid: '42', name: 'Me', workspaces: [{ gid: '111', name: 'Acme' }] }),
       getMyTasks: async () => [task], getTask: async () => task, getComments: async () => [],
     });
-    const keep = scriptedIo([...keepRun(''), '', '', '', '', '1', MENU.exit]);
+    const keep = scriptedIo([...keepRun(''), '', '', '', '', '1', '', MENU.exit]);
     await runMenu(keep, deps({ makeAsana }), s.ctx, s.env);
+    expect(loadSites(s.ctx.hubDir)).toEqual({ AC: { folder: 'acme' }, GL: { folder: 'gl' } });
     expect(keep.logs.join('\n')).toContain('Kept from before');
     expect(loadWorkflow(s.ctx.hubDir)).toEqual(wf);
 
@@ -276,6 +283,7 @@ describe('runMenu', () => {
       status: { ...wf.status, waiting: [] },
       urgent: { field: 'Priority', values: ['Urgent'] },
     });
+    expect(loadSites(s.ctx.hubDir)).toHaveProperty('GL'); // a code no longer mapped keeps its project
     expect(drop.left()).toBe(0);
   });
 
