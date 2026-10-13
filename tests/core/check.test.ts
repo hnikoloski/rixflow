@@ -7,7 +7,7 @@ import { hubCommand } from '../../src/core/command';
 import { sendMessage } from '../../src/core/messages';
 import { fakeAsanaSource, fakeSource, task, ticket } from '../fixtures/asana';
 import { makeSource } from '../../src/core/runtime';
-import type { Ctx } from '../../src/core/types';
+import { HubError, type Ctx } from '../../src/core/types';
 import { LEGACY_WORKFLOW, type Workflow } from '../../src/core/workflow';
 import { makeCtx } from '../helpers';
 
@@ -167,6 +167,13 @@ describe('runCheck', () => {
     const pending = runCheck(ctx, { source: asana, sync: hang }, 'session');
     await vi.advanceTimersByTimeAsync(20_000);
     expect(await pending).toBe('[rixflow] 1 new request from pm · Asana unreachable');
+  });
+
+  it('says a rejected login needs a reconnect, on session only', async () => {
+    const ctx = makeCtx();
+    const rejected = { ...fakeSource([]), myTickets: async () => { throw new HubError('ASANA_AUTH', 'Asana rejected the token'); } };
+    expect(await runCheck(ctx, { source: rejected, sync: noSync }, 'session')).toBe('[rixflow] Asana login rejected: run /rixflow:setup and choose "Reconnect my ticket account"');
+    expect(await runCheck(ctx, { source: rejected, sync: noSync }, 'prompt')).toBe('');
   });
 
   it('says Asana is unreachable on session only, and stays quiet on prompt', async () => {

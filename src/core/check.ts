@@ -190,8 +190,13 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
         const names = changed.slice(0, 3).map((t) => `"${clean(t.title).replace(/"/g, "'")}"`).join(', ');
         parts.push(`${source.label} updated: ${names}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}`);
       }
-    } catch {
-      if (trigger === 'session') parts.push(`${source.label} unreachable`);
+    } catch (e) {
+      // A rejected token needs the person to act, so it says what to do.
+      if (trigger === 'session') {
+        parts.push(e instanceof HubError && e.code.endsWith('_AUTH')
+          ? `${source.label} login rejected: run /rixflow:setup and choose "Reconnect my ticket account"`
+          : `${source.label} unreachable`);
+      }
     }
   }
 
