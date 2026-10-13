@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LEGACY_WORKFLOW, compareVersions, loadWorkflow, workflowToYaml, writeWorkflow, type Workflow } from '../../src/core/workflow';
+import { WORKFLOW_REQUIRES } from '../../src/core/version';
 
 let hub: string;
 beforeEach(() => {
@@ -34,6 +35,9 @@ describe('workflow.yml', () => {
     };
     writeWorkflow(hub, wf);
     expect(loadWorkflow(hub, '0.3.0')).toEqual(wf);
+    // A patch release still reads it: setup writes the format version, not the release version.
+    expect(loadWorkflow(hub)).toEqual(wf);
+    expect(WORKFLOW_REQUIRES).toBe('0.3.0');
   });
 
   it('round-trips asana with codes and no requires', () => {

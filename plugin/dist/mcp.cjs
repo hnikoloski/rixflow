@@ -36892,7 +36892,7 @@ function loadSites(hubDir2) {
 }
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "0.3.0";
+var RIXFLOW_VERSION = "0.3.1";
 
 // src/core/workflow.ts
 var LEGACY = {
@@ -46296,7 +46296,7 @@ function readablePath(ctx, path) {
   return insideHub(ctx.hubDir, path);
 }
 function createServer(deps) {
-  const server2 = new McpServer({ name: "hub", version: "0.3.0" });
+  const server2 = new McpServer({ name: "hub", version: "0.3.1" });
   const workflowFor = (ctx) => deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
   const sourceFor = (ctx, wf) => {
     const source = deps.source(ctx, wf);

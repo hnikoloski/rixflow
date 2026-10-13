@@ -11,7 +11,7 @@ import { bootstrapHub, isSafeFolder } from '../../core/template';
 import { jiraBaseUrl } from '../../core/tickets/jira';
 import type { Discovery, Ticket, TicketSource } from '../../core/tickets/types';
 import { HubError, assertName, type Role, type UserConfig } from '../../core/types';
-import { RIXFLOW_VERSION } from '../../core/version';
+import { WORKFLOW_REQUIRES } from '../../core/version';
 import type { Workflow } from '../../core/workflow';
 import { applyClaudeSettings, withAccessHint, type InitIo } from '../init';
 import { connect, scopeLabel, storedSource, type Connection, type WizardDeps } from './connect';
@@ -48,7 +48,7 @@ export function workflowOf(a: Answers): Workflow {
   const status: Workflow['status'] = { field: jira ? null : 'Status', todo: [], in_progress: [], waiting: [], done: [] };
   for (const [name, bucket] of pairs(a.statusBuckets)) status[bucket as Bucket].push(name);
   return {
-    requires: RIXFLOW_VERSION,
+    requires: WORKFLOW_REQUIRES,
     legacy: false,
     tracker: trackerOf(a),
     project: {
@@ -136,7 +136,8 @@ export function mappingSteps(io: InitIo, h: MappingHelpers): Step[] {
         const values = distinctValues(await h.samples(a), a.projectFrom as Workflow['project']['from'], (a.projectField as string | null) ?? null);
         const before = new Map(pairs(a.projectValues));
         io.log('Each project gets a short code (capital letters and digits, e.g. AC). Press Enter to keep the suggestion, or type - to leave a value out.');
-        const taken = new Set<string>();
+        // Codes mapped before stay reserved, so a new value is never suggested a kept project's code.
+        const taken = new Set<string>(before.values());
         const out: Pairs = [];
         for (const v of values) {
           const suggestion = before.get(v) ?? suggestCode(v, taken);

@@ -11,7 +11,7 @@ import { loadSites, loadTeam } from '../../../src/core/team';
 import { getToken } from '../../../src/core/token';
 import type { Discovery, Ticket, TicketSource } from '../../../src/core/tickets/types';
 import type { Ctx } from '../../../src/core/types';
-import { RIXFLOW_VERSION } from '../../../src/core/version';
+import { WORKFLOW_REQUIRES } from '../../../src/core/version';
 import { loadWorkflow, writeWorkflow, type Workflow } from '../../../src/core/workflow';
 import { hubWithRemote } from '../../gitHub';
 import { scriptedIo } from './io';
@@ -125,7 +125,7 @@ describe('runMenu', () => {
     // Declining the warning changes nothing.
     const no = scriptedIo([MENU.redoMapping, 'n', MENU.exit]);
     await runMenu(no, deps({ makeAsana }), ctx, s.env);
-    expect(no.logs.join('\n')).toContain(`Everyone on the team must update to RixFlow ${RIXFLOW_VERSION} first. Older copies will ignore these settings.`);
+    expect(no.logs.join('\n')).toContain(`Everyone on the team must update to RixFlow ${WORKFLOW_REQUIRES} first. Older copies will ignore these settings.`);
     expect(existsSync(join(s.ctx.hubDir, 'config', 'workflow.yml'))).toBe(false);
 
     const io = scriptedIo([
@@ -139,11 +139,11 @@ describe('runMenu', () => {
       MENU.exit,
     ]);
     await runMenu(io, deps({ makeAsana }), ctx, s.env);
-    expect(io.logs.join('\n')).toContain(`Everyone on the team must update to RixFlow ${RIXFLOW_VERSION} first.`);
+    expect(io.logs.join('\n')).toContain(`Everyone on the team must update to RixFlow ${WORKFLOW_REQUIRES} first.`);
     expect(io.logs.join('\n')).toMatch(/Some tickets as RixFlow will see them/);
     expect(tokens).toEqual(['tok-a']); // the stored token, never asked again
     const expected: Workflow = {
-      requires: RIXFLOW_VERSION, legacy: false,
+      requires: WORKFLOW_REQUIRES, legacy: false,
       tracker: { type: 'asana', workspace: null },
       project: { from: 'custom-field', field: 'Website', values: { AC: 'AC' } },
       status: { field: 'Status', todo: [], in_progress: ['In progress'], waiting: [], done: [] },
@@ -151,7 +151,7 @@ describe('runMenu', () => {
       urgent: { field: 'Priority', values: ['Urgent', 'critical', 'p0', 'highest'] },
     };
     expect(loadWorkflow(s.ctx.hubDir)).toEqual(expected);
-    expect(readFileSync(join(s.ctx.hubDir, 'config', 'workflow.yml'), 'utf8')).toMatch(new RegExp(`^requires: ${RIXFLOW_VERSION.replace(/\./g, '\\.')}`));
+    expect(readFileSync(join(s.ctx.hubDir, 'config', 'workflow.yml'), 'utf8')).toMatch(new RegExp(`^requires: ${WORKFLOW_REQUIRES.replace(/\./g, '\\.')}`));
     expect(readFileSync(join(s.ctx.hubDir, 'config', 'workflow.yml'), 'utf8')).not.toContain('tok-a');
     expect(s.inHub('show', '--name-only', '--format=', 'HEAD').trim()).toBe('config/workflow.yml');
     expect(s.inHub('log', '-1', '--format=%s').trim()).toBe('chore: redo the ticket mapping (me)');
@@ -174,7 +174,7 @@ describe('runMenu', () => {
   it('redo on a Jira workflow keeps mapped values the sample lacks, and - removes them', async () => {
     const s = await setUp();
     const wf: Workflow = {
-      requires: RIXFLOW_VERSION, legacy: false,
+      requires: WORKFLOW_REQUIRES, legacy: false,
       tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB'] },
       project: { from: 'component', field: null, values: { 'Acme site': 'AC', 'Globex web': 'GL' } },
       status: { field: null, todo: ['To Do'], in_progress: ['In Progress'], waiting: ['QA Review'], done: ['Done'] },
@@ -212,10 +212,41 @@ describe('runMenu', () => {
     expect(drop.left()).toBe(0);
   });
 
+  it('redo never suggests a code that a kept project already uses', async () => {
+    const s = await setUp();
+    const wf: Workflow = {
+      requires: WORKFLOW_REQUIRES, legacy: false,
+      tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB'] },
+      project: { from: 'component', field: null, values: { 'Acme site': 'AC', 'Globex web': 'GW' } },
+      status: { field: null, todo: ['To Do'], in_progress: ['In Progress'], waiting: [], done: ['Done'] },
+      sprints: { mode: 'none' }, urgent: { field: null, values: [] },
+    };
+    commitWorkflow(s, wf);
+    writeFileSync(join(s.ctx.configDir, 'config.yml'), YAML.stringify({ ...s.ctx.user, jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net' }));
+    writeFileSync(join(s.ctx.configDir, 'jira-token'), 'tok-j', { mode: 0o600 });
+    const ctx: Ctx = { ...s.ctx, user: { ...s.ctx.user, jiraEmail: 'me@example.com', jiraUrl: 'https://acme.atlassian.net' } };
+    const ticket: Ticket = {
+      id: 'WEB-1', title: 'Fix the login page', notes: '', modifiedAt: '2026-10-01T00:00:00Z', due: null, url: null, parent: null,
+      status: 'In Progress', priority: null, fields: [], components: ['Acme site', 'Great Wall'], labels: [], containers: ['WEB'], sections: [], sprints: [], restricted: false,
+    };
+    const makeJira = (): TicketSource & Discovery => ({
+      kind: 'jira', label: 'Jira', normalizeId: (x) => x,
+      whoAmI: async () => ({ id: 'acc-1', name: 'Me' }),
+      myTickets: async () => [ticket], ticket: async () => ticket, comments: async () => [],
+      scopes: async () => [], sample: async () => [ticket], statuses: async () => ['To Do', 'In Progress', 'Done'],
+      priorities: async () => [], boards: async () => [],
+    });
+    // Project source, Acme site, Great Wall (suggestion), kept Globex web, three statuses, preview.
+    const io = scriptedIo([MENU.redoMapping, '', '', '', '', '', '', '', '1', MENU.exit]);
+    await runMenu(io, deps({ makeJira }), ctx, s.env);
+    expect(loadWorkflow(s.ctx.hubDir)?.project.values).toEqual({ 'Acme site': 'AC', 'Great Wall': 'GW2', 'Globex web': 'GW' });
+    expect(io.left()).toBe(0);
+  });
+
   it('redo on an Asana workflow keeps mapped values the sample lacks, and - removes them', async () => {
     const s = await setUp();
     const wf: Workflow = {
-      requires: RIXFLOW_VERSION, legacy: false,
+      requires: WORKFLOW_REQUIRES, legacy: false,
       tracker: { type: 'asana', workspace: '111' },
       project: { from: 'custom-field', field: 'Website', values: { AC: 'AC', GL: 'GL' } },
       status: { field: 'Status', todo: [], in_progress: ['In progress'], waiting: ['On hold'], done: [] },
@@ -317,7 +348,7 @@ describe('runInit on a set-up machine', () => {
   it('a Jira machine sees the menu and reconnects to Jira, never asked for an Asana token', async () => {
     const s = await setUp();
     writeWorkflow(s.ctx.hubDir, {
-      requires: RIXFLOW_VERSION, legacy: false,
+      requires: WORKFLOW_REQUIRES, legacy: false,
       tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB'] },
       project: { from: 'component', field: null, values: { 'Acme site': 'AC' } },
       status: { field: null, todo: ['To Do'], in_progress: ['In Progress'], waiting: [], done: ['Done'] },
@@ -374,7 +405,7 @@ describe('runInit on a set-up machine', () => {
   });
 
   const jiraWorkflow = (url: string): Workflow => ({
-    requires: RIXFLOW_VERSION, legacy: false,
+    requires: WORKFLOW_REQUIRES, legacy: false,
     tracker: { type: 'jira', url, flavor: 'cloud', projects: ['WEB'] },
     project: { from: 'component', field: null, values: { 'Acme site': 'AC' } },
     status: { field: null, todo: ['To Do'], in_progress: ['In Progress'], waiting: [], done: ['Done'] },

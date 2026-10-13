@@ -7,7 +7,7 @@ import { isSafeFolder } from '../../core/template';
 import type { Discovery, Ticket, TicketSource, TrackerKind } from '../../core/tickets/types';
 import { deleteLegacyToken, deleteToken, tokenEnvVar } from '../../core/token';
 import { HubError, assertName, type Ctx, type Role } from '../../core/types';
-import { RIXFLOW_VERSION } from '../../core/version';
+import { WORKFLOW_REQUIRES } from '../../core/version';
 import { jiraUrlChanged, loadWorkflow, writeWorkflow, type Workflow } from '../../core/workflow';
 import type { InitIo } from '../init';
 import { connect, scopeLabel, storedSource, type Connection, type WizardDeps } from './connect';
@@ -117,7 +117,7 @@ export async function runMenu(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJ
     async mapping() {
       await refresh();
       if (!existsSync(join(ctx.hubDir, 'config', 'workflow.yml'))) {
-        io.log(`Everyone on the team must update to RixFlow ${RIXFLOW_VERSION} first. Older copies will ignore these settings.`);
+        io.log(`Everyone on the team must update to RixFlow ${WORKFLOW_REQUIRES} first. Older copies will ignore these settings.`);
         if (!(await confirm(io, 'Continue?', false))) return;
       }
       const current = loadWorkflow(ctx.hubDir);
@@ -128,7 +128,7 @@ export async function runMenu(io: InitIo, deps: WizardDeps, ctx: Ctx, env: NodeJ
     async reconnect() {
       const wf = loadWorkflow(ctx.hubDir);
       if (wf.tracker.type === 'jira' && jiraUrlChanged(wf, ctx.user)) {
-        io.log(`The team's Jira address is ${wf.tracker.url}${ctx.user.jiraUrl ? ` (this machine used ${ctx.user.jiraUrl})` : ''}. Sign in only if you trust that address.`);
+        io.log(`The team's Jira address is ${clean(wf.tracker.url)}${ctx.user.jiraUrl ? ` (this machine used ${clean(ctx.user.jiraUrl)})` : ''}. Sign in only if you trust that address.`);
       }
       const conn = await connect(io, deps, wf, { name: user, configDir: ctx.configDir });
       updateMachineConfig(ctx.configDir, machineFacts(conn));
@@ -164,7 +164,7 @@ async function redoMapping(io: InitIo, deps: WizardDeps, ctx: Ctx, current: Work
     if (stored) src = stored as Source;
     else {
       io.log(current.tracker.type === 'jira' && jiraUrlChanged(current, user)
-        ? `The team's Jira address is ${current.tracker.url}, not the one this machine connected to. Sign in again only if you trust that address.`
+        ? `The team's Jira address is ${clean(current.tracker.url)}, not the one this machine connected to. Sign in again only if you trust that address.`
         : 'Your ticket login was not found on this machine; please sign in again.');
       const conn = await connect(io, deps, current, user);
       updateMachineConfig(ctx.configDir, machineFacts(conn));

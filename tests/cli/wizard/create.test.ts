@@ -14,7 +14,7 @@ import type { Gh, RunGit } from '../../../src/core/repo';
 import { loadSites, loadTeam } from '../../../src/core/team';
 import type { JiraAuth } from '../../../src/core/tickets/jira';
 import type { Discovery, Ticket, TicketSource } from '../../../src/core/tickets/types';
-import { RIXFLOW_VERSION } from '../../../src/core/version';
+import { WORKFLOW_REQUIRES } from '../../../src/core/version';
 import { loadWorkflow, type Workflow } from '../../../src/core/workflow';
 import { hubWithRemote } from '../../gitHub';
 import { scriptedIo } from './io';
@@ -105,7 +105,7 @@ const tail = (repo: string, home: string) => [
 ];
 
 const EXPECTED: Workflow = {
-  requires: RIXFLOW_VERSION,
+  requires: WORKFLOW_REQUIRES,
   legacy: false,
   tracker: { type: 'jira', url: 'https://acme.atlassian.net', flavor: 'cloud', projects: ['WEB', 'OPS'] },
   project: { from: 'component', field: null, values: { 'Acme site': 'AS', 'Globex web': 'GL' } },
@@ -273,7 +273,7 @@ describe('runCreate', () => {
     ]);
     await runCreate(io, deps({ makeAsana }), m.env);
     expect(loadWorkflow(m.hub)).toEqual({
-      requires: RIXFLOW_VERSION, legacy: false,
+      requires: WORKFLOW_REQUIRES, legacy: false,
       tracker: { type: 'asana', workspace: '111' },
       project: { from: 'asana-project', field: null, values: { 'Acme web': 'AW' } },
       status: { field: 'Status', todo: [], in_progress: ['In progress'], waiting: [], done: [] },

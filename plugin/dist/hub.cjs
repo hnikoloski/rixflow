@@ -11898,7 +11898,8 @@ var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "0.3.0";
+var RIXFLOW_VERSION = "0.3.1";
+var WORKFLOW_REQUIRES = "0.3.0";
 
 // src/core/workflow.ts
 var LEGACY = {
@@ -12164,6 +12165,7 @@ async function check(ctx, deps, trigger) {
   const ticketFetch = source ? withTimeout(() => source.myTickets(), budget) : null;
   ticketFetch?.catch(() => void 0);
   let publicCheck = null;
+  const lastCheckDay = state.publicHubCheckDay;
   if (trigger === "session" && state.publicHubCheckDay !== today) {
     state.publicHubCheckDay = today;
     publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => null);
@@ -12202,7 +12204,8 @@ async function check(ctx, deps, trigger) {
   }
   if (publicCheck) {
     const verdict = await publicCheck;
-    if (verdict !== null) state.publicHub = verdict;
+    if (verdict === false && synced?.status === "offline") state.publicHubCheckDay = lastCheckDay;
+    else if (verdict !== null) state.publicHub = verdict;
   }
   if (trigger === "session" && state.publicHub === true) parts.push(PUBLIC_HUB);
   const health = describeHealth(synced, trigger, state, today);
@@ -14013,7 +14016,7 @@ function workflowOf2(a) {
   const status = { field: jira ? null : "Status", todo: [], in_progress: [], waiting: [], done: [] };
   for (const [name, bucket] of pairs(a.statusBuckets)) status[bucket].push(name);
   return {
-    requires: RIXFLOW_VERSION,
+    requires: WORKFLOW_REQUIRES,
     legacy: false,
     tracker: trackerOf(a),
     project: {
@@ -14088,7 +14091,7 @@ function mappingSteps(io, h) {
         const values = distinctValues(await h.samples(a), a.projectFrom, a.projectField ?? null);
         const before = new Map(pairs(a.projectValues));
         io.log("Each project gets a short code (capital letters and digits, e.g. AC). Press Enter to keep the suggestion, or type - to leave a value out.");
-        const taken = /* @__PURE__ */ new Set();
+        const taken = new Set(before.values());
         const out = [];
         for (const v of values) {
           const suggestion = before.get(v) ?? suggestCode(v, taken);
@@ -14554,7 +14557,7 @@ async function runMenu(io, deps, ctx, env = process.env) {
     async mapping() {
       await refresh();
       if (!(0, import_node_fs18.existsSync)((0, import_node_path21.join)(ctx.hubDir, "config", "workflow.yml"))) {
-        io.log(`Everyone on the team must update to RixFlow ${RIXFLOW_VERSION} first. Older copies will ignore these settings.`);
+        io.log(`Everyone on the team must update to RixFlow ${WORKFLOW_REQUIRES} first. Older copies will ignore these settings.`);
         if (!await confirm(io, "Continue?", false)) return;
       }
       const current = loadWorkflow(ctx.hubDir);
@@ -14565,7 +14568,7 @@ async function runMenu(io, deps, ctx, env = process.env) {
     async reconnect() {
       const wf = loadWorkflow(ctx.hubDir);
       if (wf.tracker.type === "jira" && jiraUrlChanged(wf, ctx.user)) {
-        io.log(`The team's Jira address is ${wf.tracker.url}${ctx.user.jiraUrl ? ` (this machine used ${ctx.user.jiraUrl})` : ""}. Sign in only if you trust that address.`);
+        io.log(`The team's Jira address is ${clean4(wf.tracker.url)}${ctx.user.jiraUrl ? ` (this machine used ${clean4(ctx.user.jiraUrl)})` : ""}. Sign in only if you trust that address.`);
       }
       const conn = await connect(io, deps, wf, { name: user, configDir: ctx.configDir });
       updateMachineConfig(ctx.configDir, machineFacts(conn));
@@ -14601,7 +14604,7 @@ async function redoMapping(io, deps, ctx, current, env) {
     const stored = storedSource(deps, current, user, env);
     if (stored) src = stored;
     else {
-      io.log(current.tracker.type === "jira" && jiraUrlChanged(current, user) ? `The team's Jira address is ${current.tracker.url}, not the one this machine connected to. Sign in again only if you trust that address.` : "Your ticket login was not found on this machine; please sign in again.");
+      io.log(current.tracker.type === "jira" && jiraUrlChanged(current, user) ? `The team's Jira address is ${clean4(current.tracker.url)}, not the one this machine connected to. Sign in again only if you trust that address.` : "Your ticket login was not found on this machine; please sign in again.");
       const conn = await connect(io, deps, current, user);
       updateMachineConfig(ctx.configDir, machineFacts(conn));
       src = conn.source;
