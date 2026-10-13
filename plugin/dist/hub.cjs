@@ -11898,7 +11898,7 @@ var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "0.3.1";
+var RIXFLOW_VERSION = "0.4.0";
 var WORKFLOW_REQUIRES = "0.3.0";
 
 // src/core/workflow.ts
@@ -11973,7 +11973,8 @@ function parseTracker(raw) {
       fail2(`jira url is not a valid URL: ${rawUrl}`);
     }
     if (u.protocol !== "https:") fail2("jira url must use https");
-    const url = `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+    const url = jiraBaseUrl(rawUrl);
+    if (!url) fail2("jira url must be an https:// address without a login, query or #fragment");
     return { type: "jira", url, flavor: t.flavor, projects: stringList(t.projects, "tracker.projects") };
   }
   return fail2(`unknown tracker type: ${String(t.type)}`);
@@ -12333,6 +12334,19 @@ var AsanaClient = class {
     assertGid(gid);
     return this.#object(`/tasks/${gid}`, { opt_fields: TASK_FIELDS });
   }
+  // The workspace's custom fields with their enabled dropdown options, so setup can map statuses
+  // and priorities nobody has a ticket in yet.
+  async getFieldOptions(workspace) {
+    assertGid(workspace);
+    const fields = await this.#all(`/workspaces/${workspace}/custom_fields`, {
+      limit: "100",
+      opt_fields: "name,enum_options.name,enum_options.enabled"
+    });
+    return fields.map((f) => ({
+      name: f.name,
+      options: (f.enum_options ?? []).filter((o) => o.enabled !== false && o.name).map((o) => o.name)
+    }));
+  }
   async getComments(gid, limit = 10) {
     assertGid(gid);
     if (limit <= 0) return [];
@@ -12541,6 +12555,24 @@ function asanaSource(reader, opts) {
     return reader.getMe();
   };
   const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
+  const values = async (field2, seen) => {
+    let options = [];
+    try {
+      const fields = reader.getFieldOptions ? await reader.getFieldOptions(opts.workspace) : [];
+      options = fields.filter((f) => f.name.toLowerCase() === field2.toLowerCase()).flatMap((f) => f.options);
+    } catch {
+      options = [];
+    }
+    const out = [];
+    const known = /* @__PURE__ */ new Set();
+    for (const v of [...options, ...(await sample()).map(seen)]) {
+      if (v && !known.has(v.toLowerCase())) {
+        known.add(v.toLowerCase());
+        out.push(v);
+      }
+    }
+    return out;
+  };
   return {
     kind: "asana",
     label: "Asana",
@@ -12572,10 +12604,10 @@ function asanaSource(reader, opts) {
       return (await sample()).slice(0, limit);
     },
     async statuses() {
-      return [...new Set((await sample()).map((t) => t.status).filter((s) => !!s))];
+      return values(opts.statusField ?? "Status", (t) => t.status);
     },
     async priorities() {
-      return [...new Set((await sample()).map((t) => t.priority).filter((s) => !!s))];
+      return values(opts.priorityField ?? "Priority", (t) => t.priority);
     },
     async boards() {
       return [];

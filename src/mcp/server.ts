@@ -79,7 +79,7 @@ function readablePath(ctx: Ctx, path: unknown): string {
 }
 
 export function createServer(deps: ServerDeps): McpServer {
-  const server = new McpServer({ name: 'hub', version: '0.3.1' });
+  const server = new McpServer({ name: 'hub', version: '0.4.0' });
   const workflowFor = (ctx: Ctx): Workflow => (deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir));
   const sourceFor = (ctx: Ctx, wf: Workflow): TicketSource => {
     const source = deps.source(ctx, wf);
