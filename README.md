@@ -1,14 +1,39 @@
-# RixFlow
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+    <img alt="RixFlow: async handovers for Claude Code teams" src="assets/banner-light.svg" width="100%">
+  </picture>
+</p>
 
-Async team workflow for [Claude Code](https://claude.com/claude-code). Each teammate's Claude shares one git **hub** repo with the rest of the team, so work moves between people without meetings:
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/hnikoloski/rixflow?color=d97757"></a>
+  <a href="package.json"><img alt="Version" src="https://img.shields.io/github/package-json/v/hnikoloski/rixflow?color=4eba65&label=version"></a>
+  <a href="https://claude.com/claude-code"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-d97757"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP server" src="https://img.shields.io/badge/MCP-stdio%20server-7ab8ff"></a>
+  <img alt="Asana and Jira" src="https://img.shields.io/badge/tickets-Asana%20%C2%B7%20Jira-b1a6f9">
+  <img alt="Node 20+" src="https://img.shields.io/badge/node-%E2%89%A520-5f5c69">
+</p>
 
-- **Plate:** your tickets (Asana, or Jira Cloud or self-hosted), inbox and paused work in one list.
-- **Handovers:** start a task with a brief, pause it with a checkpoint, and pick it up later (or let someone else).
-- **Inbox:** send requests and questions to a teammate's Claude; it sees them at its next session.
-- **Shared knowledge:** searchable notes per project, promoted from sessions.
-- **RixFlow UI:** a status line, a band above the prompt and a `RixFlow` pane that show all of the above live.
+Async team workflow for [Claude Code](https://claude.com/claude-code). Each teammate's Claude shares one git **hub** repo with the rest of the team, so work moves between people without meetings: pause a task with a checkpoint, and you (or a teammate) can pick it up tomorrow exactly where it stopped.
 
-Your ticket system is **read-only by design**, and every string written to the hub passes through a secret scrubber first.
+<p align="center">
+  <img alt="RixFlow in Claude Code: the plate, the RixFlow pane with the current task, inbox, paused work and sprint, a new-message band above the prompt and the status line" src="assets/tui.svg" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top"><b>🍽️ Plate</b><br>Your tickets (Asana, or Jira Cloud or self-hosted), inbox and paused work in one list.</td>
+    <td width="50%" valign="top"><b>🤝 Handovers</b><br>Start a task with a brief, pause it with a checkpoint, and pick it up later (or let someone else).</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>📨 Inbox</b><br>Send requests and questions to a teammate's Claude; it sees them at its next session.</td>
+    <td valign="top"><b>📚 Shared knowledge</b><br>Searchable notes per project, promoted from sessions.</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>🖥️ RixFlow UI</b><br>A status line, a band above the prompt and a <code>RixFlow</code> pane that show all of the above live, with no model calls.</td>
+    <td valign="top"><b>🔒 Safe by design</b><br>Your ticket system is <b>read-only</b>, and every string written to the hub passes through a secret scrubber first.</td>
+  </tr>
+</table>
 
 ## Table of contents
 
@@ -22,14 +47,43 @@ Your ticket system is **read-only by design**, and every string written to the h
 
 ## How it works
 
+```mermaid
+flowchart LR
+  subgraph you["You"]
+    A["Claude Code<br/>+ rixflow"]
+  end
+  subgraph mate["A teammate"]
+    B["Claude Code<br/>+ rixflow"]
+  end
+  H[("Team hub<br/>(private git repo)<br/>people/ · inbox/ · shared/")]
+  T["Asana or Jira"]
+  A <-->|"commit · pull --rebase · push"| H
+  B <-->|"commit · pull --rebase · push"| H
+  T -.->|"read-only"| A
+  T -.->|"read-only"| B
 ```
- you + Claude ──┐                         ┌── teammate + Claude
-                │   hub (a git repo)      │
-   rixflow ─────┼──► people/<you>/  ◄─────┼───── rixflow
-   (commands,   │    inbox/<them>/        │
-    MCP, hooks) │    shared/sites/…       │
-                └─────────────────────────┘
-        Asana (read-only) ──► plate, briefs, sprint
+
+A typical handover:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Alice
+  participant AC as Alice's Claude
+  participant Hub as Team hub
+  participant BC as Bob's Claude
+  actor Bob
+  Alice->>AC: /rixflow:start WEB-142
+  AC->>Hub: handover brief
+  Alice->>AC: /rixflow:checkpoint
+  AC->>Hub: where it stopped and what's next
+  Alice->>AC: /rixflow:send bob WEB-142 "can you finish this?"
+  AC->>Hub: message in inbox/bob/
+  Bob->>BC: starts a session
+  Hub-->>BC: session brief: 1 new request from alice
+  Bob->>BC: /rixflow:resume WEB-142
+  Hub-->>BC: brief + Alice's checkpoint
+  BC->>Bob: carries on where Alice stopped
 ```
 
 - Everything is plain Markdown in a git repo that your team owns. RixFlow commits and syncs it for you (pull --rebase with bounded push retries).
@@ -88,7 +142,12 @@ In Claude Code, run:
 /rixflow:setup
 ```
 
-It prints the exact `init` command for your machine. Run that command **in your own terminal**: it opens a guided setup. On a fresh machine you choose to **join** a team or **create** one; once the machine is set up, the same command opens a **change** menu. The hub URL must work without a password prompt (ssh-agent for ssh, a credential helper for https).
+It prints the exact `init` command for your machine. Run that command **in your own terminal**: it opens a guided setup.
+
+<p align="center">
+  <img alt="The setup wizard creating a team on Jira Cloud: the token is masked, then a preview shows how tickets map to projects, statuses, sprints and urgency" src="assets/setup.svg" width="85%">
+</p>
+ On a fresh machine you choose to **join** a team or **create** one; once the machine is set up, the same command opens a **change** menu. The hub URL must work without a password prompt (ssh-agent for ssh, a credential helper for https).
 
 ### Join an existing team
 

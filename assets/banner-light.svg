@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 300" width="1280" height="300" role="img" aria-label="RixFlow: async team workflow for Claude Code">
+<title>RixFlow: async team workflow for Claude Code</title>
+<defs>
+  <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#1d1c22" fill-opacity="0.08"/></pattern>
+  <radialGradient id="warm" cx="0.8" cy="0.5" r="0.55"><stop offset="0" stop-color="#d97757" stop-opacity="0.16"/><stop offset="1" stop-color="#d97757" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="1280" height="300" rx="18" fill="#faf8f4"/>
+<rect width="1280" height="300" rx="18" fill="url(#dots)"/>
+<rect width="1280" height="300" rx="18" fill="url(#warm)"/>
+<g font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace">
+  <text x="72" y="118" font-size="64" font-weight="800" fill="#1d1c22" letter-spacing="-1"><tspan fill="#d97757">◆</tspan> RixFlow</text>
+  <text x="76" y="164" font-size="22" fill="#5f5c69">Async handovers for Claude Code teams.</text>
+  <text x="76" y="194" font-size="16" fill="#5f5c69" fill-opacity="0.85">Plate · Checkpoints · Inbox · Shared knowledge, synced through one git repo.</text>
+</g>
+<g transform="translate(76 222)"><rect width="76" height="30" rx="15" fill="#e8738a" fill-opacity="0.12" stroke="#e8738a" stroke-opacity="0.55"/><circle cx="15" cy="15" r="4" fill="#e8738a"/><text x="26" y="20" fill="#2a2930" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14">Asana</text></g>
+<g transform="translate(176 222)"><rect width="122" height="30" rx="15" fill="#7ab8ff" fill-opacity="0.12" stroke="#7ab8ff" stroke-opacity="0.55"/><circle cx="15" cy="15" r="4" fill="#7ab8ff"/><text x="26" y="20" fill="#2a2930" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14">Jira Cloud</text></g>
+<g transform="translate(318 222)"><rect width="177.2" height="30" rx="15" fill="#7ab8ff" fill-opacity="0.12" stroke="#7ab8ff" stroke-opacity="0.55"/><circle cx="15" cy="15" r="4" fill="#7ab8ff"/><text x="26" y="20" fill="#2a2930" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14">Jira self-hosted</text></g>
+<g transform="translate(515 222)"><rect width="112.8" height="30" rx="15" fill="#4eba65" fill-opacity="0.12" stroke="#4eba65" stroke-opacity="0.55"/><circle cx="15" cy="15" r="4" fill="#4eba65"/><text x="26" y="20" fill="#2a2930" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14">read-only</text></g>
+<g stroke="#d97757" stroke-width="2" stroke-dasharray="5 6" stroke-opacity="0.75" fill="none">
+  <path d="M970 150 L1100 62"/><path d="M970 150 L1100 238"/><path d="M970 150 L1196 150"/><path d="M970 150 L830 150"/>
+</g>
+<g><circle cx="830" cy="150" r="30" fill="#faf8f4" stroke="#e5b45a" stroke-width="2"/><text x="830" y="155" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#e5b45a">you</text></g>
+<g><circle cx="1100" cy="62" r="30" fill="#faf8f4" stroke="#4eba65" stroke-width="2"/><text x="1100" y="67" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#4eba65">alice</text></g>
+<g><circle cx="1100" cy="238" r="30" fill="#faf8f4" stroke="#7ab8ff" stroke-width="2"/><text x="1100" y="243" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#7ab8ff">bob</text></g>
+<g><circle cx="1196" cy="150" r="30" fill="#faf8f4" stroke="#b1a6f9" stroke-width="2"/><text x="1196" y="155" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#b1a6f9">pm</text></g>
+<g><rect x="910" y="120" width="120" height="60" rx="12" fill="#faf8f4" stroke="#d97757" stroke-width="2.5"/>
+<text x="970" y="146" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#5f5c69">git</text>
+<text x="970" y="166" text-anchor="middle" font-family="ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" font-weight="700" fill="#d97757">hub</text></g>
+</svg>
