@@ -50,7 +50,7 @@ const BUCKETS = ['todo', 'in_progress', 'waiting', 'done'] as const;
 // A workflow.yml whose `requires` is newer than this RixFlow: its ticket features are skipped.
 export class WorkflowTooNew extends HubError {
   constructor(readonly requires: string) {
-    super('WORKFLOW_TOO_NEW', `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`);
+    super('WORKFLOW_TOO_NEW', `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin marketplace update rixflow, then restart Claude Code`);
   }
 }
 

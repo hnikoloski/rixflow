@@ -87,7 +87,7 @@ describe('workflow.yml', () => {
 
   it('requires a newer RixFlow', () => {
     put(`requires: 9.0.0\n${JIRA}`);
-    expect(() => loadWorkflow(hub)).toThrow(/needs RixFlow 9\.0\.0 or newer\. Update RixFlow: \/plugin update rixflow-ui@rixflow/);
+    expect(() => loadWorkflow(hub)).toThrow(/needs RixFlow 9\.0\.0 or newer\. Update RixFlow: \/plugin marketplace update rixflow, then restart Claude Code/);
     try {
       loadWorkflow(hub);
     } catch (e) {

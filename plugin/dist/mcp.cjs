@@ -36915,7 +36915,7 @@ var FROMS = ["custom-field", "asana-project", "component", "label", "jira-projec
 var BUCKETS = ["todo", "in_progress", "waiting", "done"];
 var WorkflowTooNew = class extends HubError {
   constructor(requires) {
-    super("WORKFLOW_TOO_NEW", `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin update rixflow-ui@rixflow`);
+    super("WORKFLOW_TOO_NEW", `This team's setup needs RixFlow ${requires} or newer. Update RixFlow: /plugin marketplace update rixflow, then restart Claude Code`);
     this.requires = requires;
   }
   requires;

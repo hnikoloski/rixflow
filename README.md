@@ -62,12 +62,6 @@ To get the core without the UI:
 
 Then run [first-time setup](#first-time-setup).
 
-To update later, refresh the marketplace, then restart Claude Code:
-
-```
-/plugin marketplace update rixflow
-```
-
 ### From a local clone
 
 ```sh
@@ -154,10 +148,9 @@ The UI runs only in interactive terminal sessions. With the pane focused, `c` ch
 
 ```
 /plugin marketplace update rixflow
-/plugin update rixflow-ui@rixflow
 ```
 
-`/plugin update` only picks up a new **version**. If you're working from a local clone without bumping the version, reinstall instead.
+This refreshes the marketplace and updates both installed plugins. Restart Claude Code afterwards. Updates only pick up a new **version**. If you're working from a local clone without bumping the version, reinstall instead.
 
 ## Development
 
