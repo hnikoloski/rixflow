@@ -152,6 +152,7 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
   // Probed at most once per UTC day, at session start. A probe that fails or times out (null)
   // leaves the stored verdict as it was.
   let publicCheck: Promise<boolean | null> | null = null;
+  const lastCheckDay = state.publicHubCheckDay;
   if (trigger === 'session' && state.publicHubCheckDay !== today) {
     state.publicHubCheckDay = today;
     publicCheck = withTimeout(() => hubIsPublic(ctx, deps), budget).catch(() => null);
@@ -196,7 +197,10 @@ async function check(ctx: Ctx, deps: CheckDeps, trigger: 'session' | 'prompt'): 
 
   if (publicCheck) {
     const verdict = await publicCheck;
-    if (verdict !== null) state.publicHub = verdict;
+    // Offline, "not readable" cannot be told apart from "unreachable": keep the old verdict and probe
+    // again next session.
+    if (verdict === false && synced?.status === 'offline') state.publicHubCheckDay = lastCheckDay;
+    else if (verdict !== null) state.publicHub = verdict;
   }
   // Repeated in every session brief while the stored verdict says the hub is public (spec §4).
   if (trigger === 'session' && state.publicHub === true) parts.push(PUBLIC_HUB);

@@ -302,6 +302,21 @@ describe('runCheck', () => {
     expect(await later).toBe(PUBLIC);
   });
 
+  it('an offline session does not trust a "private" answer and probes again next session', async () => {
+    const ctx = withOrigin(makeCtx());
+    let probes = 0;
+    const isPublic = async () => { probes++; return probes === 1; };
+    const offline = async () => ({ status: 'offline' as const, detail: 'could not resolve host', pending: 0, conflicts: [] });
+    expect(await runCheck(at(ctx, '2026-10-08T10:00:00Z'), { source: fakeAsanaSource([]), sync: noSync, isPublic }, 'session')).toBe(PUBLIC);
+    // Offline: the probe says "not public", but that cannot be told apart from "unreachable".
+    const brief = await runCheck(at(ctx, '2026-10-09T10:00:00Z'), { source: fakeAsanaSource([]), sync: offline, isPublic }, 'session');
+    expect(brief).toContain(PUBLIC.replace('[rixflow] ', ''));
+    expect(JSON.parse(readFileSync(join(ctx.configDir, 'state.json'), 'utf8'))).toMatchObject({ publicHub: true, publicHubCheckDay: '2026-10-08' });
+    // Back online the same day: probed again, and now the "private" answer counts.
+    expect(await runCheck(at(ctx, '2026-10-09T11:00:00Z'), { source: fakeAsanaSource([]), sync: noSync, isPublic }, 'session')).toBe('');
+    expect(probes).toBe(3);
+  });
+
   it('stays silent about a private hub, a failing public check and a hub without origin', async () => {
     const isPrivate = async () => false;
     expect(await runCheck(withOrigin(makeCtx()), { source: fakeAsanaSource([]), sync: noSync, isPublic: isPrivate }, 'session')).toBe('');
