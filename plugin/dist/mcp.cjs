@@ -3996,10 +3996,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep7, value } = collItem;
+        const { start, key, sep: sep8, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep7?.[0],
+          next: key ?? sep8?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4013,7 +4013,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep7) {
+          if (!keyProps.anchor && !keyProps.tag && !sep8) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map2.comment)
@@ -4037,7 +4037,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep7 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep8 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4053,7 +4053,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep7, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep8, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4144,7 +4144,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep7 = "";
+        let sep8 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4158,13 +4158,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep7 + cb;
-              sep7 = "";
+                comment += sep8 + cb;
+              sep8 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep7 += source;
+                sep8 += source;
               hasSpace = true;
               break;
             default:
@@ -4207,18 +4207,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep7, value } = collItem;
+        const { start, key, sep: sep8, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep7?.[0],
+          next: key ?? sep8?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep7 && !value) {
+          if (!props.anchor && !props.tag && !sep8 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4272,8 +4272,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep7 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep7, null, props, onError);
+        if (!isMap && !sep8 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep8, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4285,7 +4285,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep7 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep8 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4296,8 +4296,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep7)
-                for (const st of sep7) {
+              if (sep8)
+                for (const st of sep8) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4314,7 +4314,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep7, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep8, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4494,7 +4494,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep7 = "";
+      let sep8 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4511,24 +4511,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep7 + indent.slice(trimIndent) + content;
-          sep7 = "\n";
+          value += sep8 + indent.slice(trimIndent) + content;
+          sep8 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep7 === " ")
-            sep7 = "\n";
-          else if (!prevMoreIndented && sep7 === "\n")
-            sep7 = "\n\n";
-          value += sep7 + indent.slice(trimIndent) + content;
-          sep7 = "\n";
+          if (sep8 === " ")
+            sep8 = "\n";
+          else if (!prevMoreIndented && sep8 === "\n")
+            sep8 = "\n\n";
+          value += sep8 + indent.slice(trimIndent) + content;
+          sep8 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep7 === "\n")
+          if (sep8 === "\n")
             value += "\n";
           else
-            sep7 = "\n";
+            sep8 = "\n";
         } else {
-          value += sep7 + content;
-          sep7 = " ";
+          value += sep8 + content;
+          sep8 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4711,25 +4711,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep7 = " ";
+      let sep8 = " ";
       let pos = line2.lastIndex;
       while (match = line2.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep7 === "\n")
-            res += sep7;
+          if (sep8 === "\n")
+            res += sep8;
           else
-            sep7 = "\n";
+            sep8 = "\n";
         } else {
-          res += sep7 + lm;
-          sep7 = " ";
+          res += sep8 + lm;
+          sep8 = " ";
         }
         pos = line2.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep7 + (match?.[1] ?? "");
+      return res + sep8 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5539,14 +5539,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep7, value }) {
+    function stringifyItem({ start, key, sep: sep8, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep7)
-        for (const st of sep7)
+      if (sep8)
+        for (const st of sep8)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6713,18 +6713,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep7;
+          let sep8;
           if (scalar.end) {
-            sep7 = scalar.end;
-            sep7.push(this.sourceToken);
+            sep8 = scalar.end;
+            sep8.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep7 = [this.sourceToken];
+            sep8 = [this.sourceToken];
           const map2 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep7 }]
+            items: [{ start, key: scalar, sep: sep8 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map2;
@@ -6877,15 +6877,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep7 = it.sep;
-                  sep7.push(this.sourceToken);
+                  const sep8 = it.sep;
+                  sep8.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep7 }]
+                    items: [{ start: start2, key, sep: sep8 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7079,13 +7079,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep7 = fc.end.splice(1, fc.end.length);
-            sep7.push(this.sourceToken);
+            const sep8 = fc.end.splice(1, fc.end.length);
+            sep8.push(this.sourceToken);
             const map2 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep7 }]
+              items: [{ start, key: fc, sep: sep8 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map2;
@@ -36136,6 +36136,11 @@ var JiraClient = class {
     if (labels.length) fields.push({ name: "Labels", value: labels.join(", ") });
     for (const [key, value] of Object.entries(f)) {
       if (!key.startsWith("customfield_") || key === sprintId || !names[key]) continue;
+      if (Array.isArray(value)) {
+        const values = value.map((o) => str(o) ?? str(obj2(o).value)).filter((o) => !!o);
+        if (values.length) fields.push({ name: names[key], value: values.join(", "), ...values.length > 1 ? { values } : {} });
+        continue;
+      }
       const v = str(value) ?? str(obj2(value).value);
       if (v) fields.push({ name: names[key], value: v });
     }
@@ -36337,7 +36342,8 @@ var TASK_FIELDS = [
   "memberships.project.name",
   "memberships.section.name",
   "custom_fields.name",
-  "custom_fields.display_value"
+  "custom_fields.display_value",
+  "custom_fields.multi_enum_values.name"
 ].join(",");
 var enabledOptions = (f) => ({
   name: f.name,
@@ -36916,7 +36922,7 @@ function loadSites(hubDir2) {
 }
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "0.4.0";
+var RIXFLOW_VERSION = "0.4.1";
 
 // src/core/workflow.ts
 var LEGACY = {
@@ -37095,6 +37101,12 @@ function fieldValue(t, prefix) {
   const p = prefix.toLowerCase();
   return t.fields.find((f) => f.name.toLowerCase().startsWith(p) && f.value)?.value ?? null;
 }
+function fieldValues(t, prefix) {
+  const p = prefix.toLowerCase();
+  const f = t.fields.find((x) => x.name.toLowerCase().startsWith(p) && x.value);
+  if (!f) return [];
+  return f.values?.length ? f.values : [f.value];
+}
 async function parentChain(src, t, max = 5) {
   const chain = [t];
   const seen = /* @__PURE__ */ new Set([t.id]);
@@ -37111,7 +37123,10 @@ async function parentChain(src, t, max = 5) {
 
 // src/core/tickets/asana.ts
 function toTicket(t, opts) {
-  const fields = (t.custom_fields ?? []).filter((c) => c.display_value).map((c) => ({ name: c.name, value: c.display_value }));
+  const fields = (t.custom_fields ?? []).filter((c) => c.display_value).map((c) => {
+    const values = (c.multi_enum_values ?? []).map((o) => o.name).filter(Boolean);
+    return { name: c.name, value: c.display_value, ...values.length > 1 ? { values } : {} };
+  });
   const base = {
     id: t.gid,
     title: t.name,
@@ -45656,6 +45671,48 @@ function readCheckpoint(ctx, task) {
   const path = checkpointPath(ctx, task);
   return (0, import_node_fs12.existsSync)(path) ? toCheckpoint(path) : null;
 }
+function findTeammateWork(ctx, task) {
+  assertTicketId(task);
+  const peopleDir = (0, import_node_path14.join)(ctx.hubDir, "people");
+  if (!(0, import_node_fs12.existsSync)(peopleDir)) return null;
+  const hubReal = (0, import_node_fs12.realpathSync)(ctx.hubDir);
+  const real = (path) => {
+    try {
+      const r = (0, import_node_fs12.realpathSync)(path);
+      return r.startsWith(hubReal + import_node_path14.sep) ? r : null;
+    } catch {
+      return null;
+    }
+  };
+  let best = null;
+  for (const name of (0, import_node_fs12.readdirSync)(peopleDir).sort()) {
+    if (name === ctx.user.name) continue;
+    try {
+      assertName(name);
+    } catch {
+      continue;
+    }
+    const dir = personDir(ctx, name);
+    const cp = real((0, import_node_path14.join)(dir, "checkpoints", `${task}.md`));
+    if (!cp) continue;
+    let checkpoint;
+    try {
+      checkpoint = toCheckpoint(cp);
+    } catch {
+      continue;
+    }
+    if (best && (checkpoint.pausedAt ?? "") <= (best.checkpoint.pausedAt ?? "")) continue;
+    const ho = real((0, import_node_path14.join)(dir, "handovers", `${task}.md`));
+    let handover = null;
+    try {
+      handover = ho ? toHandover(ho) : null;
+    } catch {
+      handover = null;
+    }
+    best = { from: name, checkpoint, handover };
+  }
+  return best;
+}
 function listCheckpoints(ctx) {
   return readAll2(listMd((0, import_node_path14.join)(personDir(ctx), "checkpoints")), toCheckpoint);
 }
@@ -45808,8 +45865,7 @@ var URGENT_TITLE = /hotfix|urgent|\bp0\b/i;
 function valuesFrom(t, from, field) {
   switch (from) {
     case "custom-field": {
-      const v = field ? fieldValue(t, field) : null;
-      return v ? [v] : [];
+      return field ? fieldValues(t, field) : [];
     }
     case "component":
       return t.components;
@@ -46249,13 +46305,16 @@ async function startTask(ctx, source, wf, input2) {
 }
 async function resumeTask(ctx, source, task, noSource = "the ticket tracker is not configured") {
   assertTicketId(task);
-  const handover = readHandover(ctx, task);
-  const checkpoint = readCheckpoint(ctx, task);
-  const priv = handover?.restricted ? readPrivateBrief(ctx.configDir, task) : null;
+  let handover = readHandover(ctx, task);
+  let checkpoint = readCheckpoint(ctx, task);
+  const teammate = !handover && !checkpoint ? findTeammateWork(ctx, task) : null;
+  if (teammate) ({ handover, checkpoint } = teammate);
+  const priv = handover?.restricted && !teammate ? readPrivateBrief(ctx.configDir, task) : null;
   const local = {
     handover: handover && scrubFields(priv === null ? handover : { ...handover, brief: priv }),
     checkpoint: checkpoint && scrubFields(checkpoint),
-    privateBrief: priv !== null
+    privateBrief: priv !== null,
+    ...teammate ? { from: teammate.from } : {}
   };
   const unavailable = (reason) => ({
     ...local,
@@ -46340,7 +46399,7 @@ function readablePath(ctx, path) {
   return insideHub(ctx.hubDir, path);
 }
 function createServer(deps) {
-  const server2 = new McpServer({ name: "hub", version: "0.4.0" });
+  const server2 = new McpServer({ name: "hub", version: "0.4.1" });
   const workflowFor = (ctx) => deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
   const sourceFor = (ctx, wf) => {
     const source = deps.source(ctx, wf);
@@ -46404,7 +46463,7 @@ function createServer(deps) {
     return { ...result, handoverPath: rel(ctx, result.handoverPath), ...await persisted(ctx, `handover: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("resume_task", {
-    description: "Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. Works offline from local files.",
+    description: `Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. With none of your own, loads a teammate's paused work on the task ("from" names them). Works offline from local files. ${UNTRUSTED}`,
     inputSchema: { task: text2 }
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
@@ -46417,7 +46476,8 @@ function createServer(deps) {
       if (!(e instanceof HubError)) throw e;
       reason = e.code === "BAD_CONFIG" ? "the ticket can't be loaded: the team's workflow.yml is invalid" : `${e.code}: ${e.message}`;
     }
-    return resumeTask(ctx, source, task, reason);
+    const result = await resumeTask(ctx, source, task, reason);
+    return result.from ? { untrusted: true, note: UNTRUSTED, ...result } : result;
   }));
   server2.registerTool("remember_site", {
     description: "Remember which project (code from the hub config/sites.yml, e.g. AC or GL) a ticket belongs to, when it cannot be resolved automatically.",

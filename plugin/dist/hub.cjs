@@ -7418,10 +7418,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep5, value } = collItem;
+        const { start, key, sep: sep6, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep5?.[0],
+          next: key ?? sep6?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -7435,7 +7435,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep5) {
+          if (!keyProps.anchor && !keyProps.tag && !sep6) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -7459,7 +7459,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep5 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep6 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -7475,7 +7475,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep5, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep6, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -7566,7 +7566,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep5 = "";
+        let sep6 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -7580,13 +7580,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep5 + cb;
-              sep5 = "";
+                comment += sep6 + cb;
+              sep6 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep5 += source;
+                sep6 += source;
               hasSpace = true;
               break;
             default:
@@ -7629,18 +7629,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep5, value } = collItem;
+        const { start, key, sep: sep6, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep5?.[0],
+          next: key ?? sep6?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep5 && !value) {
+          if (!props.anchor && !props.tag && !sep6 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -7694,8 +7694,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep5 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep5, null, props, onError);
+        if (!isMap && !sep6 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep6, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -7707,7 +7707,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep5 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep6 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -7718,8 +7718,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep5)
-                for (const st of sep5) {
+              if (sep6)
+                for (const st of sep6) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -7736,7 +7736,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep5, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep6, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -7916,7 +7916,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep5 = "";
+      let sep6 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -7933,24 +7933,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep5 + indent.slice(trimIndent) + content;
-          sep5 = "\n";
+          value += sep6 + indent.slice(trimIndent) + content;
+          sep6 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep5 === " ")
-            sep5 = "\n";
-          else if (!prevMoreIndented && sep5 === "\n")
-            sep5 = "\n\n";
-          value += sep5 + indent.slice(trimIndent) + content;
-          sep5 = "\n";
+          if (sep6 === " ")
+            sep6 = "\n";
+          else if (!prevMoreIndented && sep6 === "\n")
+            sep6 = "\n\n";
+          value += sep6 + indent.slice(trimIndent) + content;
+          sep6 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep5 === "\n")
+          if (sep6 === "\n")
             value += "\n";
           else
-            sep5 = "\n";
+            sep6 = "\n";
         } else {
-          value += sep5 + content;
-          sep5 = " ";
+          value += sep6 + content;
+          sep6 = " ";
           prevMoreIndented = false;
         }
       }
@@ -8133,25 +8133,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep5 = " ";
+      let sep6 = " ";
       let pos = line2.lastIndex;
       while (match = line2.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep5 === "\n")
-            res += sep5;
+          if (sep6 === "\n")
+            res += sep6;
           else
-            sep5 = "\n";
+            sep6 = "\n";
         } else {
-          res += sep5 + lm;
-          sep5 = " ";
+          res += sep6 + lm;
+          sep6 = " ";
         }
         pos = line2.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep5 + (match?.[1] ?? "");
+      return res + sep6 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -8961,14 +8961,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep5, value }) {
+    function stringifyItem({ start, key, sep: sep6, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep5)
-        for (const st of sep5)
+      if (sep6)
+        for (const st of sep6)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -10135,18 +10135,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep5;
+          let sep6;
           if (scalar.end) {
-            sep5 = scalar.end;
-            sep5.push(this.sourceToken);
+            sep6 = scalar.end;
+            sep6.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep5 = [this.sourceToken];
+            sep6 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep5 }]
+            items: [{ start, key: scalar, sep: sep6 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -10299,15 +10299,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep5 = it.sep;
-                  sep5.push(this.sourceToken);
+                  const sep6 = it.sep;
+                  sep6.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep5 }]
+                    items: [{ start: start2, key, sep: sep6 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -10501,13 +10501,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep5 = fc.end.splice(1, fc.end.length);
-            sep5.push(this.sourceToken);
+            const sep6 = fc.end.splice(1, fc.end.length);
+            sep6.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep5 }]
+              items: [{ start, key: fc, sep: sep6 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -11081,6 +11081,11 @@ var JiraClient = class {
     if (labels.length) fields.push({ name: "Labels", value: labels.join(", ") });
     for (const [key, value] of Object.entries(f)) {
       if (!key.startsWith("customfield_") || key === sprintId || !names[key]) continue;
+      if (Array.isArray(value)) {
+        const values = value.map((o) => str(o) ?? str(obj2(o).value)).filter((o) => !!o);
+        if (values.length) fields.push({ name: names[key], value: values.join(", "), ...values.length > 1 ? { values } : {} });
+        continue;
+      }
       const v = str(value) ?? str(obj2(value).value);
       if (v) fields.push({ name: names[key], value: v });
     }
@@ -11898,7 +11903,7 @@ var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "0.4.0";
+var RIXFLOW_VERSION = "0.4.1";
 var WORKFLOW_REQUIRES = "0.3.0";
 
 // src/core/workflow.ts
@@ -12199,8 +12204,10 @@ async function check(ctx, deps, trigger) {
         const names = changed.slice(0, 3).map((t) => `"${clean(t.title).replace(/"/g, "'")}"`).join(", ");
         parts.push(`${source.label} updated: ${names}${changed.length > 3 ? ` and ${changed.length - 3} more` : ""}`);
       }
-    } catch {
-      if (trigger === "session") parts.push(`${source.label} unreachable`);
+    } catch (e) {
+      if (trigger === "session") {
+        parts.push(e instanceof HubError && e.code.endsWith("_AUTH") ? `${source.label} login rejected: run /rixflow:setup and choose "Reconnect my ticket account"` : `${source.label} unreachable`);
+      }
     }
   }
   if (publicCheck) {
@@ -12252,7 +12259,8 @@ var TASK_FIELDS = [
   "memberships.project.name",
   "memberships.section.name",
   "custom_fields.name",
-  "custom_fields.display_value"
+  "custom_fields.display_value",
+  "custom_fields.multi_enum_values.name"
 ].join(",");
 var enabledOptions = (f) => ({
   name: f.name,
@@ -12520,6 +12528,12 @@ function fieldValue(t, prefix) {
   const p = prefix.toLowerCase();
   return t.fields.find((f) => f.name.toLowerCase().startsWith(p) && f.value)?.value ?? null;
 }
+function fieldValues(t, prefix) {
+  const p = prefix.toLowerCase();
+  const f = t.fields.find((x) => x.name.toLowerCase().startsWith(p) && x.value);
+  if (!f) return [];
+  return f.values?.length ? f.values : [f.value];
+}
 async function parentChain(src, t, max = 5) {
   const chain = [t];
   const seen = /* @__PURE__ */ new Set([t.id]);
@@ -12536,7 +12550,10 @@ async function parentChain(src, t, max = 5) {
 
 // src/core/tickets/asana.ts
 function toTicket(t, opts) {
-  const fields = (t.custom_fields ?? []).filter((c) => c.display_value).map((c) => ({ name: c.name, value: c.display_value }));
+  const fields = (t.custom_fields ?? []).filter((c) => c.display_value).map((c) => {
+    const values = (c.multi_enum_values ?? []).map((o) => o.name).filter(Boolean);
+    return { name: c.name, value: c.display_value, ...values.length > 1 ? { values } : {} };
+  });
   const base = {
     id: t.gid,
     title: t.name,
@@ -13459,8 +13476,7 @@ var BUCKET_LABEL = { todo: "to do", in_progress: "in progress", waiting: "waitin
 function valuesFrom(t, from, field2) {
   switch (from) {
     case "custom-field": {
-      const v = field2 ? fieldValue(t, field2) : null;
-      return v ? [v] : [];
+      return field2 ? fieldValues(t, field2) : [];
     }
     case "component":
       return t.components;
@@ -13576,7 +13592,7 @@ function mapTicket(chain, wf, now) {
   if (codesAt !== void 0) mapped.codesAt = codesAt;
   return mapped;
 }
-var oneLine2 = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+var oneLine2 = (s) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")).trim();
 function previewRows(samples, wf, now) {
   return samples.map((t) => {
     const m = mapTicket([t], wf, now);
@@ -13746,7 +13762,7 @@ function storedSource(deps, wf, user, env = process.env) {
   return workspace ? asanaFrom(makeAsana(deps, token), wf, workspace) : null;
 }
 var PREVIEW_COUNT = 5;
-var clean2 = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+var clean2 = (s) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")).trim();
 function scopeLabel(wf) {
   if (wf.tracker.type === "jira") return wf.tracker.projects.length ? wf.tracker.projects.join(", ") : "this Jira site";
   return "your Asana workspace";
@@ -13765,7 +13781,7 @@ async function previewTickets(io, source, wf, now, opts) {
     if (needsParents(t, wf)) chain = await parentChain(source, t).catch(() => [t]);
     const m = mapTicket(chain, wf, now);
     const project = m.codes.length ? `project ${m.codes.join(", ")}` : "no project";
-    const bucket = m.bucket ? BUCKET_LABEL[m.bucket] : `status "${clean2(t.status ?? "none")}" not mapped`;
+    const bucket = m.bucket ? BUCKET_LABEL[m.bucket] : t.status ? `status "${clean2(t.status)}" not mapped` : "no status";
     io.log(`  ${t.id}  ${clean2(t.title)}  -> ${project}, ${bucket}, sprint: ${m.sprint ? "yes" : "no"}, urgent: ${m.urgent ? "yes" : "no"}`);
   }
   return tickets.length;
@@ -14046,7 +14062,7 @@ var BUCKETS3 = ["todo", "in_progress", "waiting", "done"];
 var URGENT_GUESS = /highest|critical|urgent|blocker|p0/i;
 var SITE2 = /^[A-Z0-9]{1,10}$/;
 var MAPPING_STEPS = ["project-source", "project-values", "statuses", "sprints", "urgent"];
-var clean3 = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+var clean3 = (s) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")).trim();
 var pairs = (v) => Array.isArray(v) ? v : [];
 var scope = (a) => a.projects ?? [];
 var isJira = (a) => a.tracker?.type === "jira";
@@ -14513,7 +14529,7 @@ var SITE3 = /^[A-Z0-9]{1,10}$/;
 var SAMPLE_COUNT2 = 50;
 var KINDS = ["asana", "jira"];
 var MACHINE_FILES = ["setup-progress.json", "status-cache.json", "config.yml"];
-var clean4 = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+var clean4 = (s) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")).trim();
 var validName = (s) => clean4(s).length <= 60 ? null : "Please keep the name under 60 characters.";
 var validFolder = (s) => isSafeFolder(s) ? null : "Please use one folder name: letters, digits, dots, dashes or underscores, no slashes.";
 async function runMenu(io, deps, ctx, env = process.env) {
@@ -14606,7 +14622,9 @@ async function runMenu(io, deps, ctx, env = process.env) {
       }
       const current = loadWorkflow(ctx.hubDir);
       const wf = await redoMapping(io, deps, ctx, current, env);
+      const sites = await foldersForNewCodes(io, loadSites(ctx.hubDir), wf);
       writeWorkflow(ctx.hubDir, wf);
+      if (sites) saveSites(ctx.hubDir, sites);
       await save("redo the ticket mapping", "Saved the ticket mapping");
     },
     async reconnect() {
@@ -14665,6 +14683,17 @@ async function redoMapping(io, deps, ctx, current, env) {
   };
   const now = () => (deps.now ?? (() => /* @__PURE__ */ new Date()))();
   return workflowOf2(await runStepsFrom(mappingSteps(io, { source, samples, now }), mappingAnswers(current)));
+}
+async function foldersForNewCodes(io, sites, wf) {
+  const fresh = /* @__PURE__ */ new Map();
+  for (const [value, code] of Object.entries(wf.project.values)) if (!Object.hasOwn(sites, code) && !fresh.has(code)) fresh.set(code, value);
+  if (fresh.size === 0) return null;
+  io.log("New projects need a folder inside each person's projects folder. Press Enter to keep the suggestion.");
+  const out = { ...sites };
+  for (const [code, value] of fresh) {
+    out[code] = { folder: await askValid(io, `Folder for project ${code} (${clean4(value)}):`, validFolder, slug(value) || code.toLowerCase()) };
+  }
+  return out;
 }
 function machineFacts(conn) {
   return {
