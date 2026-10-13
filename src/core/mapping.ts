@@ -1,6 +1,7 @@
 import { isSiteCode } from './sites';
+import { scrub } from './scrub';
 import { isCurrentSprint } from './sprint';
-import { fieldValue, type Ticket, type TrackerKind } from './tickets/types';
+import { fieldValues, type Ticket, type TrackerKind } from './tickets/types';
 import type { Workflow } from './workflow';
 
 export type Bucket = 'todo' | 'in_progress' | 'waiting' | 'done';
@@ -24,8 +25,7 @@ type ProjectFrom = Workflow['project']['from'];
 function valuesFrom(t: Ticket, from: ProjectFrom, field: string | null): string[] {
   switch (from) {
     case 'custom-field': {
-      const v = field ? fieldValue(t, field) : null;
-      return v ? [v] : [];
+      return field ? fieldValues(t, field) : [];
     }
     case 'component':
       return t.components;
@@ -168,7 +168,7 @@ export function mapTicket(chain: Ticket[], wf: Workflow, now: Date): Mapped {
   return mapped;
 }
 
-const oneLine = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+const oneLine = (s: string) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')).trim();
 
 // Wizard preview: how each sample ticket maps. Only the ticket's own fields are read (no parents).
 export function previewRows(

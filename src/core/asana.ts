@@ -10,7 +10,7 @@ export interface AsanaTask {
   completed?: boolean;
   parent?: { gid: string; name: string } | null;
   memberships: Array<{ project?: { gid: string; name: string }; section?: { gid: string; name: string } }>;
-  custom_fields: Array<{ name: string; display_value: string | null }>;
+  custom_fields: Array<{ name: string; display_value: string | null; multi_enum_values?: Array<{ name: string }> | null }>;
   permalink_url?: string;
 }
 
@@ -34,6 +34,7 @@ export const ASANA_TIMEOUT_MS = 5_000;
 const TASK_FIELDS = [
   'name', 'notes', 'modified_at', 'due_on', 'completed', 'permalink_url', 'parent.name',
   'memberships.project.name', 'memberships.section.name', 'custom_fields.name', 'custom_fields.display_value',
+  'custom_fields.multi_enum_values.name',
 ].join(',');
 
 interface Page<T> {

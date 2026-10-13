@@ -160,6 +160,15 @@ describe('JiraClient hardening', () => {
     expect(calls.filter((x) => x.url.pathname.endsWith('/field')).length).toBe(1);
   });
 
+  it('keeps each option of a multi-select custom field', async () => {
+    const { fn } = jiraFetch({
+      '/rest/api/3/field': [...FIELDS, { id: 'customfield_10040', name: 'Sites' }],
+      '/rest/api/3/search/jql': { issues: [issue('WEB-1', { customfield_10040: [{ value: 'Acme' }, { value: 'Globex' }] })] },
+    });
+    const [t] = await new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).myTickets();
+    expect(t.fields.find((f) => f.name === 'Sites')).toEqual({ name: 'Sites', value: 'Acme, Globex', values: ['Acme', 'Globex'] });
+  });
+
   it('finds the sprint field by name when there is no schema', async () => {
     const { fn } = jiraFetch({
       '/rest/api/3/field': [{ id: 'customfield_10020', name: 'Sprint' }],

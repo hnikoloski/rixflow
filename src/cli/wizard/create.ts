@@ -4,7 +4,7 @@ import { configDir as getConfigDir, homeDir, hubDir as getHubDir, saveUserConfig
 import { Git } from '../../core/git';
 import { BUCKET_LABEL, distinctValues, guessBucket, previewRows, projectOptions, suggestCode, type Bucket } from '../../core/mapping';
 import { checkReach, systemGh } from '../../core/repo';
-import { findSecrets } from '../../core/scrub';
+import { findSecrets, scrub } from '../../core/scrub';
 import { isCurrentSprint, parseSprintSection } from '../../core/sprint';
 import type { TeamMember } from '../../core/team';
 import { bootstrapHub, isSafeFolder } from '../../core/template';
@@ -31,7 +31,8 @@ const URGENT_GUESS = /highest|critical|urgent|blocker|p0/i;
 const SITE = /^[A-Z0-9]{1,10}$/;
 const MAPPING_STEPS = ['project-source', 'project-values', 'statuses', 'sprints', 'urgent'] as const;
 
-const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+// Display only: one line, and a password or token in a ticket value is never printed.
+const clean = (s: string) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')).trim();
 const pairs = (v: unknown): Pairs => (Array.isArray(v) ? (v as Pairs) : []);
 const scope = (a: Answers) => (a.projects as string[] | undefined) ?? [];
 const isJira = (a: Answers) => (a.tracker as { type?: string } | undefined)?.type === 'jira';

@@ -12,7 +12,10 @@ export interface AsanaSourceOpts {
 export function toTicket(t: AsanaTask, opts: AsanaSourceOpts): Ticket {
   const fields = (t.custom_fields ?? [])
     .filter((c) => c.display_value)
-    .map((c) => ({ name: c.name, value: c.display_value as string }));
+    .map((c) => {
+      const values = (c.multi_enum_values ?? []).map((o) => o.name).filter(Boolean);
+      return { name: c.name, value: c.display_value as string, ...(values.length > 1 ? { values } : {}) };
+    });
   const base: Ticket = {
     id: t.gid,
     title: t.name,

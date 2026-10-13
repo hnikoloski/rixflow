@@ -214,6 +214,12 @@ export class JiraClient implements TicketSource, Discovery {
     if (labels.length) fields.push({ name: 'Labels', value: labels.join(', ') });
     for (const [key, value] of Object.entries(f)) {
       if (!key.startsWith('customfield_') || key === sprintId || !names[key]) continue;
+      if (Array.isArray(value)) {
+        // A multi-select field: each option on its own, plus the joined text for display.
+        const values = value.map((o) => str(o) ?? str(obj(o).value)).filter((o): o is string => !!o);
+        if (values.length) fields.push({ name: names[key], value: values.join(', '), ...(values.length > 1 ? { values } : {}) });
+        continue;
+      }
       const v = str(value) ?? str(obj(value).value);
       if (v) fields.push({ name: names[key], value: v });
     }

@@ -10,7 +10,8 @@ export interface Ticket {
   parent: { id: string; title: string } | null;
   status: string | null;
   priority: string | null;
-  fields: Array<{ name: string; value: string }>; // custom fields with a display value
+  // Custom fields with a display value. `values` lists a multi-select field's options one by one.
+  fields: Array<{ name: string; value: string; values?: string[] }>;
   components: string[];
   labels: string[];
   containers: string[]; // Asana project names / Jira project key
@@ -46,6 +47,14 @@ export interface Discovery {
 export function fieldValue(t: Ticket, prefix: string): string | null {
   const p = prefix.toLowerCase();
   return t.fields.find((f) => f.name.toLowerCase().startsWith(p) && f.value)?.value ?? null;
+}
+
+// Like fieldValue, but a multi-select field gives each of its options (["GL", "AC"], not "GL, AC").
+export function fieldValues(t: Ticket, prefix: string): string[] {
+  const p = prefix.toLowerCase();
+  const f = t.fields.find((x) => x.name.toLowerCase().startsWith(p) && x.value);
+  if (!f) return [];
+  return f.values?.length ? f.values : [f.value];
 }
 
 export async function parentChain(src: Pick<TicketSource, 'ticket'>, t: Ticket, max = 5): Promise<Ticket[]> {

@@ -1,6 +1,7 @@
 import { AsanaClient, type AsanaReader } from '../../core/asana';
 import { BUCKET_LABEL, needsParents, mapTicket } from '../../core/mapping';
 import type { Gh, RunGit } from '../../core/repo';
+import { scrub } from '../../core/scrub';
 import { asanaSource } from '../../core/tickets/asana';
 import { JiraClient, jiraBaseUrl, type JiraAuth } from '../../core/tickets/jira';
 import { parentChain, type Discovery, type Ticket, type TicketSource } from '../../core/tickets/types';
@@ -144,7 +145,8 @@ export function storedSource(
 }
 
 const PREVIEW_COUNT = 5;
-const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+// Display only: one line, and a password or token in a ticket value is never printed.
+const clean = (s: string) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')).trim();
 
 export function scopeLabel(wf: Workflow): string {
   if (wf.tracker.type === 'jira') return wf.tracker.projects.length ? wf.tracker.projects.join(', ') : 'this Jira site';
@@ -170,7 +172,7 @@ export async function previewTickets(
     if (needsParents(t, wf)) chain = await parentChain(source, t).catch(() => [t]);
     const m = mapTicket(chain, wf, now);
     const project = m.codes.length ? `project ${m.codes.join(', ')}` : 'no project';
-    const bucket = m.bucket ? BUCKET_LABEL[m.bucket] : `status "${clean(t.status ?? 'none')}" not mapped`;
+    const bucket = m.bucket ? BUCKET_LABEL[m.bucket] : t.status ? `status "${clean(t.status)}" not mapped` : 'no status';
     io.log(`  ${t.id}  ${clean(t.title)}  -> ${project}, ${bucket}, sprint: ${m.sprint ? 'yes' : 'no'}, urgent: ${m.urgent ? 'yes' : 'no'}`);
   }
   return tickets.length;

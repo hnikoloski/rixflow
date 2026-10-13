@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import YAML from 'yaml';
 import { isMapping, loadSites, loadTeam, saveSites, saveTeam } from '../../core/team';
 import { describeSync, persistConfig } from '../../core/runtime';
+import { scrub } from '../../core/scrub';
 import { isSafeFolder } from '../../core/template';
 import type { Discovery, Ticket, TicketSource, TrackerKind } from '../../core/tickets/types';
 import { deleteLegacyToken, deleteToken, tokenEnvVar } from '../../core/token';
@@ -36,7 +37,8 @@ const SAMPLE_COUNT = 50;
 const KINDS: TrackerKind[] = ['asana', 'jira'];
 const MACHINE_FILES = ['setup-progress.json', 'status-cache.json', 'config.yml'];
 
-const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+// Display only: one line, and a password or token in a ticket value is never printed.
+const clean = (s: string) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')).trim();
 const validName = (s: string) => (clean(s).length <= 60 ? null : 'Please keep the name under 60 characters.');
 const validFolder = (s: string) => (isSafeFolder(s) ? null : 'Please use one folder name: letters, digits, dots, dashes or underscores, no slashes.');
 

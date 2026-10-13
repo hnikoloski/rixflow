@@ -258,7 +258,10 @@ describe('runCreate', () => {
     const task: AsanaTask = {
       gid: '1001', name: 'Acme homepage', modified_at: '2026-10-01T00:00:00Z',
       memberships: [{ project: { gid: '9', name: 'Acme web' }, section: { gid: '8', name: 'Backlog' } }],
-      custom_fields: [{ name: 'Status', display_value: 'In progress' }, { name: 'Priority', display_value: 'Urgent' }],
+      custom_fields: [
+        { name: 'Status', display_value: 'In progress' }, { name: 'Priority', display_value: 'Urgent' },
+        { name: 'Stage link', display_value: 'https://demo:s3cret@stage.example.com/' },
+      ],
     };
     const makeAsana = () => ({
       getMe: async () => ({ gid: '42', name: 'Me', workspaces: [{ gid: '111', name: 'Acme' }] }),
@@ -266,7 +269,7 @@ describe('runCreate', () => {
     });
     const io = scriptedIo([
       'me', '2', '1', 'tok-a', // pm, Asana
-      '3', '', // project source: Asana project (after the Status and Priority fields); "Acme web" keeps AW
+      '4', '', // project source: Asana project (after the Status, Priority and Stage link fields); "Acme web" keeps AW
       '', // status keeps its guess
       '', // urgent keeps Urgent
       '1', '', '', m.remote, join(m.home, 'projects'), 'n',
@@ -281,6 +284,8 @@ describe('runCreate', () => {
       urgent: { field: 'Priority', values: ['Urgent'] },
     });
     expect(io.logs.join('\n')).toMatch(/No section name looks like a sprint/);
+    expect(io.logs.join('\n')).toContain('Field "Stage link" (e.g. https://[redacted]@stage.example.com/)');
+    expect(io.logs.join('\n')).not.toContain('s3cret');
     expect(loadTeam(m.hub)).toEqual([{ name: 'me', role: 'pm' }]);
     expect(YAML.parse(readFileSync(join(m.cfg, 'config.yml'), 'utf8')).asanaWorkspace).toBeUndefined();
   });
@@ -329,11 +334,28 @@ describe('projectOptions', () => {
   });
 });
 
+describe('projectOptions with multi-select values', () => {
+  it('offers each option once, never the joined text', () => {
+    const samples = [
+      ticket({ fields: [{ name: 'Website', value: 'GL, AC', values: ['GL', 'AC'] }] }),
+      ticket({ fields: [{ name: 'Website', value: 'GL' }] }),
+    ];
+    expect(projectOptions(samples, 'asana')[0]).toMatchObject({ field: 'Website', examples: ['GL', 'AC'] });
+  });
+});
+
 describe('previewRows', () => {
   it('shows "no project" for a ticket no value maps', () => {
     const rows = previewRows(SAMPLES, EXPECTED, NOW);
     expect(rows[2]).toEqual({ id: 'OPS-7', title: 'Rotate certs', project: 'no project', bucket: 'waiting', sprint: false, urgent: false });
     expect(rows[0]).toEqual({ id: 'WEB-1', title: 'Fix the login page', project: 'AS', bucket: 'in progress', sprint: true, urgent: true });
+  });
+});
+
+describe('previewRows scrubbing', () => {
+  it('never shows a password from a ticket title', () => {
+    const [row] = previewRows([ticket({ title: 'Check https://demo:s3cret@stage.example.com/' })], EXPECTED, NOW);
+    expect(row.title).not.toContain('s3cret');
   });
 });
 

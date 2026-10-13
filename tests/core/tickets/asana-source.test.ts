@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AsanaClient, AsanaReader } from '../../../src/core/asana';
 import { asanaSource, toTicket } from '../../../src/core/tickets/asana';
-import { fieldValue, parentChain } from '../../../src/core/tickets/types';
+import { fieldValue, fieldValues, parentChain } from '../../../src/core/tickets/types';
 import { fakeAsana, fakeSource, field, task, ticket } from '../../fixtures/asana';
 
 const opts = { workspace: '9' };
@@ -32,6 +32,15 @@ describe('toTicket', () => {
     expect(t.fields).toEqual([
       { name: 'Status', value: 'In progress' }, { name: 'Priority', value: 'High' }, { name: 'Website', value: 'AC' },
     ]);
+  });
+
+  it('keeps each option of a multi-select field, and maps a ticket to every one of them', () => {
+    const multi = { name: 'Website', display_value: 'GL, AC', multi_enum_values: [{ name: 'GL' }, { name: 'AC' }] };
+    const t = toTicket(task({ gid: '5', custom_fields: [multi, field('Single', 'AC')] }), opts);
+    expect(t.fields).toEqual([{ name: 'Website', value: 'GL, AC', values: ['GL', 'AC'] }, { name: 'Single', value: 'AC' }]);
+    expect(fieldValues(t, 'website')).toEqual(['GL', 'AC']);
+    expect(fieldValues(t, 'single')).toEqual(['AC']);
+    expect(fieldValue(t, 'website')).toBe('GL, AC'); // display text is unchanged
   });
 
   it('reads a custom status field', () => {
