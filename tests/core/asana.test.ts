@@ -49,7 +49,7 @@ describe('AsanaClient', () => {
     const calls: Array<{ method: string }> = [];
     const fn = (async (url: URL, init: RequestInit) => {
       calls.push({ method: String(init.method) });
-      const isList = url.pathname.endsWith('/tasks') || url.pathname.endsWith('/stories');
+      const isList = url.pathname.endsWith('/tasks') || url.pathname.endsWith('/stories') || url.pathname.endsWith('/custom_fields');
       const data = isList ? [] : { gid: '5', name: 'x', workspaces: [] };
       return new Response(JSON.stringify({ data, next_page: null }), { status: 200 });
     }) as unknown as typeof fetch;
@@ -58,6 +58,7 @@ describe('AsanaClient', () => {
     await client.getMyTasks('111');
     await client.getTask('5');
     await client.getComments('5');
+    await client.getFieldOptions('111');
     expect(calls.length).toBeGreaterThanOrEqual(4);
     expect(calls.map((c) => c.method)).toEqual(calls.map(() => 'GET'));
   });
@@ -154,6 +155,20 @@ describe('AsanaClient', () => {
       { created_at: '2', created_by: { name: 'Designer' }, text: 'move the logo', resource_subtype: 'comment_added' },
     ] }]);
     expect(await new AsanaClient('t', fn).getComments('9')).toEqual([{ created_at: '2', author: 'Designer', text: 'move the logo' }]);
+  });
+
+  it('reads the enabled options of the workspace custom fields', async () => {
+    const { fn, calls } = fakeFetch([{ data: [
+      { gid: '1', name: 'Status', enum_options: [{ name: 'Open', enabled: true }, { name: 'Old', enabled: false }, { name: 'Done', enabled: true }] },
+      { gid: '2', name: 'Estimate' },
+    ], next_page: null }]);
+    expect(await new AsanaClient('t', fn).getFieldOptions('111')).toEqual([
+      { name: 'Status', options: ['Open', 'Done'] }, { name: 'Estimate', options: [] },
+    ]);
+    expect(calls[0].method).toBe('GET');
+    expect(calls[0].url).toContain('/workspaces/111/custom_fields');
+    expect(calls[0].url).toContain('enum_options.enabled');
+    await expect(new AsanaClient('t', fn).getFieldOptions('nope')).rejects.toBeInstanceOf(HubError);
   });
 
   it('exposes no write methods', () => {

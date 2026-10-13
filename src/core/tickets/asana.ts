@@ -36,7 +36,7 @@ export function toTicket(t: AsanaTask, opts: AsanaSourceOpts): Ticket {
   return base;
 }
 
-type Reader = AsanaReader & Partial<Pick<AsanaClient, 'getMe'>>;
+type Reader = AsanaReader & Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions'>>;
 
 export function asanaSource(reader: Reader, opts: AsanaSourceOpts): TicketSource & Discovery {
   const conv = (t: AsanaTask) => toTicket(t, opts);
@@ -45,6 +45,24 @@ export function asanaSource(reader: Reader, opts: AsanaSourceOpts): TicketSource
     return reader.getMe();
   };
   const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
+  // The dropdown options of every workspace field with this name, then the values seen on sampled
+  // tickets. Options cover statuses nobody has a ticket in yet; when they cannot be read (no
+  // permission, a plan without custom fields), the sampled values alone still work.
+  const values = async (field: string, seen: (t: Ticket) => string | null): Promise<string[]> => {
+    let options: string[] = [];
+    try {
+      const fields = reader.getFieldOptions ? await reader.getFieldOptions(opts.workspace) : [];
+      options = fields.filter((f) => f.name.toLowerCase() === field.toLowerCase()).flatMap((f) => f.options);
+    } catch {
+      options = [];
+    }
+    const out: string[] = [];
+    const known = new Set<string>();
+    for (const v of [...options, ...(await sample()).map(seen)]) {
+      if (v && !known.has(v.toLowerCase())) { known.add(v.toLowerCase()); out.push(v); }
+    }
+    return out;
+  };
   return {
     kind: 'asana',
     label: 'Asana',
@@ -76,10 +94,10 @@ export function asanaSource(reader: Reader, opts: AsanaSourceOpts): TicketSource
       return (await sample()).slice(0, limit);
     },
     async statuses() {
-      return [...new Set((await sample()).map((t) => t.status).filter((s): s is string => !!s))];
+      return values(opts.statusField ?? 'Status', (t) => t.status);
     },
     async priorities() {
-      return [...new Set((await sample()).map((t) => t.priority).filter((s): s is string => !!s))];
+      return values(opts.priorityField ?? 'Priority', (t) => t.priority);
     },
     async boards() {
       return [];

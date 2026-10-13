@@ -85,15 +85,15 @@ describe('parentChain', () => {
 });
 
 describe('asanaSource', () => {
-  const reader = (extra: Partial<Pick<AsanaClient, 'getMe'>> = {}) =>
+  const reader = (...extra: Array<Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions'>>>) =>
     Object.assign(
       fakeAsana([
         task({ gid: '1', custom_fields: [field('Status', 'Open')] }),
         task({ gid: '2', custom_fields: [field('Status', 'Done'), field('Status', 'x')] }),
         task({ gid: '3', custom_fields: [field('Status', 'Open')] }),
       ], { '1': [{ created_at: 'c', author: 'Ann', text: 'hi' }] }),
-      extra,
-    ) as AsanaReader & Partial<Pick<AsanaClient, 'getMe'>>;
+      ...extra,
+    ) as AsanaReader & Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions'>>;
   const me = { getMe: async () => ({ gid: '7', name: 'Ann', workspaces: [{ gid: '9', name: 'Acme' }] }) };
 
   it('identifies itself', () => {
@@ -126,5 +126,31 @@ describe('asanaSource', () => {
     expect(await s.statuses([])).toEqual(['Open', 'Done']);
     expect(await s.priorities()).toEqual([]);
     expect(await s.boards([])).toEqual([]);
+  });
+
+  it('learns every status and priority option from the workspace fields, not only from sampled tickets', async () => {
+    const fields = {
+      getFieldOptions: async (ws: string) => {
+        expect(ws).toBe('9');
+        return [
+          { name: 'Status', options: ['Open', 'In QA', 'Done'] },
+          { name: 'status', options: ['Blocked'] }, // a second field with the same name, other case
+          { name: 'Priority', options: ['Low', 'High'] },
+          { name: 'Website', options: ['AC'] },
+        ];
+      },
+    };
+    const s = asanaSource(reader(me, fields), opts);
+    expect(await s.statuses([])).toEqual(['Open', 'In QA', 'Done', 'Blocked']);
+    expect(await s.priorities()).toEqual(['Low', 'High']);
+    const stage = asanaSource(reader(me, fields), { ...opts, statusField: 'Website' });
+    expect(await stage.statuses([])).toEqual(['AC']);
+  });
+
+  it('falls back to sampled tickets when the field options cannot be read', async () => {
+    const failing = { getFieldOptions: async () => { throw new Error('402 premium only'); } };
+    const s = asanaSource(reader(me, failing), opts);
+    expect(await s.statuses([])).toEqual(['Open', 'Done']);
+    expect(await s.priorities()).toEqual([]);
   });
 });

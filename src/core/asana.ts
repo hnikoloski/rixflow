@@ -41,6 +41,11 @@ interface Page<T> {
   next_page?: { offset: string } | null;
 }
 
+interface RawField {
+  name: string;
+  enum_options?: Array<{ name: string; enabled?: boolean }>;
+}
+
 interface RawStory {
   created_at: string;
   created_by: { name: string } | null;
@@ -132,6 +137,19 @@ export class AsanaClient implements AsanaReader {
   async getTask(gid: string): Promise<AsanaTask> {
     assertGid(gid);
     return this.#object<AsanaTask>(`/tasks/${gid}`, { opt_fields: TASK_FIELDS });
+  }
+
+  // The workspace's custom fields with their enabled dropdown options, so setup can map statuses
+  // and priorities nobody has a ticket in yet.
+  async getFieldOptions(workspace: string): Promise<Array<{ name: string; options: string[] }>> {
+    assertGid(workspace);
+    const fields = await this.#all<RawField>(`/workspaces/${workspace}/custom_fields`, {
+      limit: '100', opt_fields: 'name,enum_options.name,enum_options.enabled',
+    });
+    return fields.map((f) => ({
+      name: f.name,
+      options: (f.enum_options ?? []).filter((o) => o.enabled !== false && o.name).map((o) => o.name),
+    }));
   }
 
   async getComments(gid: string, limit = 10): Promise<AsanaComment[]> {
