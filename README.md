@@ -12,6 +12,7 @@
   <a href="https://modelcontextprotocol.io"><img alt="MCP server" src="https://img.shields.io/badge/MCP-stdio%20server-7ab8ff"></a>
   <img alt="Asana and Jira" src="https://img.shields.io/badge/tickets-Asana%20%C2%B7%20Jira-b1a6f9">
   <img alt="Node 20+" src="https://img.shields.io/badge/node-%E2%89%A520-5f5c69">
+  <a href="https://buymeacoffee.com/rixmkd"><img alt="Buy me a coffee" src="https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black"></a>
 </p>
 
 Async team workflow for [Claude Code](https://claude.com/claude-code). Each teammate's Claude shares one git **hub** repo with the rest of the team, so work moves between people without meetings: pause a task with a checkpoint, and you (or a teammate) can pick it up tomorrow exactly where it stopped.
@@ -43,6 +44,7 @@ Async team workflow for [Claude Code](https://claude.com/claude-code). Each team
 - [Usage](#usage)
 - [Updating](#updating)
 - [Development](#development)
+- [Support](#support)
 - [License](#license)
 
 ## How it works
@@ -231,6 +233,10 @@ npm run check        # typecheck + tests + build, and fails if plugin/dist is st
 | `claude plugin validate ui && claude plugin test ui` | Validate the mod and run its kit tests |
 
 [`AGENTS.md`](AGENTS.md) is the contributor guide. It covers the layout, the rules the code enforces (read-only ticket clients, scrubbing, hooks that never fail a session) and conventions.
+
+## Support
+
+If RixFlow saves your team time, you can [buy me a coffee](https://buymeacoffee.com/rixmkd). Bug reports and pull requests help just as much.
 
 ## License
 
