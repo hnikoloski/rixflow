@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { AsanaReader } from '../../src/core/asana';
 import { buildBrief } from '../../src/core/brief';
@@ -168,6 +168,50 @@ describe('resumeTask', () => {
     const res = await resumeTask(ctx, null, '101');
     expect(res.handover?.task).toBe('101');
     expect(res.currentModifiedAt).toBeNull();
+  });
+
+  const cp = (task: string, done: string) => ({ task, done, pending: 'p', blockers: 'none', resume: 'r', branch: 'fix/x' });
+  const as = (ctx: ReturnType<typeof makeCtx>, name: string, now?: string) =>
+    ({ ...ctx, user: { ...ctx.user, name }, ...(now ? { now: () => new Date(now) } : {}) });
+
+  it("picks up a teammate's paused work when you have nothing of your own for the task", async () => {
+    const ctx = makeCtx();
+    await startTask(ctx, asSource(fakeAsana([sub, parent], comments)), LEGACY, { task: '101', cwd: '/' });
+    writeCheckpoint(ctx, cp('101', 'hristijan did this'));
+    const ana = as(ctx, 'ana');
+    const res = await resumeTask(ana, null, '101');
+    expect(res.from).toBe('hristijan');
+    expect(res.checkpoint).toMatchObject({ task: '101', done: 'hristijan did this', branch: 'fix/x' });
+    expect(res.handover?.task).toBe('101');
+    expect(res.privateBrief).toBe(false);
+
+    // Your own work always wins over a teammate's.
+    writeCheckpoint(ana, cp('101', 'ana did this'));
+    const own = await resumeTask(ana, null, '101');
+    expect(own.from).toBeUndefined();
+    expect(own.checkpoint?.done).toBe('ana did this');
+  });
+
+  it("takes the newest teammate checkpoint, and none when nobody paused the task", async () => {
+    const ctx = makeCtx();
+    writeCheckpoint(as(ctx, 'hristijan', '2026-10-08T10:00:00Z'), cp('101', 'older'));
+    writeCheckpoint(as(ctx, 'pm', '2026-10-09T10:00:00Z'), cp('101', 'newer'));
+    const res = await resumeTask(as(ctx, 'ana'), null, '101');
+    expect(res).toMatchObject({ from: 'pm', checkpoint: { done: 'newer' }, handover: null });
+    const none = await resumeTask(as(ctx, 'ana'), null, '102');
+    expect(none.from).toBeUndefined();
+    expect(none.checkpoint).toBeNull();
+  });
+
+  it("skips a teammate's checkpoint that links outside the hub", async () => {
+    const ctx = makeCtx();
+    const outside = join(ctx.configDir, 'secret.md');
+    writeFileSync(outside, '---\ntask: "101"\n---\n## Done\nsecret\n');
+    mkdirSync(join(ctx.hubDir, 'people', 'pm', 'checkpoints'), { recursive: true });
+    symlinkSync(outside, join(ctx.hubDir, 'people', 'pm', 'checkpoints', '101.md'));
+    const res = await resumeTask(as(ctx, 'ana'), null, '101');
+    expect(res.from).toBeUndefined();
+    expect(res.checkpoint).toBeNull();
   });
 
   it('returns nulls offline when nothing was started', async () => {

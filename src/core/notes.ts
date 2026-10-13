@@ -1,10 +1,10 @@
-import { existsSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { isInsideDir } from './config';
 import { listMd, personDir, readDoc, writeDoc } from './hubfs';
 import { isoDate } from './ids';
 import { rebuildIndex } from './indexes';
-import { assertTicketId, type Ctx } from './types';
+import { assertName, assertTicketId, type Ctx } from './types';
 
 export type Phase = 'research' | 'plan' | 'implement' | 'debug' | 'done';
 export type Trigger = 'checkpoint' | 'wrapup' | 'precompact' | 'session-end';
@@ -165,6 +165,46 @@ function toCheckpoint(path: string): Checkpoint {
 export function readCheckpoint(ctx: Ctx, task: string): Checkpoint | null {
   const path = checkpointPath(ctx, task);
   return existsSync(path) ? toCheckpoint(path) : null;
+}
+
+export interface TeammateWork {
+  from: string;
+  checkpoint: Checkpoint;
+  handover: Handover | null;
+}
+
+// A teammate's paused work on a task, for picking it up: the newest checkpoint for the task in
+// anyone else's people/ folder, with that person's handover. Read only. Teammates control those
+// files, so a file (or symlink) whose real path leaves the hub is skipped, as in search.
+export function findTeammateWork(ctx: Ctx, task: string): TeammateWork | null {
+  assertTicketId(task);
+  const peopleDir = join(ctx.hubDir, 'people');
+  if (!existsSync(peopleDir)) return null;
+  const hubReal = realpathSync(ctx.hubDir);
+  const real = (path: string): string | null => {
+    try {
+      const r = realpathSync(path);
+      return r.startsWith(hubReal + sep) ? r : null;
+    } catch {
+      return null;
+    }
+  };
+  let best: TeammateWork | null = null;
+  for (const name of readdirSync(peopleDir).sort()) {
+    if (name === ctx.user.name) continue;
+    try { assertName(name); } catch { continue; }
+    const dir = personDir(ctx, name);
+    const cp = real(join(dir, 'checkpoints', `${task}.md`));
+    if (!cp) continue;
+    let checkpoint: Checkpoint;
+    try { checkpoint = toCheckpoint(cp); } catch { continue; }
+    if (best && (checkpoint.pausedAt ?? '') <= (best.checkpoint.pausedAt ?? '')) continue;
+    const ho = real(join(dir, 'handovers', `${task}.md`));
+    let handover: Handover | null = null;
+    try { handover = ho ? toHandover(ho) : null; } catch { handover = null; }
+    best = { from: name, checkpoint, handover };
+  }
+  return best;
 }
 
 export function listCheckpoints(ctx: Ctx): Checkpoint[] {

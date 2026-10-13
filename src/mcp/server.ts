@@ -150,7 +150,7 @@ export function createServer(deps: ServerDeps): McpServer {
   }));
 
   server.registerTool('resume_task', {
-    description: 'Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. Works offline from local files.',
+    description: `Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. With none of your own, loads a teammate's paused work on the task ("from" names them). Works offline from local files. ${UNTRUSTED}`,
     inputSchema: { task: text },
   }, async ({ task: rawTask }) => safe(async () => {
     const ctx = deps.ctx();
@@ -164,7 +164,8 @@ export function createServer(deps: ServerDeps): McpServer {
       if (!(e instanceof HubError)) throw e;
       reason = e.code === 'BAD_CONFIG' ? "the ticket can't be loaded: the team's workflow.yml is invalid" : `${e.code}: ${e.message}`;
     }
-    return resumeTask(ctx, source, task, reason);
+    const result = await resumeTask(ctx, source, task, reason);
+    return result.from ? { untrusted: true, note: UNTRUSTED, ...result } : result;
   }));
 
   server.registerTool('remember_site', {

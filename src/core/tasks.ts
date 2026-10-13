@@ -2,7 +2,7 @@ import { normalizeDir, isInsideDir } from './config';
 import { buildBrief, oneLine } from './brief';
 import { mapTicket } from './mapping';
 import { listInbox } from './messages';
-import { readCheckpoint, readHandover, writeHandover, type Checkpoint, type Handover } from './notes';
+import { findTeammateWork, readCheckpoint, readHandover, writeHandover, type Checkpoint, type Handover } from './notes';
 import { scrub } from './scrub';
 import { search } from './search';
 import { markRestricted, readPrivateBrief, restrictedBrief, writePrivateBrief } from './private';
@@ -35,6 +35,9 @@ export interface ResumeResult {
   reason?: string;
   // True when `handover.brief` is the full brief from this machine's private file.
   privateBrief: boolean;
+  // Set when you had nothing of your own for the task and the handover and checkpoint are a
+  // teammate's paused work (their name).
+  from?: string;
 }
 
 function keywords(name: string): string {
@@ -128,13 +131,17 @@ export async function resumeTask(
   ctx: Ctx, source: TicketSource | null, task: string, noSource = 'the ticket tracker is not configured',
 ): Promise<ResumeResult> {
   assertTicketId(task);
-  const handover = readHandover(ctx, task);
-  const checkpoint = readCheckpoint(ctx, task);
-  const priv = handover?.restricted ? readPrivateBrief(ctx.configDir, task) : null;
+  let handover = readHandover(ctx, task);
+  let checkpoint = readCheckpoint(ctx, task);
+  // Nothing of your own: pick up a teammate's paused work on the task, if any.
+  const teammate = !handover && !checkpoint ? findTeammateWork(ctx, task) : null;
+  if (teammate) ({ handover, checkpoint } = teammate);
+  const priv = handover?.restricted && !teammate ? readPrivateBrief(ctx.configDir, task) : null;
   const local = {
     handover: handover && scrubFields(priv === null ? handover : { ...handover, brief: priv }),
     checkpoint: checkpoint && scrubFields(checkpoint),
     privateBrief: priv !== null,
+    ...(teammate ? { from: teammate.from } : {}),
   };
   const unavailable = (reason: string): ResumeResult => ({
     ...local, changed: false, newComments: [], currentModifiedAt: null, ticketsUnavailable: true, reason: oneLine(scrub(reason)).slice(0, 200),
