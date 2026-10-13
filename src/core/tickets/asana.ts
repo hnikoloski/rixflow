@@ -36,7 +36,10 @@ export function toTicket(t: AsanaTask, opts: AsanaSourceOpts): Ticket {
   return base;
 }
 
-type Reader = AsanaReader & Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions'>>;
+// Setup reads the fields of at most this many projects, so a person in hundreds of projects stays fast.
+const MAX_PROJECT_LOOKUPS = 20;
+
+type Reader = AsanaReader & Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions' | 'getProjectFieldOptions'>>;
 
 export function asanaSource(reader: Reader, opts: AsanaSourceOpts): TicketSource & Discovery {
   const conv = (t: AsanaTask) => toTicket(t, opts);
@@ -45,20 +48,24 @@ export function asanaSource(reader: Reader, opts: AsanaSourceOpts): TicketSource
     return reader.getMe();
   };
   const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
-  // The dropdown options of every workspace field with this name, then the values seen on sampled
-  // tickets. Options cover statuses nobody has a ticket in yet; when they cannot be read (no
-  // permission, a plan without custom fields), the sampled values alone still work.
+  // The dropdown options of every field with this name (workspace fields, and the project-only
+  // fields of the projects the sampled tasks are in), then the values seen on sampled tickets.
+  // Options cover statuses nobody has a ticket in yet. A lookup that fails (no permission, a plan
+  // without custom fields) is skipped; the sampled values alone still work.
   const values = async (field: string, seen: (t: Ticket) => string | null): Promise<string[]> => {
-    let options: string[] = [];
-    try {
-      const fields = reader.getFieldOptions ? await reader.getFieldOptions(opts.workspace) : [];
-      options = fields.filter((f) => f.name.toLowerCase() === field.toLowerCase()).flatMap((f) => f.options);
-    } catch {
-      options = [];
-    }
+    const tasks = await reader.getMyTasks(opts.workspace);
+    const projects = [...new Set(tasks.flatMap((t) => (t.memberships ?? []).flatMap((m) => (m.project?.gid ? [m.project.gid] : []))))];
+    const lookups: Array<Promise<Array<{ name: string; options: string[] }>>> = [
+      ...(reader.getFieldOptions ? [reader.getFieldOptions(opts.workspace)] : []),
+      ...(reader.getProjectFieldOptions ? projects.slice(0, MAX_PROJECT_LOOKUPS).map((p) => reader.getProjectFieldOptions!(p)) : []),
+    ];
+    const options = (await Promise.all(lookups.map((l) => l.catch(() => []))))
+      .flat()
+      .filter((f) => f.name.toLowerCase() === field.toLowerCase())
+      .flatMap((f) => f.options);
     const out: string[] = [];
     const known = new Set<string>();
-    for (const v of [...options, ...(await sample()).map(seen)]) {
+    for (const v of [...options, ...tasks.map(conv).map(seen)]) {
       if (v && !known.has(v.toLowerCase())) { known.add(v.toLowerCase()); out.push(v); }
     }
     return out;

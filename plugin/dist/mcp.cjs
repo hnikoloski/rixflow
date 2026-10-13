@@ -36339,6 +36339,10 @@ var TASK_FIELDS = [
   "custom_fields.name",
   "custom_fields.display_value"
 ].join(",");
+var enabledOptions = (f) => ({
+  name: f.name,
+  options: (f.enum_options ?? []).filter((o) => o.enabled !== false && o.name).map((o) => o.name)
+});
 var AsanaClient = class {
   #token;
   #fetchFn;
@@ -36427,10 +36431,17 @@ var AsanaClient = class {
       limit: "100",
       opt_fields: "name,enum_options.name,enum_options.enabled"
     });
-    return fields.map((f) => ({
-      name: f.name,
-      options: (f.enum_options ?? []).filter((o) => o.enabled !== false && o.name).map((o) => o.name)
-    }));
+    return fields.map(enabledOptions);
+  }
+  // A project's own custom fields (Asana lets a field live in one project only, outside the
+  // workspace's field list) with their enabled dropdown options.
+  async getProjectFieldOptions(project) {
+    assertGid(project);
+    const settings = await this.#all(`/projects/${project}/custom_field_settings`, {
+      limit: "100",
+      opt_fields: "custom_field.name,custom_field.enum_options.name,custom_field.enum_options.enabled"
+    });
+    return settings.flatMap((s) => s.custom_field?.name ? [enabledOptions(s.custom_field)] : []);
   }
   async getComments(gid, limit = 10) {
     assertGid(gid);
@@ -37123,6 +37134,7 @@ function toTicket(t, opts) {
   base.priority = fieldValue(base, opts.priorityField ?? "Priority");
   return base;
 }
+var MAX_PROJECT_LOOKUPS = 20;
 function asanaSource(reader, opts) {
   const conv = (t) => toTicket(t, opts);
   const me = () => {
@@ -37131,16 +37143,16 @@ function asanaSource(reader, opts) {
   };
   const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
   const values = async (field, seen) => {
-    let options = [];
-    try {
-      const fields = reader.getFieldOptions ? await reader.getFieldOptions(opts.workspace) : [];
-      options = fields.filter((f) => f.name.toLowerCase() === field.toLowerCase()).flatMap((f) => f.options);
-    } catch {
-      options = [];
-    }
+    const tasks = await reader.getMyTasks(opts.workspace);
+    const projects = [...new Set(tasks.flatMap((t) => (t.memberships ?? []).flatMap((m) => m.project?.gid ? [m.project.gid] : [])))];
+    const lookups = [
+      ...reader.getFieldOptions ? [reader.getFieldOptions(opts.workspace)] : [],
+      ...reader.getProjectFieldOptions ? projects.slice(0, MAX_PROJECT_LOOKUPS).map((p) => reader.getProjectFieldOptions(p)) : []
+    ];
+    const options = (await Promise.all(lookups.map((l) => l.catch(() => [])))).flat().filter((f) => f.name.toLowerCase() === field.toLowerCase()).flatMap((f) => f.options);
     const out = [];
     const known = /* @__PURE__ */ new Set();
-    for (const v of [...options, ...(await sample()).map(seen)]) {
+    for (const v of [...options, ...tasks.map(conv).map(seen)]) {
       if (v && !known.has(v.toLowerCase())) {
         known.add(v.toLowerCase());
         out.push(v);

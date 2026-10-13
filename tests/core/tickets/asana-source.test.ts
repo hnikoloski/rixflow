@@ -85,7 +85,7 @@ describe('parentChain', () => {
 });
 
 describe('asanaSource', () => {
-  const reader = (...extra: Array<Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions'>>>) =>
+  const reader = (...extra: Array<Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions' | 'getProjectFieldOptions'>>>) =>
     Object.assign(
       fakeAsana([
         task({ gid: '1', custom_fields: [field('Status', 'Open')] }),
@@ -93,7 +93,7 @@ describe('asanaSource', () => {
         task({ gid: '3', custom_fields: [field('Status', 'Open')] }),
       ], { '1': [{ created_at: 'c', author: 'Ann', text: 'hi' }] }),
       ...extra,
-    ) as AsanaReader & Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions'>>;
+    ) as AsanaReader & Partial<Pick<AsanaClient, 'getMe' | 'getFieldOptions' | 'getProjectFieldOptions'>>;
   const me = { getMe: async () => ({ gid: '7', name: 'Ann', workspaces: [{ gid: '9', name: 'Acme' }] }) };
 
   it('identifies itself', () => {
@@ -145,6 +145,26 @@ describe('asanaSource', () => {
     expect(await s.priorities()).toEqual(['Low', 'High']);
     const stage = asanaSource(reader(me, fields), { ...opts, statusField: 'Website' });
     expect(await stage.statuses([])).toEqual(['AC']);
+  });
+
+  it('also reads the project-only fields of the projects the sampled tickets are in', async () => {
+    const asked: string[] = [];
+    const extra = {
+      getFieldOptions: async () => [],
+      getProjectFieldOptions: async (project: string) => {
+        asked.push(project);
+        if (project === '50') throw new Error('no access');
+        return [{ name: 'Status', options: ['TODO', 'In QA'] }, { name: 'Priority', options: ['Urgent'] }];
+      },
+    };
+    const projects = fakeAsana([
+      task({ gid: '1', memberships: [{ project: { gid: '40', name: 'Acme' } }, { project: { gid: '50', name: 'Globex' } }], custom_fields: [field('Status', 'Open')] }),
+      task({ gid: '2', memberships: [{ project: { gid: '40', name: 'Acme' } }], custom_fields: [field('Status', 'Done')] }),
+    ]);
+    const s = asanaSource(Object.assign(projects, me, extra), opts);
+    expect(await s.statuses([])).toEqual(['TODO', 'In QA', 'Open', 'Done']);
+    expect(await s.priorities()).toEqual(['Urgent']);
+    expect([...new Set(asked)].sort()).toEqual(['40', '50']);
   });
 
   it('falls back to sampled tickets when the field options cannot be read', async () => {

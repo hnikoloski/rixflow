@@ -46,6 +46,11 @@ interface RawField {
   enum_options?: Array<{ name: string; enabled?: boolean }>;
 }
 
+const enabledOptions = (f: RawField): { name: string; options: string[] } => ({
+  name: f.name,
+  options: (f.enum_options ?? []).filter((o) => o.enabled !== false && o.name).map((o) => o.name),
+});
+
 interface RawStory {
   created_at: string;
   created_by: { name: string } | null;
@@ -146,10 +151,17 @@ export class AsanaClient implements AsanaReader {
     const fields = await this.#all<RawField>(`/workspaces/${workspace}/custom_fields`, {
       limit: '100', opt_fields: 'name,enum_options.name,enum_options.enabled',
     });
-    return fields.map((f) => ({
-      name: f.name,
-      options: (f.enum_options ?? []).filter((o) => o.enabled !== false && o.name).map((o) => o.name),
-    }));
+    return fields.map(enabledOptions);
+  }
+
+  // A project's own custom fields (Asana lets a field live in one project only, outside the
+  // workspace's field list) with their enabled dropdown options.
+  async getProjectFieldOptions(project: string): Promise<Array<{ name: string; options: string[] }>> {
+    assertGid(project);
+    const settings = await this.#all<{ custom_field?: RawField | null }>(`/projects/${project}/custom_field_settings`, {
+      limit: '100', opt_fields: 'custom_field.name,custom_field.enum_options.name,custom_field.enum_options.enabled',
+    });
+    return settings.flatMap((s) => (s.custom_field?.name ? [enabledOptions(s.custom_field)] : []));
   }
 
   async getComments(gid: string, limit = 10): Promise<AsanaComment[]> {

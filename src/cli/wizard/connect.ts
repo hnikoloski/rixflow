@@ -10,7 +10,7 @@ import { jiraUrlChanged, type Workflow } from '../../core/workflow';
 import type { InitIo } from '../init';
 import { askValid, choose } from './prompts';
 
-type AsanaLike = AsanaReader & Pick<AsanaClient, 'getMe'> & Partial<Pick<AsanaClient, 'getFieldOptions'>>;
+type AsanaLike = AsanaReader & Pick<AsanaClient, 'getMe'> & Partial<Pick<AsanaClient, 'getFieldOptions' | 'getProjectFieldOptions'>>;
 
 // Injection points for tests. The real clients are used when a factory is left out.
 export interface WizardDeps {

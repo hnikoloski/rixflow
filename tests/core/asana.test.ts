@@ -49,7 +49,7 @@ describe('AsanaClient', () => {
     const calls: Array<{ method: string }> = [];
     const fn = (async (url: URL, init: RequestInit) => {
       calls.push({ method: String(init.method) });
-      const isList = url.pathname.endsWith('/tasks') || url.pathname.endsWith('/stories') || url.pathname.endsWith('/custom_fields');
+      const isList = url.pathname.endsWith('/tasks') || url.pathname.endsWith('/stories') || url.pathname.endsWith('/custom_fields') || url.pathname.endsWith('/custom_field_settings');
       const data = isList ? [] : { gid: '5', name: 'x', workspaces: [] };
       return new Response(JSON.stringify({ data, next_page: null }), { status: 200 });
     }) as unknown as typeof fetch;
@@ -59,6 +59,7 @@ describe('AsanaClient', () => {
     await client.getTask('5');
     await client.getComments('5');
     await client.getFieldOptions('111');
+    await client.getProjectFieldOptions('222');
     expect(calls.length).toBeGreaterThanOrEqual(4);
     expect(calls.map((c) => c.method)).toEqual(calls.map(() => 'GET'));
   });
@@ -169,6 +170,17 @@ describe('AsanaClient', () => {
     expect(calls[0].url).toContain('/workspaces/111/custom_fields');
     expect(calls[0].url).toContain('enum_options.enabled');
     await expect(new AsanaClient('t', fn).getFieldOptions('nope')).rejects.toBeInstanceOf(HubError);
+  });
+
+  it('reads the enabled options of a project\'s own custom fields', async () => {
+    const { fn, calls } = fakeFetch([{ data: [
+      { custom_field: { name: 'Status', enum_options: [{ name: 'TODO', enabled: true }, { name: 'Gone', enabled: false }] } },
+      { custom_field: null },
+    ], next_page: null }]);
+    expect(await new AsanaClient('t', fn).getProjectFieldOptions('222')).toEqual([{ name: 'Status', options: ['TODO'] }]);
+    expect(calls[0].method).toBe('GET');
+    expect(calls[0].url).toContain('/projects/222/custom_field_settings');
+    await expect(new AsanaClient('t', fn).getProjectFieldOptions('x')).rejects.toBeInstanceOf(HubError);
   });
 
   it('exposes no write methods', () => {
