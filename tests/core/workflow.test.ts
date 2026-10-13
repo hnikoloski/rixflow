@@ -107,6 +107,13 @@ describe('workflow.yml', () => {
     expect(wf.tracker).toMatchObject({ url: 'https://jira.example.com/jira' });
   });
 
+  it('rejects a jira url with a login, query or #fragment instead of quietly dropping it', () => {
+    for (const bad of ['https://me:pw@acme.atlassian.net', 'https://acme.atlassian.net/?x=1', 'https://acme.atlassian.net/#top']) {
+      put(JIRA.replace('https://acme.atlassian.net', bad));
+      expect(() => loadWorkflow(hub)).toThrow('config/workflow.yml: jira url must be an https:// address without a login, query or #fragment');
+    }
+  });
+
   it('compares versions', () => {
     expect(compareVersions('0.2.0', '0.10.0')).toBe(-1);
     expect(compareVersions('1.0.0', '1.0.0')).toBe(0);

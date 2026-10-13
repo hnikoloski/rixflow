@@ -105,7 +105,8 @@ function parseTracker(raw: Record<string, unknown>): Workflow['tracker'] {
       fail(`jira url is not a valid URL: ${rawUrl}`);
     }
     if (u.protocol !== 'https:') fail('jira url must use https');
-    const url = `${u.origin}${u.pathname}`.replace(/\/+$/, '');
+    const url = jiraBaseUrl(rawUrl);
+    if (!url) fail('jira url must be an https:// address without a login, query or #fragment');
     return { type: 'jira', url, flavor: t.flavor, projects: stringList(t.projects, 'tracker.projects') };
   }
   return fail(`unknown tracker type: ${String(t.type)}`);
