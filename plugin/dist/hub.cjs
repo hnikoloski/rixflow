@@ -11707,7 +11707,7 @@ function saveSites(hubDir2, sites) {
 }
 
 // src/core/messages.ts
-var TYPES = ["request", "question", "answer"];
+var TYPES = ["request", "question", "answer", "handover"];
 var STATUSES = ["new", "read", "done"];
 var isOneOf = (list, v) => list.includes(v);
 function passes(check3, v) {
@@ -11925,7 +11925,7 @@ var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "1.1.0";
+var RIXFLOW_VERSION = "1.2.0";
 var WORKFLOW_REQUIRES = "0.3.0";
 
 // src/core/workflow.ts
@@ -13073,8 +13073,31 @@ function toCheckpoint(path) {
     blockers: s["Blockers"] ?? "",
     resume: s["How to resume"] ?? "",
     asanaModifiedAt: str2(data.asana_modified_at),
-    pausedAt: str2(data.paused_at)
+    pausedAt: str2(data.paused_at),
+    handedTo: validName(data.handed_to)
   };
+}
+function validName(v) {
+  if (typeof v !== "string") return void 0;
+  try {
+    assertName(v);
+    return v;
+  } catch {
+    return void 0;
+  }
+}
+function handoverPickedUp(ctx, cp) {
+  if (!cp.handedTo) return false;
+  try {
+    assertTicketId(cp.task);
+    const path = (0, import_node_fs13.realpathSync)((0, import_node_path17.join)(personDir(ctx, cp.handedTo), "handovers", `${cp.task}.md`));
+    if (!isInsideDir(path, (0, import_node_fs13.realpathSync)(ctx.hubDir))) return false;
+    const created = Date.parse(String(readDoc(path).data.created ?? ""));
+    const paused = Date.parse(cp.pausedAt ?? "");
+    return !Number.isNaN(created) && (Number.isNaN(paused) || created >= paused);
+  } catch {
+    return false;
+  }
 }
 function listCheckpoints(ctx) {
   return readAll2(listMd((0, import_node_path17.join)(personDir(ctx), "checkpoints")), toCheckpoint);
@@ -14588,7 +14611,7 @@ var SAMPLE_COUNT2 = 50;
 var KINDS = ["asana", "jira"];
 var MACHINE_FILES = ["setup-progress.json", "status-cache.json", "config.yml"];
 var clean4 = (s) => scrub(s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")).trim();
-var validName = (s) => clean4(s).length <= 60 ? null : "Please keep the name under 60 characters.";
+var validName2 = (s) => clean4(s).length <= 60 ? null : "Please keep the name under 60 characters.";
 var validFolder = (s) => isSafeFolder(s) ? null : "Please use one folder name: letters, digits, dots, dashes or underscores, no slashes.";
 async function runMenu(io, deps, ctx, env = process.env) {
   const hub = (0, import_node_fs18.existsSync)((0, import_node_path21.join)(ctx.hubDir, ".git"));
@@ -14642,7 +14665,7 @@ async function runMenu(io, deps, ctx, env = process.env) {
         if (!SITE3.test(c)) return "Please use 1 to 10 capital letters or digits.";
         return Object.hasOwn(sites, c) ? `${c} is already a project.` : null;
       })).toUpperCase();
-      const name = clean4(await askValid(io, `Name of project ${code} (optional, e.g. Acme site):`, validName));
+      const name = clean4(await askValid(io, `Name of project ${code} (optional, e.g. Acme site):`, validName2));
       const folder = await askValid(io, `Folder for project ${code} (inside each person's projects folder):`, validFolder, slug(name) || code.toLowerCase());
       saveSites(ctx.hubDir, { ...sites, [code]: { ...name ? { name } : {}, folder } });
       await save(`add project ${code}`, `Added project ${code}`);
@@ -14662,7 +14685,7 @@ async function runMenu(io, deps, ctx, env = process.env) {
       })));
       const site = sites[code];
       io.log(`The short code (${code}) can't change: it's part of saved notes and links.`);
-      const name = clean4(await askValid(io, `Name of project ${code}:`, validName, site.name));
+      const name = clean4(await askValid(io, `Name of project ${code}:`, validName2, site.name));
       const folder = await askValid(io, `Folder for project ${code}:`, validFolder, site.folder);
       if (name === (site.name ?? "") && folder === site.folder) {
         io.log("Nothing changed.");
@@ -15033,7 +15056,7 @@ var clean5 = (text2) => text2.trim().split("\n")[0].slice(0, 80).replace(/[\u000
 var display = (text2) => clean5(scrub(text2));
 var byDue = (a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
 function buildPlate(input) {
-  const paused = new Set(input.checkpoints.map((c) => c.task));
+  const paused = new Map(input.checkpoints.map((c) => [c.task, c]));
   const plate = { sprintName: null, urgent: [], inProgress: [], sprint: [], inbox: [], backlog: [], waiting: [] };
   for (const { ticket, mapped } of input.tasks) {
     if (mapped.bucket === "done") continue;
@@ -15046,7 +15069,8 @@ function buildPlate(input) {
       status: ticket.status === null ? null : display(ticket.status),
       priority: ticket.priority,
       due: ticket.due,
-      paused: paused.has(ticket.id)
+      paused: paused.has(ticket.id),
+      ...paused.get(ticket.id)?.handedTo ? { handedTo: paused.get(ticket.id)?.handedTo } : {}
     };
     if (mapped.sprint) plate.sprintName = display(mapped.sprint);
     if (mapped.urgent) plate.urgent.push(item);
@@ -15127,7 +15151,7 @@ async function gatherPlate(ctx, source, wf) {
   return buildPlate({
     tasks,
     inbox: listInbox(ctx, ["new", "read"]),
-    checkpoints: listCheckpoints(ctx),
+    checkpoints: listCheckpoints(ctx).filter((c) => !handoverPickedUp(ctx, c)),
     waiting: listWaiting(ctx, 2),
     now
   });
@@ -15278,11 +15302,13 @@ async function buildStatus(opts, deps) {
       } catch {
         continue;
       }
+      if (handoverPickedUp(ctx, c)) continue;
       out.paused.push({
         task: c.task,
         title: titleOf(readHandover(ctx, c.task), c.task),
         site: c.site ? display(c.site) : null,
-        pausedAt: c.pausedAt ? display(c.pausedAt) : null
+        pausedAt: c.pausedAt ? display(c.pausedAt) : null,
+        handedTo: c.handedTo ?? null
       });
     }
   } catch {

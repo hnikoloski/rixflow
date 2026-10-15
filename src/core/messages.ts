@@ -5,7 +5,7 @@ import { newMessageId } from './ids';
 import { loadTeam } from './team';
 import { HubError, assertTicketId, assertMessageId, assertName, type Ctx } from './types';
 
-export type MessageType = 'request' | 'question' | 'answer';
+export type MessageType = 'request' | 'question' | 'answer' | 'handover';
 export type MessageStatus = 'new' | 'read' | 'done';
 
 export interface Message {
@@ -21,7 +21,7 @@ export interface Message {
   path: string;
 }
 
-const TYPES: readonly MessageType[] = ['request', 'question', 'answer'];
+const TYPES: readonly MessageType[] = ['request', 'question', 'answer', 'handover'];
 const STATUSES: readonly MessageStatus[] = ['new', 'read', 'done'];
 const MAX_ID_ATTEMPTS = 20;
 

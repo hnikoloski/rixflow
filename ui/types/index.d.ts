@@ -23,7 +23,7 @@ export type Status = {
     startedAt: string | null; source: 'session' | 'cwd'
   } | null
   inbox: InboxItem[]
-  paused: Array<{ task: string; title: string; site: string | null; pausedAt: string | null }>
+  paused: Array<{ task: string; title: string; site: string | null; pausedAt: string | null; handedTo?: string | null }>
   sprint: { name: string | null; fetchedAt: string; items: StatusTask[] } | null
   problems: string[]
 }

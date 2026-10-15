@@ -33,6 +33,7 @@ export interface Checkpoint {
   resume: string;
   asanaModifiedAt?: string;
   pausedAt?: string;
+  handedTo?: string; // the teammate this paused work was handed over to
 }
 
 export interface Handover {
@@ -140,13 +141,15 @@ function checkpointPath(ctx: Ctx, task: string): string {
 
 export function writeCheckpoint(ctx: Ctx, cp: Checkpoint): string {
   const path = checkpointPath(ctx, cp.task);
+  if (cp.handedTo !== undefined) assertName(cp.handedTo);
   const body = [
     `# Checkpoint ${cp.task}`, siteLink(cp.site), '', '## Done', cp.done, '', '## Pending', cp.pending, '',
     '## Blockers', cp.blockers, '', '## How to resume', cp.resume,
   ].join('\n');
   writeDoc(path, {
     type: 'checkpoint', task: cp.task, site: cp.site, branch: cp.branch, stash_ref: cp.stashRef,
-    paused_at: ctx.now().toISOString(), asana_modified_at: cp.asanaModifiedAt, author: ctx.user.name,
+    paused_at: ctx.now().toISOString(), asana_modified_at: cp.asanaModifiedAt, handed_to: cp.handedTo,
+    author: ctx.user.name,
   }, body);
   reindex(ctx);
   return path;
@@ -159,7 +162,19 @@ function toCheckpoint(path: string): Checkpoint {
     task: String(data.task), site: str(data.site), branch: str(data.branch), stashRef: str(data.stash_ref),
     done: s['Done'] ?? '', pending: s['Pending'] ?? '', blockers: s['Blockers'] ?? '', resume: s['How to resume'] ?? '',
     asanaModifiedAt: str(data.asana_modified_at), pausedAt: str(data.paused_at),
+    handedTo: validName(data.handed_to),
   };
+}
+
+// A hand-edited `handed_to` that is not a valid person name is ignored.
+function validName(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  try {
+    assertName(v);
+    return v;
+  } catch {
+    return undefined;
+  }
 }
 
 export function readCheckpoint(ctx: Ctx, task: string): Checkpoint | null {
@@ -174,10 +189,11 @@ export interface TeammateWork {
 }
 
 // A teammate's paused work on a task, for picking it up: the newest checkpoint for the task in
-// anyone else's people/ folder, with that person's handover. Read only. Teammates control those
+// anyone else's people/ folder (only `from`'s when given), with that person's handover. Read only. Teammates control those
 // files, so a file (or symlink) whose real path leaves the hub is skipped, as in search.
-export function findTeammateWork(ctx: Ctx, task: string): TeammateWork | null {
+export function findTeammateWork(ctx: Ctx, task: string, from?: string): TeammateWork | null {
   assertTicketId(task);
+  if (from !== undefined) assertName(from);
   const peopleDir = join(ctx.hubDir, 'people');
   if (!existsSync(peopleDir)) return null;
   const hubReal = realpathSync(ctx.hubDir);
@@ -191,7 +207,7 @@ export function findTeammateWork(ctx: Ctx, task: string): TeammateWork | null {
   };
   let best: TeammateWork | null = null;
   for (const name of readdirSync(peopleDir).sort()) {
-    if (name === ctx.user.name) continue;
+    if (name === ctx.user.name || (from !== undefined && name !== from)) continue;
     try { assertName(name); } catch { continue; }
     const dir = personDir(ctx, name);
     const cp = real(join(dir, 'checkpoints', `${task}.md`));
@@ -238,6 +254,22 @@ export function notesForTask(ctx: Ctx, task: string): string[] {
     }
   }
   return out;
+}
+
+// True once the teammate a checkpoint was handed to has started the task (their handover for it
+// is newer than the checkpoint), so the sender's plate can stop listing it as paused.
+export function handoverPickedUp(ctx: Ctx, cp: Checkpoint): boolean {
+  if (!cp.handedTo) return false;
+  try {
+    assertTicketId(cp.task);
+    const path = realpathSync(join(personDir(ctx, cp.handedTo), 'handovers', `${cp.task}.md`));
+    if (!isInsideDir(path, realpathSync(ctx.hubDir))) return false;
+    const created = Date.parse(String(readDoc(path).data.created ?? ''));
+    const paused = Date.parse(cp.pausedAt ?? '');
+    return !Number.isNaN(created) && (Number.isNaN(paused) || created >= paused);
+  } catch {
+    return false;
+  }
 }
 
 export function listCheckpoints(ctx: Ctx): Checkpoint[] {

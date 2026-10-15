@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import type { SyncResult, SyncStatus } from './git';
 import { listInbox, type MessageStatus, type MessageType } from './messages';
-import { findActiveHandover, listCheckpoints, readHandover, type Handover } from './notes';
+import { findActiveHandover, handoverPickedUp, listCheckpoints, readHandover, type Handover } from './notes';
 import { display, gatherPlate, type PlateItem } from './plate';
 import type { TicketSource } from './tickets/types';
 import { HubError, assertTicketId, type Ctx } from './types';
@@ -45,7 +45,7 @@ export interface HubStatus {
     startedAt: string | null; source: 'session' | 'cwd';
   } | null;
   inbox: Array<{ id: string; from: string; type: MessageType; task: string | null; preview: string; status: MessageStatus; created: string }>;
-  paused: Array<{ task: string; title: string; site: string | null; pausedAt: string | null }>;
+  paused: Array<{ task: string; title: string; site: string | null; pausedAt: string | null; handedTo: string | null }>;
   sprint: { name: string | null; fetchedAt: string; items: StatusTask[] } | null;
   problems: string[];
 }
@@ -199,9 +199,11 @@ export async function buildStatus(opts: StatusOptions, deps: StatusDeps): Promis
       } catch {
         continue; // a hand-edited checkpoint with a bad task id: skip it, keep the rest
       }
+      if (handoverPickedUp(ctx, c)) continue; // the teammate it was handed to has taken it
       out.paused.push({
         task: c.task, title: titleOf(readHandover(ctx, c.task), c.task),
         site: c.site ? display(c.site) : null, pausedAt: c.pausedAt ? display(c.pausedAt) : null,
+        handedTo: c.handedTo ?? null,
       });
     }
   } catch {

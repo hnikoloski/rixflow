@@ -35,9 +35,11 @@ export interface ResumeResult {
   reason?: string;
   // True when `handover.brief` is the full brief from this machine's private file.
   privateBrief: boolean;
-  // Set when you had nothing of your own for the task and the handover and checkpoint are a
-  // teammate's paused work (their name).
+  // Set when the handover and checkpoint are a teammate's paused work (their name): you had
+  // nothing of your own for the task, or you asked for that teammate's work by name.
   from?: string;
+  // With `from`: hub paths of everyone's notes on the task (handovers, checkpoints, sessions).
+  notes?: string[];
 }
 
 function keywords(name: string): string {
@@ -151,22 +153,28 @@ export async function startTask(ctx: Ctx, source: TicketSource, wf: Workflow, in
   };
 }
 
-// `noSource` is the reason given when `source` is null.
+// `noSource` is the reason given when `source` is null. `from` names the teammate whose paused
+// work to load (a handover sent to you); it wins over your own notes on the task.
 export async function resumeTask(
-  ctx: Ctx, source: TicketSource | null, task: string, noSource = 'the ticket tracker is not configured',
+  ctx: Ctx, source: TicketSource | null, task: string, noSource = 'the ticket tracker is not configured', from?: string,
 ): Promise<ResumeResult> {
   assertTicketId(task);
   let handover = readHandover(ctx, task);
   let checkpoint = readCheckpoint(ctx, task);
   // Nothing of your own: pick up a teammate's paused work on the task, if any.
-  const teammate = !handover && !checkpoint ? findTeammateWork(ctx, task) : null;
+  const teammate = from !== undefined && from !== ctx.user.name
+    ? findTeammateWork(ctx, task, from)
+    : !handover && !checkpoint ? findTeammateWork(ctx, task) : null;
+  if (from !== undefined && from !== ctx.user.name && !teammate) {
+    throw new HubError('NOT_FOUND', `${from} has no paused work on ${task}`);
+  }
   if (teammate) ({ handover, checkpoint } = teammate);
   const priv = handover?.restricted && !teammate ? readPrivateBrief(ctx.configDir, task) : null;
   const local = {
     handover: handover && scrubFields(priv === null ? handover : { ...handover, brief: priv }),
     checkpoint: checkpoint && scrubFields(checkpoint),
     privateBrief: priv !== null,
-    ...(teammate ? { from: teammate.from } : {}),
+    ...(teammate ? { from: teammate.from, notes: notesForTask(ctx, task) } : {}),
   };
   const unavailable = (reason: string): ResumeResult => ({
     ...local, changed: false, newComments: [], currentModifiedAt: null, ticketsUnavailable: true, reason: oneLine(scrub(reason)).slice(0, 200),

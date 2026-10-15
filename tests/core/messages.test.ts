@@ -19,6 +19,13 @@ describe('messages', () => {
     expect(listInbox(me, ['done'])).toEqual([]);
   });
 
+  it('sends a handover message', () => {
+    const ctx = makeCtx();
+    const m = sendMessage(ctx, { to: 'ana', type: 'handover', body: 'Over to you', task: '42' });
+    const ana = { ...ctx, user: { ...ctx.user, name: 'ana' } };
+    expect(listInbox(ana)).toEqual([expect.objectContaining({ id: m.id, type: 'handover', from: 'hristijan', task: '42' })]);
+  });
+
   it('rejects unknown recipients and traversal', () => {
     const ctx = makeCtx();
     expect(() => sendMessage(ctx, { to: 'nobody', type: 'question', body: 'x' })).toThrowError(expect.objectContaining({ code: 'UNKNOWN_RECIPIENT' }));

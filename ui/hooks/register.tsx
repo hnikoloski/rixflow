@@ -347,7 +347,7 @@ export const register: Register = on => {
         {head('‖', 'PAUSED', ACCENT.paused, `${s.paused.length}`)}
         {paused.shown.length === 0 && empty('nothing paused', ACCENT.paused)}
         {paused.shown.map(p => {
-          const r = fitRow(text, [[p.site ?? '', 6]], p.title, ` ${relTime(p.pausedAt, now)}`)
+          const r = fitRow(text, [[p.site ?? '', 6]], p.title, p.handedTo ? ` → ${p.handedTo}` : ` ${relTime(p.pausedAt, now)}`)
           return (
           <Box key={`p-${p.task}`}>
             {gutter(ACCENT.paused)}

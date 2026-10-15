@@ -1,6 +1,6 @@
 import { mapTicket, needsParents, type Mapped } from './mapping';
 import { listInbox, listWaiting, type Message, type MessageType } from './messages';
-import { listCheckpoints, type Checkpoint } from './notes';
+import { handoverPickedUp, listCheckpoints, type Checkpoint } from './notes';
 import { resolveSite } from './sites';
 import { scrub } from './scrub';
 import { loadSites } from './team';
@@ -18,6 +18,7 @@ export interface PlateItem {
   priority: string | null;
   due: string | null;
   paused: boolean;
+  handedTo?: string; // paused work handed over to this teammate
   from?: string;
   messageType?: MessageType;
 }
@@ -51,7 +52,7 @@ export function buildPlate(input: {
   waiting: Message[];
   now: Date;
 }): Plate {
-  const paused = new Set(input.checkpoints.map((c) => c.task));
+  const paused = new Map(input.checkpoints.map((c) => [c.task, c]));
   const plate: Plate = { sprintName: null, urgent: [], inProgress: [], sprint: [], inbox: [], backlog: [], waiting: [] };
   for (const { ticket, mapped } of input.tasks) {
     if (mapped.bucket === 'done') continue;
@@ -59,6 +60,7 @@ export function buildPlate(input: {
       n: 0, kind: 'task', ref: ticket.id, title: display(ticket.title), sites: mapped.codes,
       status: ticket.status === null ? null : display(ticket.status), priority: ticket.priority,
       due: ticket.due, paused: paused.has(ticket.id),
+      ...(paused.get(ticket.id)?.handedTo ? { handedTo: paused.get(ticket.id)?.handedTo } : {}),
     };
     if (mapped.sprint) plate.sprintName = display(mapped.sprint);
     if (mapped.urgent) plate.urgent.push(item);
@@ -87,7 +89,7 @@ export function buildPlate(input: {
 function line(item: PlateItem): string {
   if (item.kind === 'message') return `${item.n}. ${item.messageType} from ${item.from}: ${item.title} (${item.ref})`;
   const tag = item.sites.length ? `[${item.sites.join(', ')}] ` : '';
-  const extra = [item.status, item.due ? `due ${item.due}` : null, item.paused ? '(paused)' : null].filter(Boolean).join(' · ');
+  const extra = [item.status, item.due ? `due ${item.due}` : null, item.handedTo ? `(handed to ${item.handedTo})` : item.paused ? '(paused)' : null].filter(Boolean).join(' · ');
   return `${item.n}. ${tag}${item.title}${extra ? ` — ${extra}` : ''} (${item.ref})`;
 }
 
@@ -161,7 +163,7 @@ export async function gatherPlate(ctx: Ctx, source: TicketSource, wf: Workflow):
   return buildPlate({
     tasks,
     inbox: listInbox(ctx, ['new', 'read']),
-    checkpoints: listCheckpoints(ctx),
+    checkpoints: listCheckpoints(ctx).filter((c) => !handoverPickedUp(ctx, c)),
     waiting: listWaiting(ctx, 2),
     now,
   });

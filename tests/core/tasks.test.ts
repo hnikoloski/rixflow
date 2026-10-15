@@ -6,7 +6,7 @@ import { buildBrief } from '../../src/core/brief';
 import { resumeTask, startTask } from '../../src/core/tasks';
 import { writeDoc } from '../../src/core/hubfs';
 import { sendMessage } from '../../src/core/messages';
-import { readHandover, writeCheckpoint } from '../../src/core/notes';
+import { readHandover, writeCheckpoint, writeSession } from '../../src/core/notes';
 import { HubError } from '../../src/core/types';
 import type { AsanaComment, AsanaTask } from '../../src/core/asana';
 import { LEGACY_WORKFLOW, type Workflow } from '../../src/core/workflow';
@@ -201,6 +201,30 @@ describe('resumeTask', () => {
     const none = await resumeTask(as(ctx, 'ana'), null, '102');
     expect(none.from).toBeUndefined();
     expect(none.checkpoint).toBeNull();
+  });
+
+  it("loads a named teammate's handover over your own notes and lists the task's notes", async () => {
+    const ctx = makeCtx();
+    const pm = as(ctx, 'pm', '2026-10-09T10:00:00Z');
+    writeCheckpoint(as(ctx, 'hristijan', '2026-10-10T10:00:00Z'), cp('101', 'hristijan paused'));
+    writeCheckpoint(pm, { ...cp('101', 'pm handed this over'), handedTo: 'ana' });
+    writeSession(pm, {
+      task: '101', sessionId: 's1', phase: 'implement', trigger: 'checkpoint',
+      goal: 'g', done: 'd', decisions: 'x', deadEnds: 'none', next: 'n',
+    });
+    const ana = as(ctx, 'ana');
+    writeCheckpoint(ana, cp('101', 'ana own'));
+    const res = await resumeTask(ana, null, '101', undefined, 'pm');
+    expect(res).toMatchObject({ from: 'pm', checkpoint: { done: 'pm handed this over', handedTo: 'ana' } });
+    expect(res.notes).toEqual(expect.arrayContaining(['people/pm/checkpoints/101.md', expect.stringMatching(/^people\/pm\/sessions\/.+\.md$/)]));
+    // Naming yourself is the same as naming nobody.
+    expect((await resumeTask(ana, null, '101', undefined, 'ana')).checkpoint?.done).toBe('ana own');
+  });
+
+  it('fails clearly when the named teammate has no paused work on the task', async () => {
+    const ctx = makeCtx();
+    await expect(resumeTask(as(ctx, 'ana'), null, '101', undefined, 'pm')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(resumeTask(as(ctx, 'ana'), null, '101', undefined, '../pm')).rejects.toMatchObject({ code: 'BAD_NAME' });
   });
 
   it("skips a teammate's checkpoint that links outside the hub", async () => {

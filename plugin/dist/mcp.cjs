@@ -36951,7 +36951,7 @@ function loadSites(hubDir2) {
 }
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "1.1.0";
+var RIXFLOW_VERSION = "1.2.0";
 
 // src/core/workflow.ts
 var DEFAULT_STEPS = Object.freeze({
@@ -45461,7 +45461,7 @@ function rebuildIndex(hubDir2, relDir, title) {
 // src/core/messages.ts
 var import_node_fs11 = require("node:fs");
 var import_node_path13 = require("node:path");
-var TYPES = ["request", "question", "answer"];
+var TYPES = ["request", "question", "answer", "handover"];
 var STATUSES = ["new", "read", "done"];
 var MAX_ID_ATTEMPTS = 20;
 var isOneOf = (list, v) => list.includes(v);
@@ -45688,6 +45688,7 @@ function checkpointPath(ctx, task) {
 }
 function writeCheckpoint(ctx, cp) {
   const path = checkpointPath(ctx, cp.task);
+  if (cp.handedTo !== void 0) assertName(cp.handedTo);
   const body = [
     `# Checkpoint ${cp.task}`,
     siteLink(cp.site),
@@ -45712,6 +45713,7 @@ function writeCheckpoint(ctx, cp) {
     stash_ref: cp.stashRef,
     paused_at: ctx.now().toISOString(),
     asana_modified_at: cp.asanaModifiedAt,
+    handed_to: cp.handedTo,
     author: ctx.user.name
   }, body);
   reindex(ctx);
@@ -45730,15 +45732,26 @@ function toCheckpoint(path) {
     blockers: s["Blockers"] ?? "",
     resume: s["How to resume"] ?? "",
     asanaModifiedAt: str2(data.asana_modified_at),
-    pausedAt: str2(data.paused_at)
+    pausedAt: str2(data.paused_at),
+    handedTo: validName(data.handed_to)
   };
+}
+function validName(v) {
+  if (typeof v !== "string") return void 0;
+  try {
+    assertName(v);
+    return v;
+  } catch {
+    return void 0;
+  }
 }
 function readCheckpoint(ctx, task) {
   const path = checkpointPath(ctx, task);
   return (0, import_node_fs12.existsSync)(path) ? toCheckpoint(path) : null;
 }
-function findTeammateWork(ctx, task) {
+function findTeammateWork(ctx, task, from) {
   assertTicketId(task);
+  if (from !== void 0) assertName(from);
   const peopleDir = (0, import_node_path14.join)(ctx.hubDir, "people");
   if (!(0, import_node_fs12.existsSync)(peopleDir)) return null;
   const hubReal = (0, import_node_fs12.realpathSync)(ctx.hubDir);
@@ -45752,7 +45765,7 @@ function findTeammateWork(ctx, task) {
   };
   let best = null;
   for (const name of (0, import_node_fs12.readdirSync)(peopleDir).sort()) {
-    if (name === ctx.user.name) continue;
+    if (name === ctx.user.name || from !== void 0 && name !== from) continue;
     try {
       assertName(name);
     } catch {
@@ -45811,6 +45824,19 @@ function notesForTask(ctx, task) {
     }
   }
   return out;
+}
+function handoverPickedUp(ctx, cp) {
+  if (!cp.handedTo) return false;
+  try {
+    assertTicketId(cp.task);
+    const path = (0, import_node_fs12.realpathSync)((0, import_node_path14.join)(personDir(ctx, cp.handedTo), "handovers", `${cp.task}.md`));
+    if (!isInsideDir(path, (0, import_node_fs12.realpathSync)(ctx.hubDir))) return false;
+    const created = Date.parse(String(readDoc(path).data.created ?? ""));
+    const paused = Date.parse(cp.pausedAt ?? "");
+    return !Number.isNaN(created) && (Number.isNaN(paused) || created >= paused);
+  } catch {
+    return false;
+  }
 }
 function listCheckpoints(ctx) {
   return readAll2(listMd((0, import_node_path14.join)(personDir(ctx), "checkpoints")), toCheckpoint);
@@ -46042,7 +46068,7 @@ var clean = (text3) => text3.trim().split("\n")[0].slice(0, 80).replace(/[\u0000
 var display = (text3) => clean(scrub(text3));
 var byDue = (a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
 function buildPlate(input2) {
-  const paused = new Set(input2.checkpoints.map((c) => c.task));
+  const paused = new Map(input2.checkpoints.map((c) => [c.task, c]));
   const plate = { sprintName: null, urgent: [], inProgress: [], sprint: [], inbox: [], backlog: [], waiting: [] };
   for (const { ticket, mapped } of input2.tasks) {
     if (mapped.bucket === "done") continue;
@@ -46055,7 +46081,8 @@ function buildPlate(input2) {
       status: ticket.status === null ? null : display(ticket.status),
       priority: ticket.priority,
       due: ticket.due,
-      paused: paused.has(ticket.id)
+      paused: paused.has(ticket.id),
+      ...paused.get(ticket.id)?.handedTo ? { handedTo: paused.get(ticket.id)?.handedTo } : {}
     };
     if (mapped.sprint) plate.sprintName = display(mapped.sprint);
     if (mapped.urgent) plate.urgent.push(item);
@@ -46094,7 +46121,7 @@ function buildPlate(input2) {
 function line(item) {
   if (item.kind === "message") return `${item.n}. ${item.messageType} from ${item.from}: ${item.title} (${item.ref})`;
   const tag = item.sites.length ? `[${item.sites.join(", ")}] ` : "";
-  const extra = [item.status, item.due ? `due ${item.due}` : null, item.paused ? "(paused)" : null].filter(Boolean).join(" \xB7 ");
+  const extra = [item.status, item.due ? `due ${item.due}` : null, item.handedTo ? `(handed to ${item.handedTo})` : item.paused ? "(paused)" : null].filter(Boolean).join(" \xB7 ");
   return `${item.n}. ${tag}${item.title}${extra ? ` \u2014 ${extra}` : ""} (${item.ref})`;
 }
 function renderPlate(plate) {
@@ -46161,7 +46188,7 @@ async function gatherPlate(ctx, source, wf) {
   return buildPlate({
     tasks,
     inbox: listInbox(ctx, ["new", "read"]),
-    checkpoints: listCheckpoints(ctx),
+    checkpoints: listCheckpoints(ctx).filter((c) => !handoverPickedUp(ctx, c)),
     waiting: listWaiting(ctx, 2),
     now
   });
@@ -46446,18 +46473,21 @@ async function startTask(ctx, source, wf, input2) {
     needsSite: !site.folder
   };
 }
-async function resumeTask(ctx, source, task, noSource = "the ticket tracker is not configured") {
+async function resumeTask(ctx, source, task, noSource = "the ticket tracker is not configured", from) {
   assertTicketId(task);
   let handover = readHandover(ctx, task);
   let checkpoint = readCheckpoint(ctx, task);
-  const teammate = !handover && !checkpoint ? findTeammateWork(ctx, task) : null;
+  const teammate = from !== void 0 && from !== ctx.user.name ? findTeammateWork(ctx, task, from) : !handover && !checkpoint ? findTeammateWork(ctx, task) : null;
+  if (from !== void 0 && from !== ctx.user.name && !teammate) {
+    throw new HubError("NOT_FOUND", `${from} has no paused work on ${task}`);
+  }
   if (teammate) ({ handover, checkpoint } = teammate);
   const priv = handover?.restricted && !teammate ? readPrivateBrief(ctx.configDir, task) : null;
   const local = {
     handover: handover && scrubFields(priv === null ? handover : { ...handover, brief: priv }),
     checkpoint: checkpoint && scrubFields(checkpoint),
     privateBrief: priv !== null,
-    ...teammate ? { from: teammate.from } : {}
+    ...teammate ? { from: teammate.from, notes: notesForTask(ctx, task) } : {}
   };
   const unavailable = (reason) => ({
     ...local,
@@ -46542,7 +46572,7 @@ function readablePath(ctx, path) {
   return insideHub(ctx.hubDir, path);
 }
 function createServer(deps) {
-  const server2 = new McpServer({ name: "hub", version: "1.1.0" });
+  const server2 = new McpServer({ name: "hub", version: "1.2.0" });
   const workflowFor = (ctx) => deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
   const sourceFor = (ctx, wf) => {
     const source = deps.source(ctx, wf);
@@ -46606,9 +46636,9 @@ function createServer(deps) {
     return { ...result, handoverPath: rel(ctx, result.handoverPath), ...await persisted(ctx, `handover: ${ctx.user.name} ${task}`) };
   }));
   server2.registerTool("resume_task", {
-    description: `Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. With none of your own, loads a teammate's paused work on the task ("from" names them). Works offline from local files. ${UNTRUSTED}`,
-    inputSchema: { task: text2 }
-  }, async ({ task: rawTask }) => safe(async () => {
+    description: `Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. With none of your own, loads a teammate's paused work on the task ("from" names them); pass from to load a named teammate's handover. Works offline from local files. ${UNTRUSTED}`,
+    inputSchema: { task: text2, from: text2.optional() }
+  }, async ({ task: rawTask, from }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
     let source = null;
@@ -46619,7 +46649,7 @@ function createServer(deps) {
       if (!(e instanceof HubError)) throw e;
       reason = e.code === "BAD_CONFIG" ? "the ticket can't be loaded: the team's workflow.yml is invalid" : `${e.code}: ${e.message}`;
     }
-    const result = await resumeTask(ctx, source, task, reason);
+    const result = await resumeTask(ctx, source, task, reason, from);
     return result.from ? { untrusted: true, note: UNTRUSTED, ...result } : result;
   }));
   server2.registerTool("remember_site", {
@@ -46648,7 +46678,7 @@ function createServer(deps) {
     return JSON.stringify(details, null, 2);
   }));
   server2.registerTool("checkpoint", {
-    description: "Save paused-work state for a task (done, pending, blockers, exact resume steps, WIP branch or stash ref) and sync the hub.",
+    description: "Save paused-work state for a task (done, pending, blockers, exact resume steps, WIP branch or stash ref) and sync the hub. handedTo names the teammate the task is handed over to.",
     inputSchema: {
       task: text2,
       done: text2,
@@ -46657,12 +46687,20 @@ function createServer(deps) {
       resume: text2,
       site: text2.optional(),
       branch: text2.optional(),
-      stashRef: text2.optional()
+      stashRef: text2.optional(),
+      handedTo: text2.optional()
     }
   }, async (a) => safe(async () => {
     const ctx = deps.ctx();
     const args = { ...a, task: normalizeTicketId(a.task) };
     optionalSite(args.site);
+    if (args.handedTo !== void 0) {
+      assertName(args.handedTo);
+      if (args.handedTo === ctx.user.name) throw new HubError("BAD_INPUT", "handedTo must be a teammate, not you");
+      if (!loadTeam(ctx.hubDir).some((m) => m.name === args.handedTo)) {
+        throw new HubError("UNKNOWN_RECIPIENT", `${args.handedTo} is not in config/team.yml`);
+      }
+    }
     let asanaModifiedAt;
     try {
       const source = deps.source(ctx, workflowFor(ctx));
@@ -46749,10 +46787,10 @@ ${(0, import_node_fs15.readFileSync)(real, "utf8")}
 >>>`;
   }));
   server2.registerTool("send_message", {
-    description: `Send a request, question or answer to a teammate's Claude (written to their hub inbox). For answers, pass thread = the question's thread. ${APPROVAL}`,
+    description: `Send a request, question, answer or handover to a teammate's Claude (written to their hub inbox). For answers, pass thread = the question's thread. ${APPROVAL}`,
     inputSchema: {
       to: text2,
-      type: external_exports.enum(["request", "question", "answer"]),
+      type: external_exports.enum(["request", "question", "answer", "handover"]),
       body: text2,
       task: text2.optional(),
       thread: text2.optional()

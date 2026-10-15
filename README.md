@@ -208,7 +208,8 @@ Advanced: `node plugin/dist/hub.cjs bootstrap ./my-team-hub --members alice:dev,
 | `/rixflow:plate` | Everything on your plate: tickets, inbox, paused work |
 | `/rixflow:start <ticket id or plate number>` | Start a ticket with a handover brief |
 | `/rixflow:checkpoint [task id]` | Pause the current task and save where you left off |
-| `/rixflow:resume <task id>` | Resume a task from its handover and checkpoint |
+| `/rixflow:resume <task id> [from <person>]` | Resume a task from its handover and checkpoint, or pick up a teammate's |
+| `/rixflow:handover <task id> <person> [note]` | Hand a task to a teammate: pushes your WIP branch (after asking), saves a checkpoint and sends them a handover |
 | `/rixflow:wrapup [task id]` | Finish the task and capture what the team should know |
 | `/rixflow:inbox [message id]` | Show your inbox, or open one message |
 | `/rixflow:send <person> <task id> [note]` | Send a teammate's Claude a request about a task |

@@ -19,7 +19,7 @@ import { resumeTask, startTask } from '../core/tasks';
 import { loadSites, loadTeam } from '../core/team';
 import { hubCommand } from '../core/command';
 import type { TicketSource } from '../core/tickets/types';
-import { HubError, assertTicketId, normalizeTicketId, assertSiteCode, type Ctx } from '../core/types';
+import { HubError, assertName, assertTicketId, normalizeTicketId, assertSiteCode, type Ctx } from '../core/types';
 import { loadWorkflow, type Workflow } from '../core/workflow';
 
 export interface ServerDeps {
@@ -79,7 +79,7 @@ function readablePath(ctx: Ctx, path: unknown): string {
 }
 
 export function createServer(deps: ServerDeps): McpServer {
-  const server = new McpServer({ name: 'hub', version: '1.1.0' });
+  const server = new McpServer({ name: 'hub', version: '1.2.0' });
   const workflowFor = (ctx: Ctx): Workflow => (deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir));
   const sourceFor = (ctx: Ctx, wf: Workflow): TicketSource => {
     const source = deps.source(ctx, wf);
@@ -150,9 +150,9 @@ export function createServer(deps: ServerDeps): McpServer {
   }));
 
   server.registerTool('resume_task', {
-    description: `Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. With none of your own, loads a teammate's paused work on the task ("from" names them). Works offline from local files. ${UNTRUSTED}`,
-    inputSchema: { task: text },
-  }, async ({ task: rawTask }) => safe(async () => {
+    description: `Load the handover and checkpoint for a task, and report ticket changes and new comments since the handover was written. With none of your own, loads a teammate's paused work on the task ("from" names them); pass from to load a named teammate's handover. Works offline from local files. ${UNTRUSTED}`,
+    inputSchema: { task: text, from: text.optional() },
+  }, async ({ task: rawTask, from }) => safe(async () => {
     const ctx = deps.ctx();
     const task = normalizeTicketId(rawTask);
     // Works from local files even when the team's workflow cannot be used; only the ticket part is lost.
@@ -164,7 +164,7 @@ export function createServer(deps: ServerDeps): McpServer {
       if (!(e instanceof HubError)) throw e;
       reason = e.code === 'BAD_CONFIG' ? "the ticket can't be loaded: the team's workflow.yml is invalid" : `${e.code}: ${e.message}`;
     }
-    const result = await resumeTask(ctx, source, task, reason);
+    const result = await resumeTask(ctx, source, task, reason, from);
     return result.from ? { untrusted: true, note: UNTRUSTED, ...result } : result;
   }));
 
@@ -196,15 +196,22 @@ export function createServer(deps: ServerDeps): McpServer {
   }));
 
   server.registerTool('checkpoint', {
-    description: 'Save paused-work state for a task (done, pending, blockers, exact resume steps, WIP branch or stash ref) and sync the hub.',
+    description: 'Save paused-work state for a task (done, pending, blockers, exact resume steps, WIP branch or stash ref) and sync the hub. handedTo names the teammate the task is handed over to.',
     inputSchema: {
       task: text, done: text, pending: text, blockers: text, resume: text,
-      site: text.optional(), branch: text.optional(), stashRef: text.optional(),
+      site: text.optional(), branch: text.optional(), stashRef: text.optional(), handedTo: text.optional(),
     },
   }, async (a) => safe(async () => {
     const ctx = deps.ctx();
     const args = { ...a, task: normalizeTicketId(a.task) };
     optionalSite(args.site);
+    if (args.handedTo !== undefined) {
+      assertName(args.handedTo);
+      if (args.handedTo === ctx.user.name) throw new HubError('BAD_INPUT', 'handedTo must be a teammate, not you');
+      if (!loadTeam(ctx.hubDir).some((m) => m.name === args.handedTo)) {
+        throw new HubError('UNKNOWN_RECIPIENT', `${args.handedTo} is not in config/team.yml`);
+      }
+    }
     let asanaModifiedAt: string | undefined;
     try {
       const source = deps.source(ctx, workflowFor(ctx));
@@ -283,9 +290,9 @@ export function createServer(deps: ServerDeps): McpServer {
   }));
 
   server.registerTool('send_message', {
-    description: `Send a request, question or answer to a teammate's Claude (written to their hub inbox). For answers, pass thread = the question's thread. ${APPROVAL}`,
+    description: `Send a request, question, answer or handover to a teammate's Claude (written to their hub inbox). For answers, pass thread = the question's thread. ${APPROVAL}`,
     inputSchema: {
-      to: text, type: z.enum(['request', 'question', 'answer']), body: text,
+      to: text, type: z.enum(['request', 'question', 'answer', 'handover']), body: text,
       task: text.optional(), thread: text.optional(),
     },
   }, async (a) => safe(async () => {

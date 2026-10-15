@@ -113,6 +113,18 @@ describe('buildStatus', () => {
     expect(s.paused).toEqual([expect.objectContaining({ task: '111', title: 'Banner overlap', site: 'AC' })]);
   });
 
+  it('shows who paused work was handed to, and drops it once they have started the task', async () => {
+    const ctx = makeCtx();
+    handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');
+    writeCheckpoint({ ...ctx, now: () => new Date('2026-10-08T10:00:00Z') }, { task: '111', done: 'd', pending: 'p', blockers: 'none', resume: 'r', handedTo: 'ana' });
+    let s = await buildStatus(opts({}), deps(ctx));
+    expect(s.paused).toEqual([expect.objectContaining({ task: '111', handedTo: 'ana' })]);
+    const ana = { ...ctx, user: { ...ctx.user, name: 'ana' }, now: () => new Date('2026-10-09T10:00:00Z') };
+    writeHandover(ana, { task: '111', asanaModifiedAt: '', brief: 'b', related: [] });
+    s = await buildStatus(opts({}), deps(ctx));
+    expect(s.paused).toEqual([]);
+  });
+
   it('skips a checkpoint with an invalid task and cleans the others', async () => {
     const ctx = makeCtx();
     handover(ctx, '111', 'Banner overlap', '/home/u/projects/acme');

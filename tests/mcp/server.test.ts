@@ -160,6 +160,17 @@ describe('MCP server', () => {
     expect(persisted).toEqual(['checkpoint: hristijan 101', 'session: hristijan sess-1', 'finish: hristijan 101']);
   });
 
+  it('checkpoint records a handover to a teammate, and resume_task loads it by name', async () => {
+    const { call, ctx } = await connect();
+    const r = await call('checkpoint', { task: '101', done: '- a', pending: '- b', blockers: '- none', resume: 'go', branch: 'wip/101', handedTo: 'ana' });
+    expect(r.isError).toBe(false);
+    expect(readFileSync(join(ctx.hubDir, 'people/hristijan/checkpoints/101.md'), 'utf8')).toContain('handed_to: ana');
+    expect((await call('checkpoint', { task: '101', done: 'a', pending: 'b', blockers: 'c', resume: 'd', handedTo: 'nobody' })).text).toMatch(/^UNKNOWN_RECIPIENT/);
+    expect((await call('checkpoint', { task: '101', done: 'a', pending: 'b', blockers: 'c', resume: 'd', handedTo: 'hristijan' })).text).toMatch(/^BAD_INPUT/);
+    expect((await call('checkpoint', { task: '101', done: 'a', pending: 'b', blockers: 'c', resume: 'd', handedTo: '../ana' })).text).toMatch(/^BAD_NAME/);
+    expect((await call('resume_task', { task: '101', from: 'pm' })).text).toMatch(/^NOT_FOUND/);
+  });
+
   it('finish_task and drop_task delete the private brief', async () => {
     const { call, ctx } = await connect();
     for (const tool of ['finish_task', 'drop_task']) {

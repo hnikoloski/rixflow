@@ -17,3 +17,4 @@ Ask which to open. When the user picks one:
 - A question → answer it following the rixflow skill.
 - An answer → summarize it; mark it done when the user is finished with it.
 - A request → offer /rixflow:start for its task.
+- A handover → say who handed which task over, and offer `/rixflow:resume <task> from <sender>`. Leave the message unanswered; mark it done once the task is resumed.

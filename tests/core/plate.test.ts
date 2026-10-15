@@ -154,6 +154,13 @@ describe('gatherPlate', () => {
     const plate = await gatherPlate(ctx, asSource(fakeAsana([task({ gid: '5', name: 'Half done' })])), LEGACY);
     expect(plate.inProgress[0]).toMatchObject({ ref: '5', paused: true });
   });
+  it('shows who a paused task was handed to', async () => {
+    const ctx = makeCtx();
+    writeCheckpoint(ctx, { task: '5', done: '', pending: '', blockers: '', resume: '', handedTo: 'ana' });
+    const plate = await gatherPlate(ctx, asSource(fakeAsana([task({ gid: '5', name: 'Half done' })])), LEGACY);
+    expect(plate.inProgress[0]).toMatchObject({ ref: '5', paused: true, handedTo: 'ana' });
+    expect(renderPlate(plate)).toContain('(handed to ana)');
+  });
   it('degrades a task whose parent fetch fails instead of crashing', async () => {
     const ctx = makeCtx();
     const sub = task({ gid: '2', name: 'Orphan subtask', parent: { gid: '1', name: 'gone' }, custom_fields: [field('Website - Web', 'AC')] });
