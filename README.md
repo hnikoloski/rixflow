@@ -15,6 +15,8 @@
   <a href="https://buymeacoffee.com/rixmkd"><img alt="Buy me a coffee" src="https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black"></a>
 </p>
 
+**Your teammate's Claude picks up exactly where yours stopped.**
+
 Async team workflow for [Claude Code](https://claude.com/claude-code). Each teammate's Claude shares one git **hub** repo with the rest of the team, so work moves between people without meetings: pause a task with a checkpoint, and you (or a teammate) can pick it up tomorrow exactly where it stopped.
 
 <p align="center">
@@ -44,6 +46,7 @@ Async team workflow for [Claude Code](https://claude.com/claude-code). Each team
 - [Usage](#usage)
 - [Updating](#updating)
 - [Development](#development)
+- [Contributing](#contributing)
 - [Support](#support)
 - [License](#license)
 
@@ -233,6 +236,10 @@ npm run check        # typecheck + tests + build, and fails if plugin/dist is st
 | `claude plugin validate ui && claude plugin test ui` | Validate the mod and run its kit tests |
 
 [`AGENTS.md`](AGENTS.md) is the contributor guide. It covers the layout, the rules the code enforces (read-only ticket clients, scrubbing, hooks that never fail a session) and conventions.
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started, and look for issues labeled [good first issue](https://github.com/hnikoloski/rixflow/labels/good%20first%20issue). Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## Support
 

@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in RixFlow doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste tokens, passwords, hub contents or real ticket text here. Replace them with made-up values.
+        Security problems go to [private vulnerability reporting](https://github.com/hnikoloski/rixflow/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run /rixflow:start WEB-142
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: RixFlow version
+      description: Shown by /plugin in Claude Code.
+      placeholder: 0.4.1
+    validations:
+      required: true
+  - type: dropdown
+    id: tracker
+    attributes:
+      label: Ticket system
+      options: [Asana, Jira Cloud, Jira self-hosted, None / not relevant]
+  - type: input
+    id: env
+    attributes:
+      label: OS and Claude Code version
+      placeholder: macOS 15, Claude Code 2.x
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output
+      description: Tool errors show as `CODE: message`. For more detail, set `RIXFLOW_DEBUG=1`.
+      render: text
