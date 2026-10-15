@@ -1,7 +1,7 @@
 {
   "name": "rixflow",
   "author": { "name": "rixflow" },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "description": "Async team workflow through Claude Code: plate, handovers, inbox, shared knowledge"
 }

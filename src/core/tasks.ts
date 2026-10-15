@@ -2,15 +2,15 @@ import { normalizeDir, isInsideDir } from './config';
 import { buildBrief, oneLine } from './brief';
 import { mapTicket } from './mapping';
 import { listInbox } from './messages';
-import { findTeammateWork, readCheckpoint, readHandover, writeHandover, type Checkpoint, type Handover } from './notes';
+import { findTeammateWork, notesForTask, readCheckpoint, readHandover, writeHandover, type Checkpoint, type Handover } from './notes';
 import { scrub } from './scrub';
 import { search } from './search';
 import { markRestricted, readPrivateBrief, restrictedBrief, writePrivateBrief } from './private';
 import { resolveSite } from './sites';
 import { loadSites } from './team';
-import { parentChain, type Ticket, type TicketComment, type TicketSource } from './tickets/types';
+import { parentChain, type Ticket, type TicketChild, type TicketComment, type TicketSource } from './tickets/types';
 import { HubError, assertTicketId, type Ctx } from './types';
-import type { Workflow } from './workflow';
+import { stepOf, type Workflow } from './workflow';
 
 export interface StartResult {
   task: string;
@@ -86,6 +86,16 @@ function isAuthError(err: unknown): boolean {
   return err instanceof HubError && err.code.endsWith('_AUTH');
 }
 
+// Extra brief context is best effort: a failed lookup leaves it out, but a rejected login still surfaces.
+async function optional<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isAuthError(err)) throw err;
+    return fallback;
+  }
+}
+
 export async function startTask(ctx: Ctx, source: TicketSource, wf: Workflow, input: { task: string; cwd: string }): Promise<StartResult> {
   assertTicketId(input.task);
   const id = source.normalizeId(input.task);
@@ -93,14 +103,29 @@ export async function startTask(ctx: Ctx, source: TicketSource, wf: Workflow, in
   const chain = await parentChain(source, ticket);
   const site = resolveSite(chain, mapTicket(chain, wf, ctx.now()), loadSites(ctx.hubDir), ctx.user);
   const comments = await source.comments(id, 10);
+  // A subtask brings its epic (the top of the chain); the epic, or any ticket, brings its subtasks.
+  const root = chain[chain.length - 1];
+  const epic = root.id !== ticket.id
+    ? { ticket: root, comments: root.restricted ? [] : await optional(() => source.comments(root.id, 10), []) }
+    : null;
+  const subtasks: TicketChild[] = source.children ? await optional(() => source.children!(root.id), []) : [];
+  const step = epic ? stepOf(ticket.title, wf.steps) : null;
   const related = search(ctx.hubDir, { text: keywords(chain.map((t) => t.title).join(' ')), site: site.codes[0], limit: 5 }).map((h) => h.path);
+  // Stage builds on the dev step: link everyone's notes on the epic's dev subtasks.
+  if (step === 'stage') {
+    for (const c of subtasks) {
+      if (c.id === ticket.id || stepOf(c.title, wf.steps) !== 'dev') continue;
+      try { assertTicketId(c.id); } catch { continue; }
+      for (const path of notesForTask(ctx, c.id)) if (!related.includes(path)) related.push(path);
+    }
+  }
   const checkpoint = readCheckpoint(ctx, id);
   const requests = listInbox(ctx)
     .filter((m) => m.task === id)
     .map((m) => oneLine(`- ${m.type} from ${m.from} (${oneLine(scrub(m.created).slice(0, 10))}): ${m.body}`))
     .join('\n');
   if (ticket.restricted) markRestricted(ctx.configDir, id, ctx.now());
-  const full = buildBrief(ticket, chain, comments, source.label);
+  const full = buildBrief(ticket, chain, comments, source.label, { epic, subtasks, step });
   if (ticket.restricted) writePrivateBrief(ctx.configDir, id, full);
   const handoverPath = writeHandover(ctx, {
     task: id,

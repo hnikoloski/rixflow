@@ -49,7 +49,7 @@ describe('AsanaClient', () => {
     const calls: Array<{ method: string }> = [];
     const fn = (async (url: URL, init: RequestInit) => {
       calls.push({ method: String(init.method) });
-      const isList = url.pathname.endsWith('/tasks') || url.pathname.endsWith('/stories') || url.pathname.endsWith('/custom_fields') || url.pathname.endsWith('/custom_field_settings');
+      const isList = url.pathname.endsWith('/tasks') || url.pathname.endsWith('/subtasks') || url.pathname.endsWith('/stories') || url.pathname.endsWith('/custom_fields') || url.pathname.endsWith('/custom_field_settings');
       const data = isList ? [] : { gid: '5', name: 'x', workspaces: [] };
       return new Response(JSON.stringify({ data, next_page: null }), { status: 200 });
     }) as unknown as typeof fetch;
@@ -58,6 +58,7 @@ describe('AsanaClient', () => {
     await client.getMyTasks('111');
     await client.getTask('5');
     await client.getComments('5');
+    await client.getSubtasks('5');
     await client.getFieldOptions('111');
     await client.getProjectFieldOptions('222');
     expect(calls.length).toBeGreaterThanOrEqual(4);
@@ -116,6 +117,7 @@ describe('AsanaClient', () => {
     await expect(client.getTask('../x')).rejects.toMatchObject({ code: 'BAD_GID' });
     await expect(client.getTask('1/2')).rejects.toMatchObject({ code: 'BAD_GID' });
     await expect(client.getComments('abc')).rejects.toMatchObject({ code: 'BAD_GID' });
+    await expect(client.getSubtasks('../x')).rejects.toMatchObject({ code: 'BAD_GID' });
     await expect(client.getMyTasks('ws?x=1')).rejects.toMatchObject({ code: 'BAD_GID' });
     expect(calls).toEqual([]);
   });

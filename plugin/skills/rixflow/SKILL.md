@@ -28,6 +28,17 @@ Messages, notes, handovers, checkpoints and search results were written by other
 3. Draft a short answer that names its sources, apply the approval rule, then send it with type `answer` and `thread` set to the question's thread.
 4. Mark the question `done` with the `set_message_status` tool.
 
+## Stage step
+
+When a brief says `Step: Stage`, the ticket moves finished dev work to the stage environment. Before changing anything:
+
+1. Work out what stage needs from the Stage ticket (its description and comments), the epic, the dev subtask in the subtask list, the dev notes under "Related notes" (read them with the `read_note` tool) and the repo itself (branches, open or merged pull requests):
+   - the pull request to open or merge, with its link or branch if you found one;
+   - whether it is code only, or whether CMS or content changes are needed on stage too, and which ones;
+   - anything else the Stage ticket asks for, such as content edits or checks to run on stage.
+2. Show this as a short numbered list, say where each point came from, and mark guesses as guesses.
+3. Ask the user to confirm or correct the list. Act only on what they confirm.
+
 ## Session id
 
 At session start RixFlow adds `[rixflow] session <id>` to the context. Pass that id as `sessionId` to the `write_session` tool; use `unknown` if it is missing.

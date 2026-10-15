@@ -189,6 +189,16 @@ urgent: { field: Priority, values: [Highest] }
 
 `requires` is the lowest RixFlow version that understands the file; an older RixFlow skips the ticket features and says so. Hubs without a `workflow.yml` keep the original Asana mapping.
 
+#### Epics and subtasks
+
+When you start a subtask, the brief also carries its epic: the epic's description, its latest comments and a list of all its subtasks (who has each, which are done), with the description of every other subtask assigned to you. Starting the epic itself lists its subtasks. This works with Asana subtasks and with Jira sub-tasks and, on Jira Cloud, an epic's child issues.
+
+Subtasks named for a team step get extra help. When the brief says `Step: Stage`, Claude works out what moving the work to stage needs (the pull request to open or merge, whether CMS or content changes are needed, anything the Stage ticket asks for), using the dev subtask's notes from the hub, and asks you to confirm before acting. Steps are recognized by whole words in the subtask's title: by default `dev`/`development`, `stage`/`staging` and `live`/`production`/`prod`. A team that names them differently can set its own words in `workflow.yml`:
+
+```yaml
+steps: { dev: [build], stage: [uat, acceptance], live: [release] }
+```
+
 Advanced: `node plugin/dist/hub.cjs bootstrap ./my-team-hub --members alice:dev,bob:pm --sites AC:acme,GL:globex-web` creates a hub non-interactively. `--sites` maps short project codes to project folder names, so a ticket tagged `AC` opens in `~/projects/acme`.
 
 ## Usage

@@ -1,7 +1,7 @@
 import type { AsanaClient, AsanaReader, AsanaTask } from '../asana';
 import { HubError, assertGid } from '../types';
 import { fieldValue } from './types';
-import type { Discovery, Ticket, TicketSource } from './types';
+import type { Discovery, Ticket, TicketChild, TicketSource } from './types';
 
 export interface AsanaSourceOpts {
   workspace: string;
@@ -50,6 +50,9 @@ export function asanaSource(reader: Reader, opts: AsanaSourceOpts): TicketSource
     if (!reader.getMe) throw new HubError('ASANA_HTTP', 'This Asana reader cannot look up the current user');
     return reader.getMe();
   };
+  // The current user's gid, looked up once; null when the lookup is not possible.
+  let myGid: Promise<string | null> | undefined;
+  const myId = () => (myGid ??= reader.getMe ? reader.getMe().then((u) => u.gid, () => null) : Promise.resolve(null));
   const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
   // The dropdown options of every field with this name (workspace fields, and the project-only
   // fields of the projects the sampled tasks are in), then the values seen on sampled tickets.
@@ -95,6 +98,18 @@ export function asanaSource(reader: Reader, opts: AsanaSourceOpts): TicketSource
     },
     async comments(id, limit) {
       return (await reader.getComments(id, limit)).map((c) => ({ createdAt: c.created_at, author: c.author, text: c.text }));
+    },
+    async children(id): Promise<TicketChild[]> {
+      if (!reader.getSubtasks) return [];
+      const [subtasks, mine] = await Promise.all([reader.getSubtasks(id), myId()]);
+      return subtasks.map((t) => ({
+        id: t.gid,
+        title: t.name,
+        assignee: t.assignee?.name ?? null,
+        mine: !!mine && t.assignee?.gid === mine,
+        done: t.completed === true,
+        notes: t.notes ?? '',
+      }));
     },
     async scopes() {
       return (await me()).workspaces.map((w) => ({ id: w.gid, name: w.name }));

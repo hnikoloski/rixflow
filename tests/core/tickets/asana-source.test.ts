@@ -183,3 +183,26 @@ describe('asanaSource', () => {
     expect(await s.priorities()).toEqual([]);
   });
 });
+
+describe('asanaSource children', () => {
+  it('maps subtasks and marks the ones assigned to you', async () => {
+    const reader = Object.assign(fakeAsana([]), {
+      async getSubtasks() {
+        return [
+          { gid: '2', name: 'Dev', completed: true, notes: 'n', assignee: { gid: '900', name: 'Me' } },
+          { gid: '3', name: 'Stage', assignee: null },
+        ];
+      },
+      async getMe() { return { gid: '900', name: 'Me', workspaces: [] }; },
+    });
+    const src = asanaSource(reader, { workspace: '111' });
+    expect(await src.children!('1')).toEqual([
+      { id: '2', title: 'Dev', assignee: 'Me', mine: true, done: true, notes: 'n' },
+      { id: '3', title: 'Stage', assignee: null, mine: false, done: false, notes: '' },
+    ]);
+  });
+
+  it('returns nothing when the reader cannot list subtasks', async () => {
+    expect(await asanaSource(fakeAsana([]), { workspace: '111' }).children!('1')).toEqual([]);
+  });
+});

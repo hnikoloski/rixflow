@@ -31045,8 +31045,8 @@ var tupleProcessor = (schema, ctx, _json, params) => {
   let minItems = def.items.length;
   while (minItems > 0) {
     const item = def.items[minItems - 1];
-    const optional2 = ctx.io === "input" ? inputOptin(item) !== void 0 : item._zod.optout === "optional";
-    if (!optional2)
+    const optional3 = ctx.io === "input" ? inputOptin(item) !== void 0 : item._zod.optout === "optional";
+    if (!optional3)
       break;
     minItems--;
   }
@@ -35969,6 +35969,7 @@ var JIRA_TIMEOUT_MS = 5e3;
 var MAX_PAGES = 50;
 var PAGE_SIZE = 100;
 var SEARCH_FIELDS = "*all,-comment,-worklog,-attachment,-issuelinks,-subtasks";
+var MAX_CHILDREN = 100;
 var clampLimit = (n) => Math.min(100, Math.max(1, Math.floor(Number(n)) || 1));
 var PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
 function jiraBaseUrl(raw) {
@@ -36193,6 +36194,27 @@ var JiraClient = class {
     const issue2 = obj2(await this.#get(`${this.#api}/issue/${key}`));
     if (typeof issue2.key !== "string" || !JIRA_KEY.test(issue2.key)) throw new HubError("JIRA_HTTP", `Jira returned no issue for /issue/${key}`);
     return this.#toTicket(issue2, meta3);
+  }
+  // Sub-tasks, and on Jira Cloud an epic's child issues: both answer to `parent = KEY`.
+  async children(id) {
+    const key = this.normalizeId(id);
+    const [issues, me] = await Promise.all([
+      this.#search(`parent = ${key} ORDER BY created ASC`, MAX_CHILDREN),
+      this.whoAmI().then((u) => u.id, () => null)
+    ]);
+    return issues.map((issue2) => {
+      const f = issue2.fields ?? {};
+      const a = obj2(f.assignee);
+      const assigneeId = str(a.accountId) ?? str(a.name) ?? str(a.key);
+      return {
+        id: issue2.key,
+        title: str(f.summary) ?? "",
+        assignee: str(a.displayName) ?? assigneeId,
+        mine: !!me && assigneeId === me,
+        done: str(obj2(obj2(f.status).statusCategory).key) === "done",
+        notes: f.security != null ? "" : this.#text(f.description)
+      };
+    });
   }
   async comments(id, limit = 10) {
     const key = this.normalizeId(id);
@@ -36448,6 +36470,13 @@ var AsanaClient = class {
       opt_fields: "custom_field.name,custom_field.enum_options.name,custom_field.enum_options.enabled"
     });
     return settings.flatMap((s) => s.custom_field?.name ? [enabledOptions(s.custom_field)] : []);
+  }
+  async getSubtasks(gid) {
+    assertGid(gid);
+    return this.#all(`/tasks/${gid}/subtasks`, {
+      limit: "100",
+      opt_fields: "name,notes,completed,assignee.name"
+    });
   }
   async getComments(gid, limit = 10) {
     assertGid(gid);
@@ -36922,9 +36951,22 @@ function loadSites(hubDir2) {
 }
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "1.0.0";
+var RIXFLOW_VERSION = "1.1.0";
 
 // src/core/workflow.ts
+var DEFAULT_STEPS = Object.freeze({
+  dev: ["dev", "development"],
+  stage: ["stage", "staging"],
+  live: ["live", "production", "prod"]
+});
+var words = (text3) => ` ${text3.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(" ")} `;
+function stepOf(title, steps = DEFAULT_STEPS) {
+  const t = words(title);
+  for (const step of ["live", "stage", "dev"]) {
+    if (steps[step].some((w) => words(w).trim() && t.includes(words(w)))) return step;
+  }
+  return null;
+}
 var LEGACY = {
   requires: null,
   legacy: true,
@@ -37041,6 +37083,15 @@ function parseStatus(raw) {
   }
   return out;
 }
+function parseSteps(raw) {
+  if (raw.steps === void 0 || raw.steps === null) return void 0;
+  const s = section(raw, "steps");
+  const list = (step) => {
+    const v = stringList(s[step], `steps.${step}`);
+    return v.length ? v : [...DEFAULT_STEPS[step]];
+  };
+  return { dev: list("dev"), stage: list("stage"), live: list("live") };
+}
 function parseSprints(raw) {
   const s = section(raw, "sprints");
   const mode = s.mode === void 0 || s.mode === null ? "none" : s.mode;
@@ -37071,7 +37122,8 @@ function loadWorkflow(hubDir2, version2 = RIXFLOW_VERSION) {
     project: parseProject(raw),
     status: parseStatus(raw),
     sprints: parseSprints(raw),
-    urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") }
+    urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") },
+    ...raw.steps !== void 0 && raw.steps !== null ? { steps: parseSteps(raw) } : {}
   };
 }
 function jiraUrlChanged(wf, user) {
@@ -37156,6 +37208,8 @@ function asanaSource(reader, opts) {
     if (!reader.getMe) throw new HubError("ASANA_HTTP", "This Asana reader cannot look up the current user");
     return reader.getMe();
   };
+  let myGid;
+  const myId = () => myGid ??= reader.getMe ? reader.getMe().then((u) => u.gid, () => null) : Promise.resolve(null);
   const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
   const values = async (field, seen) => {
     const tasks = await reader.getMyTasks(opts.workspace);
@@ -37197,6 +37251,18 @@ function asanaSource(reader, opts) {
     },
     async comments(id, limit) {
       return (await reader.getComments(id, limit)).map((c) => ({ createdAt: c.created_at, author: c.author, text: c.text }));
+    },
+    async children(id) {
+      if (!reader.getSubtasks) return [];
+      const [subtasks, mine] = await Promise.all([reader.getSubtasks(id), myId()]);
+      return subtasks.map((t) => ({
+        id: t.gid,
+        title: t.name,
+        assignee: t.assignee?.name ?? null,
+        mine: !!mine && t.assignee?.gid === mine,
+        done: t.completed === true,
+        notes: t.notes ?? ""
+      }));
     },
     async scopes() {
       return (await me()).workspaces.map((w) => ({ id: w.gid, name: w.name }));
@@ -45713,6 +45779,39 @@ function findTeammateWork(ctx, task) {
   }
   return best;
 }
+function notesForTask(ctx, task) {
+  assertTicketId(task);
+  const peopleDir = (0, import_node_path14.join)(ctx.hubDir, "people");
+  if (!(0, import_node_fs12.existsSync)(peopleDir)) return [];
+  const hubReal = (0, import_node_fs12.realpathSync)(ctx.hubDir);
+  const inside = (path) => {
+    try {
+      return (0, import_node_fs12.realpathSync)(path).startsWith(hubReal + import_node_path14.sep);
+    } catch {
+      return false;
+    }
+  };
+  const out = [];
+  for (const name of (0, import_node_fs12.readdirSync)(peopleDir).sort()) {
+    try {
+      assertName(name);
+    } catch {
+      continue;
+    }
+    const dir = personDir(ctx, name);
+    for (const kind of ["handovers", "checkpoints"]) {
+      if (inside((0, import_node_path14.join)(dir, kind, `${task}.md`))) out.push(`people/${name}/${kind}/${task}.md`);
+    }
+    for (const file2 of listMd((0, import_node_path14.join)(dir, "sessions")).sort()) {
+      if (!inside(file2)) continue;
+      try {
+        if (String(readDoc(file2).data.task ?? "") === task) out.push(`people/${name}/sessions/${file2.slice(file2.lastIndexOf(import_node_path14.sep) + 1)}`);
+      } catch {
+      }
+    }
+  }
+  return out;
+}
 function listCheckpoints(ctx) {
   return readAll2(listMd((0, import_node_path14.join)(personDir(ctx), "checkpoints")), toCheckpoint);
 }
@@ -46149,7 +46248,10 @@ var FIELDS = ["Website", "Status", "Priority", "Type", "Epic", "Page", "Theme", 
 var LINKS = ["Design link", "Draft link", "Content link", "Dev Link", "Stage link", "Live link", "Amplitude dashboard"];
 var oneLine = (text3) => text3.replace(/\s+/g, " ").trim();
 var quote2 = (text3) => text3.replace(/\r\n?/g, "\n").trim().split("\n").map((l) => `> ${l}`).join("\n");
-function buildBrief(ticket, chain, comments, label) {
+var STEP_NAMES = { dev: "Dev", stage: "Stage", live: "Live" };
+var MAX_SUBTASKS = 30;
+var commentLines = (comments) => comments.map((c) => `- ${oneLine(c.author)} (${oneLine(scrub(c.createdAt).slice(0, 10))}): ${oneLine(c.text)}`);
+function buildBrief(ticket, chain, comments, label, ctx = {}) {
   const lines = [`# ${oneLine(ticket.title)}`, "", `- ${oneLine(label)}: ${oneLine(ticket.url ?? ticket.id)}`];
   for (const name of FIELDS) {
     const v = name === "Status" ? ticket.status ?? fieldValue(ticket, name) : name === "Priority" ? chain.find((t) => t.priority)?.priority ?? valueFromChain(chain, name) : valueFromChain(chain, name);
@@ -46157,15 +46259,33 @@ function buildBrief(ticket, chain, comments, label) {
   }
   if (ticket.due) lines.push(`- Due: ${oneLine(ticket.due)}`);
   if (chain.length > 1) lines.push(`- Parent: ${chain.slice(1).map((t) => oneLine(t.title)).join(" \u203A ")}`);
+  if (ctx.step) lines.push(`- Step: ${STEP_NAMES[ctx.step]}`);
   const links = LINKS.map((name) => [name, fieldValue(ticket, name)]).filter(([, v]) => v);
   if (links.length) {
     lines.push("", "### Links");
     for (const [name, v] of links) lines.push(`- ${name}:`, quote2(v));
   }
   if (ticket.notes.trim()) lines.push("", "### Description", quote2(scrub(ticket.notes).slice(0, 4e3)));
-  if (comments.length) {
-    lines.push("", "### Recent comments");
-    for (const c of comments) lines.push(`- ${oneLine(c.author)} (${oneLine(scrub(c.createdAt).slice(0, 10))}): ${oneLine(c.text)}`);
+  if (comments.length) lines.push("", "### Recent comments", ...commentLines(comments));
+  const epic = ctx.epic?.ticket;
+  if (epic) {
+    lines.push("", `### Epic: ${oneLine(epic.title)}`, `- ${oneLine(label)}: ${oneLine(epic.url ?? epic.id)}`);
+    if (epic.restricted) lines.push("- The epic is restricted: open it in the tracker for its description and comments.");
+    else {
+      if (epic.notes.trim()) lines.push(quote2(scrub(epic.notes).slice(0, 4e3)));
+      if (ctx.epic.comments.length) lines.push("", "### Epic comments", ...commentLines(ctx.epic.comments));
+    }
+  }
+  const subtasks = ctx.subtasks ?? [];
+  if (subtasks.length) {
+    lines.push("", epic ? "### Subtasks of the epic" : "### Subtasks");
+    for (const c of subtasks.slice(0, MAX_SUBTASKS)) {
+      const who = c.assignee ? oneLine(c.assignee) : "unassigned";
+      const marks = [c.mine ? "you" : "", c.id === ticket.id ? "this ticket" : ""].filter(Boolean).join(", ");
+      lines.push(`- [${c.done ? "done" : "open"}] ${oneLine(c.title)} \xB7 ${who}${marks ? ` (${marks})` : ""} \xB7 ${oneLine(c.id)}`);
+      if (c.mine && c.id !== ticket.id && c.notes.trim()) lines.push(quote2(scrub(c.notes).slice(0, 1500)));
+    }
+    if (subtasks.length > MAX_SUBTASKS) lines.push(`- \u2026and ${subtasks.length - MAX_SUBTASKS} more`);
   }
   return scrub(lines.join("\n"));
 }
@@ -46267,6 +46387,14 @@ function scrubFields(v) {
 function isAuthError2(err) {
   return err instanceof HubError && err.code.endsWith("_AUTH");
 }
+async function optional2(fn, fallback) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isAuthError2(err)) throw err;
+    return fallback;
+  }
+}
 async function startTask(ctx, source, wf, input2) {
   assertTicketId(input2.task);
   const id = source.normalizeId(input2.task);
@@ -46274,11 +46402,26 @@ async function startTask(ctx, source, wf, input2) {
   const chain = await parentChain(source, ticket);
   const site = resolveSite(chain, mapTicket(chain, wf, ctx.now()), loadSites(ctx.hubDir), ctx.user);
   const comments = await source.comments(id, 10);
+  const root = chain[chain.length - 1];
+  const epic = root.id !== ticket.id ? { ticket: root, comments: root.restricted ? [] : await optional2(() => source.comments(root.id, 10), []) } : null;
+  const subtasks = source.children ? await optional2(() => source.children(root.id), []) : [];
+  const step = epic ? stepOf(ticket.title, wf.steps) : null;
   const related = search(ctx.hubDir, { text: keywords(chain.map((t) => t.title).join(" ")), site: site.codes[0], limit: 5 }).map((h) => h.path);
+  if (step === "stage") {
+    for (const c of subtasks) {
+      if (c.id === ticket.id || stepOf(c.title, wf.steps) !== "dev") continue;
+      try {
+        assertTicketId(c.id);
+      } catch {
+        continue;
+      }
+      for (const path of notesForTask(ctx, c.id)) if (!related.includes(path)) related.push(path);
+    }
+  }
   const checkpoint = readCheckpoint(ctx, id);
   const requests = listInbox(ctx).filter((m) => m.task === id).map((m) => oneLine(`- ${m.type} from ${m.from} (${oneLine(scrub(m.created).slice(0, 10))}): ${m.body}`)).join("\n");
   if (ticket.restricted) markRestricted(ctx.configDir, id, ctx.now());
-  const full = buildBrief(ticket, chain, comments, source.label);
+  const full = buildBrief(ticket, chain, comments, source.label, { epic, subtasks, step });
   if (ticket.restricted) writePrivateBrief(ctx.configDir, id, full);
   const handoverPath2 = writeHandover(ctx, {
     task: id,
@@ -46399,7 +46542,7 @@ function readablePath(ctx, path) {
   return insideHub(ctx.hubDir, path);
 }
 function createServer(deps) {
-  const server2 = new McpServer({ name: "hub", version: "1.0.0" });
+  const server2 = new McpServer({ name: "hub", version: "1.1.0" });
   const workflowFor = (ctx) => deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir);
   const sourceFor = (ctx, wf) => {
     const source = deps.source(ctx, wf);
@@ -46453,7 +46596,7 @@ function createServer(deps) {
     return renderPlate(await gatherPlate(ctx, sourceFor(ctx, wf), wf));
   }));
   server2.registerTool("start_task", {
-    description: "Prepare a handover for a ticket (brief, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.",
+    description: "Prepare a handover for a ticket (brief with its epic and subtasks, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.",
     inputSchema: { task: text2, cwd: text2 }
   }, async ({ task: rawTask, cwd }) => safe(async () => {
     const ctx = deps.ctx();

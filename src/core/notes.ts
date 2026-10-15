@@ -207,6 +207,39 @@ export function findTeammateWork(ctx: Ctx, task: string): TeammateWork | null {
   return best;
 }
 
+// Every teammate's notes on a task, yours included: handovers, checkpoints and session summaries,
+// as hub-relative paths, oldest person first. Links that leave the hub are skipped.
+export function notesForTask(ctx: Ctx, task: string): string[] {
+  assertTicketId(task);
+  const peopleDir = join(ctx.hubDir, 'people');
+  if (!existsSync(peopleDir)) return [];
+  const hubReal = realpathSync(ctx.hubDir);
+  const inside = (path: string): boolean => {
+    try {
+      return realpathSync(path).startsWith(hubReal + sep);
+    } catch {
+      return false;
+    }
+  };
+  const out: string[] = [];
+  for (const name of readdirSync(peopleDir).sort()) {
+    try { assertName(name); } catch { continue; }
+    const dir = personDir(ctx, name);
+    for (const kind of ['handovers', 'checkpoints']) {
+      if (inside(join(dir, kind, `${task}.md`))) out.push(`people/${name}/${kind}/${task}.md`);
+    }
+    for (const file of listMd(join(dir, 'sessions')).sort()) {
+      if (!inside(file)) continue;
+      try {
+        if (String(readDoc(file).data.task ?? '') === task) out.push(`people/${name}/sessions/${file.slice(file.lastIndexOf(sep) + 1)}`);
+      } catch {
+        // An unreadable summary is skipped.
+      }
+    }
+  }
+  return out;
+}
+
 export function listCheckpoints(ctx: Ctx): Checkpoint[] {
   return readAll(listMd(join(personDir(ctx), 'checkpoints')), toCheckpoint);
 }

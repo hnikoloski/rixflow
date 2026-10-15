@@ -1,11 +1,12 @@
 import { HubError, JIRA_KEY, normalizeTicketId } from '../types';
 import { adfToText } from './adf';
-import type { Discovery, Ticket, TicketComment, TicketSource } from './types';
+import type { Discovery, Ticket, TicketChild, TicketComment, TicketSource } from './types';
 
 export const JIRA_TIMEOUT_MS = 5_000;
 const MAX_PAGES = 50;
 const PAGE_SIZE = 100;
 const SEARCH_FIELDS = '*all,-comment,-worklog,-attachment,-issuelinks,-subtasks';
+const MAX_CHILDREN = 100;
 const clampLimit = (n: number) => Math.min(100, Math.max(1, Math.floor(Number(n)) || 1));
 const PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
 
@@ -276,6 +277,28 @@ export class JiraClient implements TicketSource, Discovery {
     const issue = obj(await this.#get(`${this.#api}/issue/${key}`));
     if (typeof issue.key !== 'string' || !JIRA_KEY.test(issue.key)) throw new HubError('JIRA_HTTP', `Jira returned no issue for /issue/${key}`);
     return this.#toTicket(issue as unknown as JiraIssue, meta);
+  }
+
+  // Sub-tasks, and on Jira Cloud an epic's child issues: both answer to `parent = KEY`.
+  async children(id: string): Promise<TicketChild[]> {
+    const key = this.normalizeId(id);
+    const [issues, me] = await Promise.all([
+      this.#search(`parent = ${key} ORDER BY created ASC`, MAX_CHILDREN),
+      this.whoAmI().then((u) => u.id, () => null),
+    ]);
+    return issues.map((issue) => {
+      const f = issue.fields ?? {};
+      const a = obj(f.assignee);
+      const assigneeId = str(a.accountId) ?? str(a.name) ?? str(a.key);
+      return {
+        id: issue.key,
+        title: str(f.summary) ?? '',
+        assignee: str(a.displayName) ?? assigneeId,
+        mine: !!me && assigneeId === me,
+        done: str(obj(obj(f.status).statusCategory).key) === 'done',
+        notes: f.security != null ? '' : this.#text(f.description),
+      };
+    });
   }
 
   async comments(id: string, limit = 10): Promise<TicketComment[]> {

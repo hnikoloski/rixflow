@@ -123,6 +123,35 @@ describe('JiraClient tickets', () => {
   });
 });
 
+describe('JiraClient children', () => {
+  it('lists sub-tasks and child issues with parent = KEY, marking yours and done ones', async () => {
+    const { fn, calls } = jiraFetch({
+      '/rest/api/3/field': FIELDS,
+      '/rest/api/3/myself': { accountId: 'a1', displayName: 'Dana' },
+      '/rest/api/3/search/jql': { issues: [
+        issue('WEB-2', { summary: 'Development', assignee: { accountId: 'a1', displayName: 'Dana' }, status: { name: 'Done', statusCategory: { key: 'done' } } }),
+        issue('WEB-3', { summary: 'Stage', assignee: { accountId: 'b2', displayName: 'Bo' }, description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'CMS copy' }] }] } }),
+        issue('WEB-4', { summary: 'Legal', assignee: null, security: { name: 'Internal' }, description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hidden' }] }] } }),
+      ], isLast: true },
+    });
+    const kids = await new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).children!('web-1');
+    expect(kids).toEqual([
+      { id: 'WEB-2', title: 'Development', assignee: 'Dana', mine: true, done: true, notes: '' },
+      { id: 'WEB-3', title: 'Stage', assignee: 'Bo', mine: false, done: false, notes: 'CMS copy' },
+      { id: 'WEB-4', title: 'Legal', assignee: null, mine: false, done: false, notes: '' },
+    ]);
+    const search = calls.find((c) => c.url.pathname.endsWith('/search/jql'))!;
+    expect(search.url.searchParams.get('jql')).toBe('parent = WEB-1 ORDER BY created ASC');
+    expect(calls.every((c) => c.method === 'GET')).toBe(true);
+  });
+
+  it('rejects a bad key before any request', async () => {
+    const { fn, calls } = jiraFetch({});
+    await expect(new JiraClient(CLOUD_URL, CLOUD, { fetchFn: fn }).children!('1 OR 1=1')).rejects.toMatchObject({ code: 'BAD_TICKET' });
+    expect(calls).toEqual([]);
+  });
+});
+
 describe('JiraClient discovery', () => {
   it('lists projects, statuses, priorities and boards (all GET)', async () => {
     const { fn, calls } = jiraFetch({

@@ -26,6 +26,16 @@ export interface TicketComment {
   text: string;
 }
 
+// A subtask (Asana) or child issue (Jira) of a ticket, as listed in a brief.
+export interface TicketChild {
+  id: string;
+  title: string;
+  assignee: string | null; // display name
+  mine: boolean; // assigned to the person running RixFlow
+  done: boolean;
+  notes: string; // '' when the tracker hides it (a restricted Jira issue)
+}
+
 export interface TicketSource {
   readonly kind: TrackerKind;
   readonly label: string; // 'Asana' | 'Jira'
@@ -34,6 +44,7 @@ export interface TicketSource {
   myTickets(): Promise<Ticket[]>; // open tickets assigned to me, in scope
   ticket(id: string): Promise<Ticket>;
   comments(id: string, limit?: number): Promise<TicketComment[]>;
+  children?(id: string): Promise<TicketChild[]>; // subtasks / child issues, oldest first
 }
 
 export interface Discovery {

@@ -10914,6 +10914,7 @@ var JIRA_TIMEOUT_MS = 5e3;
 var MAX_PAGES = 50;
 var PAGE_SIZE = 100;
 var SEARCH_FIELDS = "*all,-comment,-worklog,-attachment,-issuelinks,-subtasks";
+var MAX_CHILDREN = 100;
 var clampLimit = (n) => Math.min(100, Math.max(1, Math.floor(Number(n)) || 1));
 var PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,19}$/;
 function jiraBaseUrl(raw) {
@@ -11138,6 +11139,27 @@ var JiraClient = class {
     const issue = obj2(await this.#get(`${this.#api}/issue/${key}`));
     if (typeof issue.key !== "string" || !JIRA_KEY.test(issue.key)) throw new HubError("JIRA_HTTP", `Jira returned no issue for /issue/${key}`);
     return this.#toTicket(issue, meta);
+  }
+  // Sub-tasks, and on Jira Cloud an epic's child issues: both answer to `parent = KEY`.
+  async children(id) {
+    const key = this.normalizeId(id);
+    const [issues, me] = await Promise.all([
+      this.#search(`parent = ${key} ORDER BY created ASC`, MAX_CHILDREN),
+      this.whoAmI().then((u) => u.id, () => null)
+    ]);
+    return issues.map((issue) => {
+      const f = issue.fields ?? {};
+      const a = obj2(f.assignee);
+      const assigneeId = str(a.accountId) ?? str(a.name) ?? str(a.key);
+      return {
+        id: issue.key,
+        title: str(f.summary) ?? "",
+        assignee: str(a.displayName) ?? assigneeId,
+        mine: !!me && assigneeId === me,
+        done: str(obj2(obj2(f.status).statusCategory).key) === "done",
+        notes: f.security != null ? "" : this.#text(f.description)
+      };
+    });
   }
   async comments(id, limit = 10) {
     const key = this.normalizeId(id);
@@ -11903,10 +11925,15 @@ var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "1.0.0";
+var RIXFLOW_VERSION = "1.1.0";
 var WORKFLOW_REQUIRES = "0.3.0";
 
 // src/core/workflow.ts
+var DEFAULT_STEPS = Object.freeze({
+  dev: ["dev", "development"],
+  stage: ["stage", "staging"],
+  live: ["live", "production", "prod"]
+});
 var LEGACY = {
   requires: null,
   legacy: true,
@@ -12023,6 +12050,15 @@ function parseStatus(raw) {
   }
   return out;
 }
+function parseSteps(raw) {
+  if (raw.steps === void 0 || raw.steps === null) return void 0;
+  const s = section(raw, "steps");
+  const list = (step) => {
+    const v = stringList(s[step], `steps.${step}`);
+    return v.length ? v : [...DEFAULT_STEPS[step]];
+  };
+  return { dev: list("dev"), stage: list("stage"), live: list("live") };
+}
 function parseSprints(raw) {
   const s = section(raw, "sprints");
   const mode = s.mode === void 0 || s.mode === null ? "none" : s.mode;
@@ -12053,7 +12089,8 @@ function loadWorkflow(hubDir2, version = RIXFLOW_VERSION) {
     project: parseProject(raw),
     status: parseStatus(raw),
     sprints: parseSprints(raw),
-    urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") }
+    urgent: { field: optString(urgent.field, "urgent.field"), values: stringList(urgent.values, "urgent.values") },
+    ...raw.steps !== void 0 && raw.steps !== null ? { steps: parseSteps(raw) } : {}
   };
 }
 function workflowToYaml(wf) {
@@ -12366,6 +12403,13 @@ var AsanaClient = class {
     });
     return settings.flatMap((s) => s.custom_field?.name ? [enabledOptions(s.custom_field)] : []);
   }
+  async getSubtasks(gid) {
+    assertGid(gid);
+    return this.#all(`/tasks/${gid}/subtasks`, {
+      limit: "100",
+      opt_fields: "name,notes,completed,assignee.name"
+    });
+  }
   async getComments(gid, limit = 10) {
     assertGid(gid);
     if (limit <= 0) return [];
@@ -12583,6 +12627,8 @@ function asanaSource(reader, opts) {
     if (!reader.getMe) throw new HubError("ASANA_HTTP", "This Asana reader cannot look up the current user");
     return reader.getMe();
   };
+  let myGid;
+  const myId = () => myGid ??= reader.getMe ? reader.getMe().then((u) => u.gid, () => null) : Promise.resolve(null);
   const sample = async () => (await reader.getMyTasks(opts.workspace)).map(conv);
   const values = async (field2, seen) => {
     const tasks = await reader.getMyTasks(opts.workspace);
@@ -12624,6 +12670,18 @@ function asanaSource(reader, opts) {
     },
     async comments(id, limit) {
       return (await reader.getComments(id, limit)).map((c) => ({ createdAt: c.created_at, author: c.author, text: c.text }));
+    },
+    async children(id) {
+      if (!reader.getSubtasks) return [];
+      const [subtasks, mine] = await Promise.all([reader.getSubtasks(id), myId()]);
+      return subtasks.map((t) => ({
+        id: t.gid,
+        title: t.name,
+        assignee: t.assignee?.name ?? null,
+        mine: !!mine && t.assignee?.gid === mine,
+        done: t.completed === true,
+        notes: t.notes ?? ""
+      }));
     },
     async scopes() {
       return (await me()).workspaces.map((w) => ({ id: w.gid, name: w.name }));

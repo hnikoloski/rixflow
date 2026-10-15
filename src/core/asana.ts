@@ -14,6 +14,14 @@ export interface AsanaTask {
   permalink_url?: string;
 }
 
+export interface AsanaSubtask {
+  gid: string;
+  name: string;
+  notes?: string;
+  completed?: boolean;
+  assignee?: { gid: string; name: string } | null;
+}
+
 export interface AsanaComment {
   created_at: string;
   author: string;
@@ -24,6 +32,7 @@ export interface AsanaReader {
   getMyTasks(workspace: string): Promise<AsanaTask[]>;
   getTask(gid: string): Promise<AsanaTask>;
   getComments(gid: string, limit?: number): Promise<AsanaComment[]>;
+  getSubtasks?(gid: string): Promise<AsanaSubtask[]>;
 }
 
 const DEFAULT_BASE = 'https://app.asana.com/api/1.0';
@@ -163,6 +172,13 @@ export class AsanaClient implements AsanaReader {
       limit: '100', opt_fields: 'custom_field.name,custom_field.enum_options.name,custom_field.enum_options.enabled',
     });
     return settings.flatMap((s) => (s.custom_field?.name ? [enabledOptions(s.custom_field)] : []));
+  }
+
+  async getSubtasks(gid: string): Promise<AsanaSubtask[]> {
+    assertGid(gid);
+    return this.#all<AsanaSubtask>(`/tasks/${gid}/subtasks`, {
+      limit: '100', opt_fields: 'name,notes,completed,assignee.name',
+    });
   }
 
   async getComments(gid: string, limit = 10): Promise<AsanaComment[]> {

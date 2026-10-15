@@ -22,6 +22,29 @@ export interface Workflow {
   status: { field: string | null; todo: string[]; in_progress: string[]; waiting: string[]; done: string[] };
   sprints: { mode: 'none' } | { mode: 'asana-sections' } | { mode: 'jira-sprints'; board: number | null };
   urgent: { field: string | null; values: string[] };
+  // Words in a subtask's title that mark it as a team's dev, stage or live step. Absent: DEFAULT_STEPS.
+  steps?: Steps;
+}
+
+export type Step = 'dev' | 'stage' | 'live';
+export type Steps = Record<Step, string[]>;
+
+export const DEFAULT_STEPS: Readonly<Steps> = Object.freeze({
+  dev: ['dev', 'development'],
+  stage: ['stage', 'staging'],
+  live: ['live', 'production', 'prod'],
+});
+
+const words = (text: string): string => ` ${text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ')} `;
+
+// The step a subtask title names, matched on whole words. A title naming several ("Stage to live")
+// counts as the later step.
+export function stepOf(title: string, steps: Steps = DEFAULT_STEPS): Step | null {
+  const t = words(title);
+  for (const step of ['live', 'stage', 'dev'] as const) {
+    if (steps[step].some((w) => words(w).trim() && t.includes(words(w)))) return step;
+  }
+  return null;
 }
 
 const LEGACY: Workflow = {
@@ -153,6 +176,16 @@ function parseStatus(raw: Record<string, unknown>): Workflow['status'] {
   return out;
 }
 
+function parseSteps(raw: Record<string, unknown>): Steps | undefined {
+  if (raw.steps === undefined || raw.steps === null) return undefined;
+  const s = section(raw, 'steps');
+  const list = (step: Step) => {
+    const v = stringList(s[step], `steps.${step}`);
+    return v.length ? v : [...DEFAULT_STEPS[step]];
+  };
+  return { dev: list('dev'), stage: list('stage'), live: list('live') };
+}
+
 function parseSprints(raw: Record<string, unknown>): Workflow['sprints'] {
   const s = section(raw, 'sprints');
   const mode = s.mode === undefined || s.mode === null ? 'none' : s.mode;
@@ -185,6 +218,7 @@ export function loadWorkflow(hubDir: string, version: string = RIXFLOW_VERSION):
     status: parseStatus(raw),
     sprints: parseSprints(raw),
     urgent: { field: optString(urgent.field, 'urgent.field'), values: stringList(urgent.values, 'urgent.values') },
+    ...(raw.steps !== undefined && raw.steps !== null ? { steps: parseSteps(raw) } : {}),
   };
 }
 

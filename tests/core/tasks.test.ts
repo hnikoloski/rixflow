@@ -416,3 +416,124 @@ describe('startTask and resumeTask on any TicketSource', () => {
     await expect(resumeTask(ctx, src, 'WEB-7')).rejects.toMatchObject({ code: 'JIRA_AUTH' });
   });
 });
+
+describe('epics and subtasks', () => {
+  // An epic owned by a stakeholder, with design, dev, stage and live subtasks.
+  const epic = task({
+    gid: '200', name: 'Pricing page refresh', permalink_url: 'https://app.asana.com/0/1/200',
+    notes: 'Full spec: new hero, new plans table.\n## not a section', custom_fields: [field('Website - Web', 'AC')],
+  });
+  const kid = (gid: string, name: string, extra: Partial<AsanaTask> = {}) => task({ gid, name, parent: { gid: '200', name: epic.name }, ...extra });
+  const design = kid('201', 'Design');
+  const dev = kid('202', 'Development', { notes: 'Build the hero.' });
+  const stage = kid('203', 'Implementation to stage', { notes: 'Also update the CMS copy.' });
+  const live = kid('204', 'Live');
+  const subtasks = {
+    '200': [
+      { gid: '201', name: 'Design', completed: true, assignee: { gid: '7', name: 'Dana Designer' } },
+      { gid: '202', name: 'Development', completed: true, notes: 'Build the hero.', assignee: { gid: '900', name: 'Me' } },
+      { gid: '203', name: 'Implementation to stage', notes: 'Also update the CMS copy.', assignee: { gid: '900', name: 'Me' } },
+      { gid: '204', name: 'Live', notes: 'Close after deploy.', assignee: null },
+    ],
+  };
+  const epicComments = { '200': [{ created_at: '2026-10-05T09:00:00.000Z', author: 'Stakeholder', text: 'Plans table needs a yearly toggle' }] };
+  const reader = (extra: Partial<AsanaReader> = {}) => Object.assign(fakeAsana([epic, design, dev, stage, live], epicComments), {
+    async getSubtasks(gid: string) { return subtasks[gid as '200'] ?? []; },
+    async getMe() { return { gid: '900', name: 'Me', workspaces: [] }; },
+  }, extra);
+
+  it("starting a subtask brings the epic's description, comments and the other subtasks", async () => {
+    const ctx = makeCtx();
+    await startTask(ctx, asSource(reader()), LEGACY, { task: '202', cwd: '/' });
+    const b = readHandover(ctx, '202')!.brief;
+    expect(b).toContain('### Epic: Pricing page refresh');
+    expect(b).toContain('- Asana: https://app.asana.com/0/1/200');
+    expect(b).toContain('> Full spec: new hero, new plans table.');
+    expect(b).toContain('- Stakeholder (2026-10-05): Plans table needs a yearly toggle');
+    expect(b).toContain('### Subtasks of the epic');
+    expect(b).toContain('- [done] Design · Dana Designer · 201');
+    expect(b).toContain('- [done] Development · Me (you, this ticket) · 202');
+    expect(b).toContain('- [open] Implementation to stage · Me (you) · 203');
+    expect(b).toContain('> Also update the CMS copy.'); // your other subtask carries its description
+    expect(b).toContain('- [open] Live · unassigned · 204');
+    expect(b).not.toContain('Close after deploy.'); // not yours: one line only
+    expect(b).toContain('- Step: Dev');
+    expect(b).not.toMatch(/^## /m);
+  });
+
+  it('starting the epic itself lists its subtasks without an epic section', async () => {
+    const ctx = makeCtx();
+    await startTask(ctx, asSource(reader()), LEGACY, { task: '200', cwd: '/' });
+    const b = readHandover(ctx, '200')!.brief;
+    expect(b).toContain('### Subtasks\n');
+    expect(b).not.toContain('### Epic');
+    expect(b).not.toContain('- Step:');
+  });
+
+  it("a stage subtask links everyone's notes on the dev subtask", async () => {
+    const ctx = makeCtx();
+    const mate = { ...ctx, user: { ...ctx.user, name: 'alex' } };
+    writeCheckpoint(mate, { task: '202', branch: 'feat/hero', done: 'Hero built', pending: 'PR #12 open', blockers: '', resume: '' });
+    const res = await startTask(ctx, asSource(reader()), LEGACY, { task: '203', cwd: '/' });
+    const h = readHandover(ctx, '203')!;
+    expect(h.brief).toContain('- Step: Stage');
+    expect(h.related).toContain('people/alex/checkpoints/202.md');
+    expect(readFileSync(res.handoverPath, 'utf8')).toContain('[[people/alex/checkpoints/202]]');
+  });
+
+  it('the step words come from workflow.yml when the team sets them', async () => {
+    const ctx = makeCtx();
+    const wf: Workflow = { ...structuredClone(LEGACY), steps: { dev: ['bouw'], stage: ['acceptatie'], live: ['productie'] } };
+    const r = reader();
+    r.getTask = async (gid) => (gid === '203' ? { ...stage, name: 'Naar acceptatie' } : epic);
+    await startTask(ctx, asSource(r), wf, { task: '203', cwd: '/' });
+    expect(readHandover(ctx, '203')!.brief).toContain('- Step: Stage');
+  });
+
+  it('a failed subtask or epic-comment lookup leaves that part out instead of failing the start', async () => {
+    const ctx = makeCtx();
+    const r = reader({
+      async getSubtasks() { throw new HubError('ASANA_HTTP', 'Asana returned 500'); },
+      async getComments(gid: string) { if (gid === '200') throw new Error('boom'); return []; },
+    });
+    await startTask(ctx, asSource(r), LEGACY, { task: '202', cwd: '/' });
+    const b = readHandover(ctx, '202')!.brief;
+    expect(b).toContain('> Full spec: new hero, new plans table.');
+    expect(b).not.toContain('### Subtasks');
+    expect(b).not.toContain('### Epic comments');
+  });
+
+  it('still surfaces a rejected login from the subtask lookup', async () => {
+    const ctx = makeCtx();
+    const r = reader({ async getSubtasks() { throw new HubError('ASANA_AUTH', 'rejected'); } });
+    await expect(startTask(ctx, asSource(r), LEGACY, { task: '202', cwd: '/' })).rejects.toMatchObject({ code: 'ASANA_AUTH' });
+  });
+
+  it('works with a tracker that cannot list subtasks', async () => {
+    const ctx = makeCtx();
+    await startTask(ctx, asSource(fakeAsana([epic, dev], epicComments)), LEGACY, { task: '202', cwd: '/' });
+    const b = readHandover(ctx, '202')!.brief;
+    expect(b).toContain('### Epic: Pricing page refresh');
+    expect(b).not.toContain('### Subtasks');
+  });
+
+  it('keeps a restricted epic out of the brief and scrubs subtask text', () => {
+    const t = ticket({ id: 'WEB-2', title: 'Dev', parent: { id: 'WEB-1', title: 'Epic' } });
+    const e = ticket({ id: 'WEB-1', title: 'Epic', notes: 'secret plans', restricted: true });
+    const text = buildBrief(t, [t, e], [], 'Jira', {
+      epic: { ticket: e, comments: [] },
+      subtasks: [{ id: 'WEB-3', title: 'Stage', assignee: 'Me', mine: true, done: false, notes: 'see https://u:p@x.example.com/' }],
+    });
+    expect(text).not.toContain('secret plans');
+    expect(text).toContain('The epic is restricted');
+    expect(text).not.toContain('u:p@');
+  });
+
+  it('lists at most 30 subtasks', () => {
+    const t = ticket({ id: 'WEB-1', title: 'Epic' });
+    const many = Array.from({ length: 35 }, (_, i) => ({ id: `WEB-${i + 2}`, title: `Part ${i}`, assignee: null, mine: false, done: false, notes: '' }));
+    const text = buildBrief(t, [t], [], 'Jira', { subtasks: many });
+    expect(text).toContain('- …and 5 more');
+    expect(text).not.toContain('Part 30');
+  });
+});

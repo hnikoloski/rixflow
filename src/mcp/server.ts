@@ -79,7 +79,7 @@ function readablePath(ctx: Ctx, path: unknown): string {
 }
 
 export function createServer(deps: ServerDeps): McpServer {
-  const server = new McpServer({ name: 'hub', version: '1.0.0' });
+  const server = new McpServer({ name: 'hub', version: '1.1.0' });
   const workflowFor = (ctx: Ctx): Workflow => (deps.workflow ? deps.workflow(ctx) : loadWorkflow(ctx.hubDir));
   const sourceFor = (ctx: Ctx, wf: Workflow): TicketSource => {
     const source = deps.source(ctx, wf);
@@ -139,7 +139,7 @@ export function createServer(deps: ServerDeps): McpServer {
   }));
 
   server.registerTool('start_task', {
-    description: 'Prepare a handover for a ticket (brief, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.',
+    description: 'Prepare a handover for a ticket (brief with its epic and subtasks, request context, related notes, previous checkpoint) and work out its local project folder. Pass the session working directory as cwd.',
     inputSchema: { task: text, cwd: text },
   }, async ({ task: rawTask, cwd }) => safe(async () => {
     const ctx = deps.ctx();

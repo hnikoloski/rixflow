@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { LEGACY_WORKFLOW, compareVersions, loadWorkflow, workflowToYaml, writeWorkflow, type Workflow } from '../../src/core/workflow';
+import { LEGACY_WORKFLOW, compareVersions, loadWorkflow, stepOf, workflowToYaml, writeWorkflow, type Workflow } from '../../src/core/workflow';
 import { WORKFLOW_REQUIRES } from '../../src/core/version';
 
 let hub: string;
@@ -118,5 +118,32 @@ describe('workflow.yml', () => {
     expect(compareVersions('0.2.0', '0.10.0')).toBe(-1);
     expect(compareVersions('1.0.0', '1.0.0')).toBe(0);
     expect(compareVersions('1.0.1', '1.0.0')).toBe(1);
+  });
+});
+
+describe('dev, stage and live steps', () => {
+  it('matches whole words, the later step winning', () => {
+    expect(stepOf('Development')).toBe('dev');
+    expect(stepOf('Implementation to stage')).toBe('stage');
+    expect(stepOf('Stage to live')).toBe('live');
+    expect(stepOf('DEV - hero')).toBe('dev');
+    expect(stepOf('Developer docs')).toBeNull();
+    expect(stepOf('Design')).toBeNull();
+  });
+
+  it('reads and round-trips steps from workflow.yml, defaulting missing lists', () => {
+    put('tracker:\n  type: asana\nproject:\n  from: asana-project\nsteps:\n  stage: [acceptatie, go to uat]\n');
+    const wf = loadWorkflow(hub);
+    expect(wf.steps).toEqual({ dev: ['dev', 'development'], stage: ['acceptatie', 'go to uat'], live: ['live', 'production', 'prod'] });
+    expect(stepOf('Go to UAT', wf.steps)).toBe('stage');
+    expect(loadWorkflow(hub).steps).toEqual(wf.steps);
+    writeWorkflow(hub, wf);
+    expect(loadWorkflow(hub).steps).toEqual(wf.steps);
+  });
+
+  it('leaves steps out when workflow.yml has none', () => {
+    put('tracker:\n  type: asana\nproject:\n  from: asana-project\n');
+    expect(loadWorkflow(hub).steps).toBeUndefined();
+    expect(workflowToYaml(loadWorkflow(hub))).not.toContain('steps');
   });
 });
