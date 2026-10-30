@@ -20,6 +20,11 @@
 Async team workflow for [Claude Code](https://claude.com/claude-code). Each teammate's Claude shares one git **hub** repo with the rest of the team, so work moves between people without meetings: pause a task with a checkpoint, and you (or a teammate) can pick it up tomorrow exactly where it stopped.
 
 <p align="center">
+  <a href="assets/demo.mp4"><img alt="Watch the demo (2½ min): Hristijan starts a ticket, hands it over to Bob before a vacation, and Bob's Claude resumes it with all the context" src="assets/demo-poster.jpg" width="100%"></a>
+  <br><sub>Demo: plate → start → <code>/rixflow:handover</code> → <code>/rixflow:resume</code> on a teammate's machine.</sub>
+</p>
+
+<p align="center">
   <img alt="RixFlow in Claude Code: the plate, the RixFlow pane with the current task, inbox, paused work and sprint, a new-message band above the prompt and the status line" src="assets/tui.svg" width="100%">
 </p>
 
