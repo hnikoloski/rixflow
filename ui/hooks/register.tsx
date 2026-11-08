@@ -209,22 +209,26 @@ export const register: Register = on => {
     const [one] = items
     const open: Action = items.length === 1 && one ? { kind: 'inbox', id: one.id } : { kind: 'inbox' }
     const band = items.length ? bandParts(items) : null
+    const below = await next(e)
     return (
-      <Box flexDirection="column" paddingX={1}>
-        {update && <Text color="warning" wrap="truncate">▲ {UPDATE_PROBLEM}</Text>}
-        {band && (
-          <Box>
-            <Text backgroundColor={ACCENT.inbox} color="inverseText" bold> {band.chip} </Text>
-            <Text color={ACCENT.inbox} bold> {band.who}</Text>
-            <Box flexShrink={1}>
-              <Text color="subtle" wrap="truncate"> {band.what} </Text>
+      <Box flexDirection="column">
+        <Box flexDirection="column" paddingX={1}>
+          {update && <Text color="warning" wrap="truncate">▲ {UPDATE_PROBLEM}</Text>}
+          {band && (
+            <Box>
+              <Text backgroundColor={ACCENT.inbox} color="inverseText" bold> {band.chip} </Text>
+              <Text color={ACCENT.inbox} bold> {band.who}</Text>
+              <Box flexShrink={1}>
+                <Text color="subtle" wrap="truncate"> {band.what} </Text>
+              </Box>
+              <Box gap={1} marginLeft={1}>
+                <Button key="band-open" variant="primary" label={items.length === 1 ? 'Open' : 'Open inbox'} onPress={async () => { await markSeen($, items); await fill($, open) }} />
+                <Button key="band-later" dimColor label="Later" onPress={() => markSeen($, items)} />
+              </Box>
             </Box>
-            <Box gap={1} marginLeft={1}>
-              <Button key="band-open" variant="primary" label={items.length === 1 ? 'Open' : 'Open inbox'} onPress={async () => { await markSeen($, items); await fill($, open) }} />
-              <Button key="band-later" dimColor label="Later" onPress={() => markSeen($, items)} />
-            </Box>
-          </Box>
-        )}
+          )}
+        </Box>
+        {below}
       </Box>
     )
   }).catch(($, e, next) => next(e))

@@ -24,6 +24,9 @@ const world = (on: On, env: Record<string, string> = {}) => {
   return clock
 }
 
+// The band draws what is beneath it; this hook stands for an engine with nothing there.
+const nothingBeneath = (on: On) => on('ui.render', () => ({ type: 'engine' as const, ref: 0 }))
+
 test('session start draws the status line from hub status', async ($, on) => {
   const clock = world(on)
   const lines: Array<string | undefined> = []
@@ -67,6 +70,7 @@ test('invalid output keeps the last good view', async ($, on) => {
 
 test('a button never fills over a draft', async ($, on) => {
   const clock = world(on)
+  nothingBeneath(on)
   const fills: string[] = []
   const toasts: string[] = []
   on('process.run', async () => ran(status()))
@@ -251,6 +255,7 @@ test('the pane footer shows no sync part when the hub was locked', async ($, on)
 
 test('the band shows a new message with Open and Later', async ($, on) => {
   const clock = world(on)
+  nothingBeneath(on)
   const fills: string[] = []
   on('process.run', async () => ran(status()))
   on('fs.stat', async () => FILE)
@@ -323,6 +328,7 @@ test('a tickets problem shows in the sprint area, not in the general problem lis
 
 test('a setup that needs a newer RixFlow shows in the band in warning color and in the sprint area', async ($, on) => {
   const clock = world(on)
+  nothingBeneath(on)
   on('process.run', async () => ran(status({ inbox: [], problems: ['tickets: update rixflow'] })))
   on('fs.stat', async () => FILE)
   on('ui.status', async () => ({ value: undefined }))
@@ -335,7 +341,7 @@ test('a setup that needs a newer RixFlow shows in the band in warning color and 
   })
   const warning = await band.find({ type: 'Text', text: '▲ tickets: update rixflow' })
   expect((warning as Node | undefined)?.props).toMatchObject({ color: 'warning' })
-  expect(((await band.drawn()) as Node).props).toMatchObject({ paddingX: 1 })
+  expect((((await band.drawn()) as Node).children?.[0] as Node).props).toMatchObject({ paddingX: 1 })
   const pane = await $.ui.mount({
     plugin: 'rixflow-ui', surface: 'terminal', component: 'Pane', requestId: 'rixflow',
     props: { title: 'RixFlow', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
@@ -406,6 +412,7 @@ test('the setup box and the version and loading views are padded like the pane',
 
 test('the band has a column of padding either side', async ($, on) => {
   const clock = world(on)
+  nothingBeneath(on)
   on('process.run', async () => ran(status()))
   on('fs.stat', async () => FILE)
   on('ui.status', async () => ({ value: undefined }))
@@ -416,5 +423,50 @@ test('the band has a column of padding either side', async ($, on) => {
     props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 40, scroll: { offset: 0, bodyRows: 3 }, view: {} },
     viewport: { columns: 40, rows: 40 },
   })
-  expect(((await band.drawn()) as Node).props).toMatchObject({ paddingX: 1 })
+  expect((((await band.drawn()) as Node).children?.[0] as Node).props).toMatchObject({ paddingX: 1 })
+})
+
+const BAND = {
+  plugin: 'rixflow-ui', surface: 'terminal', component: 'AbovePrompt',
+  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  viewport: { columns: 80, rows: 40 },
+} as const
+
+test('the inbox band keeps what another mod draws above the prompt', async ($, on) => {
+  const clock = world(on)
+  on('process.run', async () => ran(status()))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async () => ({ value: undefined }))
+  on('ui.render', ($, e) => $.ui.resolve(e).Text({ children: 'other mod' }))
+  await $.session.start(START)
+  await clock.settle()
+  const band = await $.ui.mount(BAND)
+  expect(await band.find({ type: 'Text', text: ' ✦ NEW ' })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: 'other mod' })).toBeDefined()
+})
+
+test('the update warning keeps what another mod draws above the prompt', async ($, on) => {
+  const clock = world(on)
+  on('process.run', async () => ran(status({ inbox: [], problems: ['tickets: update rixflow'] })))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async () => ({ value: undefined }))
+  on('ui.render', ($, e) => $.ui.resolve(e).Text({ children: 'other mod' }))
+  await $.session.start(START)
+  await clock.settle()
+  const band = await $.ui.mount(BAND)
+  expect(await band.find({ type: 'Text', text: '▲ tickets: update rixflow' })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: 'other mod' })).toBeDefined()
+})
+
+test('the band still draws with nothing from other mods beneath it', async ($, on) => {
+  const clock = world(on)
+  on('process.run', async () => ran(status()))
+  on('fs.stat', async () => FILE)
+  on('ui.status', async () => ({ value: undefined }))
+  nothingBeneath(on)
+  await $.session.start(START)
+  await clock.settle()
+  const band = await $.ui.mount(BAND)
+  expect(await band.find({ type: 'Text', text: ' ✦ NEW ' })).toBeDefined()
+  expect((((await band.drawn()) as Node).children?.[0] as Node).props).toMatchObject({ paddingX: 1 })
 })
