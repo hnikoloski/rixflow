@@ -11925,7 +11925,7 @@ var import_node_path9 = require("node:path");
 var import_yaml4 = __toESM(require_dist(), 1);
 
 // src/core/version.ts
-var RIXFLOW_VERSION = "1.2.0";
+var RIXFLOW_VERSION = "1.2.1";
 var WORKFLOW_REQUIRES = "0.3.0";
 
 // src/core/workflow.ts
